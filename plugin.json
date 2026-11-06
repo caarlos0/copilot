@@ -1,0 +1,10 @@
+{
+  "name": "caarlos0",
+  "version": "0.1.0",
+  "description": "Personal Copilot agents and reusable skills.",
+  "author": {
+    "name": "Carlos Alexandro Becker"
+  },
+  "repository": "https://github.com/caarlos0/copilot",
+  "license": "MIT"
+}

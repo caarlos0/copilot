@@ -1,0 +1,14 @@
+{
+  "name": "caarlos0",
+  "owner": {
+    "name": "Carlos Alexandro Becker"
+  },
+  "plugins": [
+    {
+      "name": "caarlos0",
+      "description": "Personal Copilot agents and reusable skills.",
+      "source": "./",
+      "version": "0.1.0"
+    }
+  ]
+}
