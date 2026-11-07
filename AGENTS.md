@@ -46,7 +46,8 @@ structure or workflows change.
 thin agents over `plugins/coordination/skills/coordinator/SKILL.md`. It owns pane
 operations, durable briefs/results, monitoring, recovery, and cleanup.
 Reviews use Rex session `reviews`; implementations use `work`.
-Rex and an available session are required.
+Rex and an available session are required. Rex installs its own skill in
+`~/.agents/skills/`, which Copilot discovers; do not vendor it.
 
 The skill disables model/user invocation; agents preload it through `skills:`.
 Each project has one writer per role and a persistent `<project>-reviewer.json`,

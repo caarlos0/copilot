@@ -7,7 +7,7 @@ Personal Copilot agents and reusable skills, split into installable plugins.
 | `coding` | Development, code review, performance, and maintainer tools |
 | `security` | Secure design, vulnerability research, and security triage agents |
 | `fitness` | Personal trainer |
-| `terminals` | Rex, CLI design, and TUI design |
+| `terminals` | CLI design and TUI design |
 | `coordination` | Worker coordinators, durable handoffs, and task board |
 | `home` | Electricity, solar, and battery planning |
 
@@ -23,7 +23,8 @@ copilot plugin install coordination@caarlos0
 ```
 
 The other plugins use the same `<plugin>@caarlos0` form.
-Coordination uses coding workers and the terminals plugin's Rex skill.
+Coordination uses coding workers and Rex's own skill, installed in
+`~/.agents/skills/` and discovered by Copilot.
 Coding uses the terminals plugin for CLI/TUI work. Security agents use coding
 skills for language conventions and reviews. Install those companion plugins
 for these workflows; Copilot does not install them as dependencies.
