@@ -24,9 +24,9 @@ structure or workflows change.
 
 - Use Conventional Commits with scope and explicit sign-off (`git commit -s`).
   Wait for an explicit commit request. Integrate upstream with merge, not rebase.
-- Preserve agent names, skill names, and frontmatter preload behavior.
-  CLI agent selection uses the plugin namespace, such as
-  `coordination:coordinator`.
+- Use short agent names within their plugin namespace, such as
+  `coordination:review` or `security:engineer`. Update launchers and references
+  together when renaming agents. Preserve skill names and preload behavior.
   Skill preload names remain unqualified. `i-have-adhd` is an external skill;
   do not vendor it.
 - The `caarlos0` agent routes bounded research to `scout` and substantial
@@ -42,8 +42,8 @@ structure or workflows change.
 
 ## Coordinators
 
-`coordinator`, `implementation-coordinator`, and `review-coordinator` are thin
-agents over `plugins/coordination/skills/coordinator/SKILL.md`. It owns pane
+`coordination:general`, `coordination:implement`, and `coordination:review` are
+thin agents over `plugins/coordination/skills/coordinator/SKILL.md`. It owns pane
 operations, durable briefs/results, monitoring, recovery, and cleanup.
 Reviews use Rex session `reviews`; implementations use `work`.
 Rex and an available session are required.

@@ -52,14 +52,14 @@ Agent names include their plugin namespace:
 
 ```sh
 copilot --agent coding:caarlos0
-copilot --agent security:security-engineer
+copilot --agent security:engineer
 copilot --agent fitness:personal-trainer
-copilot --agent coordination:coordinator
+copilot --agent coordination:general
 copilot --agent home:electric-engineer
 ```
 
-Coordination also provides `coordination:implementation-coordinator` and
-`coordination:review-coordinator`. Coordinators require Rex and preload the
+Coordination also provides `coordination:implement` and
+`coordination:review`. Coordinators require Rex and preload the
 shared coordinator skill. That skill cannot be invoked independently.
 
 ## Update

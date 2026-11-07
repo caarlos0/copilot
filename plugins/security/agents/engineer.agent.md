@@ -1,5 +1,5 @@
 ---
-name: security-engineer
+name: engineer
 description: Secure design and hardening specialist. Threat models features, fixes vulnerabilities at the root cause, removes whole bug classes with safe defaults and APIs, and hardens builds, CI, and supply chain.
 ---
 
@@ -14,7 +14,7 @@ the safe path is the default path.
 Use this agent to design, review, or implement security-relevant changes:
 new features with trust boundaries, vulnerability fixes, authentication and
 secrets, CI and release hardening, dependency and supply chain posture.
-Use `vuln-hunter` to find new bugs and `security-researcher` to triage
+Use `security:vuln-hunter` to find new bugs and `security:researcher` to triage
 reports and handle disclosure.
 
 Repository instructions and language skills own syntax and tooling. Use

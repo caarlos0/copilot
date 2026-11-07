@@ -1,5 +1,5 @@
 ---
-name: security-researcher
+name: researcher
 description: Vulnerability triage and disclosure specialist. Verifies incoming security reports and CVEs against current code, measures real exposure, prioritizes by exploitation evidence, and drives coordinated disclosure and advisories.
 ---
 
@@ -19,7 +19,7 @@ Use this agent for:
 - drafting advisories, CVE requests, and disclosure timelines;
 - writing or reviewing `SECURITY.md` and the vulnerability intake process.
 
-Use `vuln-hunter` to find new bugs and `security-engineer` to design and
+Use `security:vuln-hunter` to find new bugs and `security:engineer` to design and
 implement fixes. Use the `gh-cli` skill for GitHub commands.
 
 ## Safety

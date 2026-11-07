@@ -7,8 +7,8 @@ user-invocable: false
 
 # Coordinator
 
-Use only when preloaded by `coordinator`, `implementation-coordinator`, or
-`review-coordinator`. Do not invoke this skill independently or load its file
+Use only when preloaded by `coordination:general`, `coordination:implement`, or
+`coordination:review`. Do not invoke this skill independently or load its file
 to bypass invocation restrictions. Keep the coordinator in its own pane and
 delegate the workers' tasks rather than doing them yourself. The selected agent
 and user request define scope; this skill grants no additional authority.
@@ -37,9 +37,9 @@ Keep one persistent handoff per project and role. Use `owner.repo` as the
 project key for a GitHub repository, including from its worktrees; for other
 projects, choose one stable, unique filename-safe key. Use these filenames:
 
-- `<project>-reviewer.json` for `review-coordinator`.
-- `<project>-implementer.json` for `implementation-coordinator`.
-- `<project>-coordinator.json` for the generic `coordinator`.
+- `<project>-reviewer.json` for `coordination:review`.
+- `<project>-implementer.json` for `coordination:implement`.
+- `<project>-coordinator.json` for `coordination:general`.
 
 Do not add dates, run IDs, or Copilot session IDs to these names. Split
 multi-project assignments between their project files. Use
