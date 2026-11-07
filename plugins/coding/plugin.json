@@ -1,6 +1,6 @@
 {
   "name": "coding",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Development, code review, performance, and maintainer tools.",
   "repository": "https://github.com/caarlos0/copilot",
   "license": "MIT"
