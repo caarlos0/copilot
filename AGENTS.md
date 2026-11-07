@@ -10,9 +10,10 @@ structure or workflows change.
   marketplace version in sync with its plugin's `plugin.json`.
 - Each plugin uses the supported legacy Copilot format with default `agents/`
   and `skills/` locations. Include its own copy of `LICENSE.md`.
-- `Taskfile.yml` provides `task release`. From a clean `main`, it uses
-  `svu next`, bumps every plugin and marketplace entry to one version, creates
-  a signed-off release commit and annotated tag, and pushes both atomically.
+- `Taskfile.yml` provides `task release:<plugin>`. From a clean `main`, it uses
+  `svu next` scoped to that plugin's tags and directory, updates only its manifest
+  and marketplace entry, creates a signed-off release commit and annotated
+  `<plugin>/v<version>` tag, and pushes both atomically.
 - `plugins/<plugin>/agents/*.agent.md` defines agent roles and model choices.
   Keep roles distinct and put reusable procedures in skills.
 - `plugins/<plugin>/skills/<name>/SKILL.md` contains reusable procedures.

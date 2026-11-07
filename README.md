@@ -76,13 +76,17 @@ Use `copilot plugin update --all` to update all installed plugins.
 From a clean `main` branch, with Task, svu, and jq installed:
 
 ```sh
-task release
+task release:terminals
+task release:coding
 ```
 
-The task uses `svu next` to choose the next tag. All six plugin manifests and
-marketplace entries receive the same version, without the tag's `v` prefix.
-It creates a signed-off `release: <tag>` commit and an annotated tag, then
-pushes `main` and that tag to `origin` in one atomic push.
+Use `task release:<plugin>` to release one plugin. The task uses `svu next`
+with that plugin's tag prefix and directory to choose its next version, with
+a patch bump when no commit triggers a larger bump. Only that plugin's manifest
+and marketplace entry are updated.
+It creates a signed-off `release(<plugin>): <plugin>/v<version>` commit and an
+annotated `<plugin>/v<version>` tag, then pushes `main` and that tag to `origin`
+in one atomic push. Other plugins keep their versions.
 
 ## Develop
 

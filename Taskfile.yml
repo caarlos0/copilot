@@ -6,11 +6,47 @@ tasks:
       - task --list
     silent: true
 
+  release:coding:
+    desc: Release the coding plugin
+    cmds:
+      - task: release
+        vars: {PLUGIN: coding}
+
+  release:security:
+    desc: Release the security plugin
+    cmds:
+      - task: release
+        vars: {PLUGIN: security}
+
+  release:fitness:
+    desc: Release the fitness plugin
+    cmds:
+      - task: release
+        vars: {PLUGIN: fitness}
+
+  release:terminals:
+    desc: Release the terminals plugin
+    cmds:
+      - task: release
+        vars: {PLUGIN: terminals}
+
+  release:coordination:
+    desc: Release the coordination plugin
+    cmds:
+      - task: release
+        vars: {PLUGIN: coordination}
+
+  release:home:
+    desc: Release the home plugin
+    cmds:
+      - task: release
+        vars: {PLUGIN: home}
+
   release:
-    desc: Bump all plugin versions, commit, tag, and push main
+    internal: true
     vars:
       TAG:
-        sh: svu next
+        sh: svu next --always --tag.prefix "{{.PLUGIN}}/v" --tag.pattern "{{.PLUGIN}}/v*" --log.directory "plugins/{{.PLUGIN}}"
     preconditions:
       - sh: test "$(git symbolic-ref --short HEAD)" = main
         msg: "Releases must run from main."
@@ -20,15 +56,15 @@ tasks:
       - |
         set -eu
         version="{{.TAG}}"
-        version=${version#v}
-        for file in plugins/*/plugin.json; do
-          jq --arg version "$version" '.version = $version' "$file" > "$file.tmp"
-          mv "$file.tmp" "$file"
-        done
-        file=.github/plugin/marketplace.json
-        jq --arg version "$version" '.plugins[].version = $version' "$file" > "$file.tmp"
+        version=${version#*/v}
+        file="plugins/{{.PLUGIN}}/plugin.json"
+        jq --arg version "$version" '.version = $version' "$file" > "$file.tmp"
         mv "$file.tmp" "$file"
-      - git add plugins/*/plugin.json .github/plugin/marketplace.json
-      - 'git commit -s -m "release: {{.TAG}}"'
+        file=.github/plugin/marketplace.json
+        jq --arg plugin "{{.PLUGIN}}" --arg version "$version" \
+          '(.plugins[] | select(.name == $plugin)).version = $version' "$file" > "$file.tmp"
+        mv "$file.tmp" "$file"
+      - git add "plugins/{{.PLUGIN}}/plugin.json" .github/plugin/marketplace.json
+      - 'git commit -s -m "release({{.PLUGIN}}): {{.TAG}}"'
       - git tag -a "{{.TAG}}" -m "{{.TAG}}"
       - git push --atomic origin main "refs/tags/{{.TAG}}"
