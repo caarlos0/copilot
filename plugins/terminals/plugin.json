@@ -1,0 +1,7 @@
+{
+  "name": "terminals",
+  "version": "0.1.0",
+  "description": "Rex operations and command-line and terminal UI design.",
+  "repository": "https://github.com/caarlos0/copilot",
+  "license": "MIT"
+}

@@ -1,0 +1,34 @@
+version: "3"
+
+tasks:
+  default:
+    cmds:
+      - task --list
+    silent: true
+
+  release:
+    desc: Bump all plugin versions, commit, tag, and push main
+    vars:
+      TAG:
+        sh: svu next
+    preconditions:
+      - sh: test "$(git symbolic-ref --short HEAD)" = main
+        msg: "Releases must run from main."
+      - sh: test -z "$(git status --porcelain)"
+        msg: "Commit or stash changes before releasing."
+    cmds:
+      - |
+        set -eu
+        version="{{.TAG}}"
+        version=${version#v}
+        for file in plugins/*/plugin.json; do
+          jq --arg version "$version" '.version = $version' "$file" > "$file.tmp"
+          mv "$file.tmp" "$file"
+        done
+        file=.github/plugin/marketplace.json
+        jq --arg version "$version" '.plugins[].version = $version' "$file" > "$file.tmp"
+        mv "$file.tmp" "$file"
+      - git add plugins/*/plugin.json .github/plugin/marketplace.json
+      - 'git commit -s -m "release: {{.TAG}}"'
+      - git tag -a "{{.TAG}}" -m "{{.TAG}}"
+      - git push --atomic origin main "refs/tags/{{.TAG}}"

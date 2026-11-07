@@ -186,7 +186,7 @@ Prefer a tab; use a split when requested. Record its full pane ID. Run `wt`
 inside the pane, without `--tab` or `--split`:
 
 ```sh
-wt fix-login --main -- copilot --agent caarlos0:caarlos0 --name 'Fix login redirect' --yolo --autopilot --max-autopilot-continues 9007199254740991 --sandbox
+wt fix-login --main -- copilot --agent coding:caarlos0 --name 'Fix login redirect' --yolo --autopilot --max-autopilot-continues 9007199254740991 --sandbox
 ```
 
 Name worker sessions with `--name`, within Copilot's 100-character limit.

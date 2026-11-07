@@ -1,0 +1,7 @@
+{
+  "name": "security",
+  "version": "0.1.0",
+  "description": "Secure design, vulnerability research, and security triage agents.",
+  "repository": "https://github.com/caarlos0/copilot",
+  "license": "MIT"
+}

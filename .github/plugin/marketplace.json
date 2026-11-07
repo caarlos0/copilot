@@ -5,9 +5,33 @@
   },
   "plugins": [
     {
-      "name": "caarlos0",
-      "description": "Personal Copilot agents and reusable skills.",
-      "source": "./",
+      "name": "coding",
+      "source": "./plugins/coding",
+      "version": "0.1.0"
+    },
+    {
+      "name": "security",
+      "source": "./plugins/security",
+      "version": "0.1.0"
+    },
+    {
+      "name": "fitness",
+      "source": "./plugins/fitness",
+      "version": "0.1.0"
+    },
+    {
+      "name": "terminals",
+      "source": "./plugins/terminals",
+      "version": "0.1.0"
+    },
+    {
+      "name": "coordination",
+      "source": "./plugins/coordination",
+      "version": "0.1.0"
+    },
+    {
+      "name": "home",
+      "source": "./plugins/home",
       "version": "0.1.0"
     }
   ]
