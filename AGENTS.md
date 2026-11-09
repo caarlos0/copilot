@@ -53,6 +53,9 @@ operations, durable briefs/results, monitoring, recovery, and cleanup.
 Reviews use Rex session `reviews`; implementations use `work`.
 Rex and an available session are required. Rex installs its own skill in
 `~/.agents/skills/`, which Copilot discovers; do not vendor it.
+Coordinators and workers preserve shared Rex session names. Every worker loads
+this rule through task-specific startup instructions before its first prompt;
+task titles name Copilot sessions and Rex tabs only.
 
 The skill disables model/user invocation; agents preload it through `skills:`.
 Each project has one writer per role and a persistent `<project>-reviewer.json`,

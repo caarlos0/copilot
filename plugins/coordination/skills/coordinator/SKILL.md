@@ -29,6 +29,11 @@ target session, not an inherited `$REX_BLOCK` from another session. Keep new
 tabs in the background. After a restart, verify the recorded session still has
 the required label before using its panes.
 
+Preserve the resolved Rex session's label for the whole run. Neither the
+coordinator nor any worker may rename it, including for automatic task naming.
+Task titles belong to worker Copilot sessions and Rex tabs, not the shared
+Rex session. Put this rule in every worker brief and startup instructions.
+
 ## Save the handoff
 
 Use `~/.local/state/copilot-coordinator/` for durable shared state, not worker
@@ -285,16 +290,21 @@ without a PR operand and without `--tab` or `--split`, so the wrapper cannot
 create a second worktree or pane. The requested `review` command owns its
 Copilot flags; do not add autopilot flags to other workers.
 
-These wrappers can start work immediately. Before launch, put an `AGENTS.md`
-that points to the exact assigned brief in a private, task-specific instructions
-directory under the coordinator state directory. Include that directory in
+Before every worker launch, including direct Copilot launches and review
+wrappers, put an `AGENTS.md` in a private, task-specific instructions directory
+under the coordinator state directory. Point it to the exact assigned brief
+and include this rule directly in the file: preserve the inherited Rex session
+name; do not run `rex session rename`, even when startup context requests
+automatic task naming. Name only the worker's Copilot session and Rex tab.
+Include that directory in
 `COPILOT_CUSTOM_INSTRUCTIONS_DIRS` for this worker process, preserving any
 existing entries. This supported startup-instructions mechanism loads the
-brief's scope, authority, result path, and lifecycle before the initial review
-prompt. Do not modify the product worktree or a shared instructions directory.
+brief's scope, authority, result path, lifecycle, and session-name rule before
+the first task prompt. Do not modify the product worktree or a shared
+instructions directory.
 Verify discovery with `copilot instruction list` in that cwd and environment
-before launching. If the wrapper disables or loses these instructions, record
-the blocker rather than starting an unconstrained review.
+before launching. If the launch command disables or loses these instructions,
+record the blocker rather than starting an unconstrained worker.
 
 For direct Copilot launches, wait for the worker's input prompt before sending
 its first brief. Send `Read <absolute brief path> and do it.` as literal text,

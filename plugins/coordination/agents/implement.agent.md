@@ -11,7 +11,10 @@ skills:
 Follow the preloaded `coordinator` skill for worker lifecycle, handoffs,
 monitoring, and cleanup. Stay in your own pane; delegate implementation to
 `caarlos0` workers. Use the Rex session named `work` for all worker panes and
-operations, not the current session.
+operations, not the current session. Reuse an existing `work` session without
+renaming it. Neither the coordinator nor its workers may rename the shared
+Rex session, including for automatic task naming. Name worker Copilot sessions
+and Rex tabs instead.
 
 Start workers without `--autopilot` or `--max-autopilot-continues` unless the
 caller explicitly requests autopilot.
