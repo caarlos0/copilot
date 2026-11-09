@@ -42,6 +42,14 @@ review, use their requested destination, or chat if none was specified.
 
 ## Scope
 
+Keep file discovery inside the assigned cwd and its descendants. Use supplied
+instructions, the local root `AGENTS.md` if present, and nested instructions
+for reviewed paths. Do not search `..`, ancestors, sibling checkouts, other
+worktrees, or Git's common directory for instructions, agent definitions, or
+skills. Missing local instructions do not justify a wider search. External
+task artifacts use their supplied paths; bundled skill files use the loaded
+skill directory.
+
 1. Resolve the base and review the complete diff. For a pull request, refresh
    the base ref before computing the merge base.
    For a coordinator-assigned follow-up with evidence of a completed prior
@@ -90,7 +98,8 @@ Do not assume the submitted approach is the right starting point.
 
 Before the verdict, request both checks in parallel. Give each the full target,
 base, intent, repository instructions, and known validation; do not split the
-diff.
+diff. Include the assigned cwd and the file-discovery boundary above in each
+leaf prompt; supplied external artifact paths are not search roots.
 
 - Ask the `caarlos0` agent for a read-only maintainer check of necessity,
   solution placement, alternative approaches, correctness, scope, simplicity,

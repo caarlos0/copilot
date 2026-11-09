@@ -40,6 +40,10 @@ structure or workflows change.
   Assess need and solution placement before implementation details.
 - Resolve bundled assets relative to the loaded skill directory, not
   `~/.copilot/skills/` or a checkout path.
+- Keep worker and subagent file discovery inside their assigned cwd and its
+  descendants. Do not search parent directories or sibling worktrees for
+  instructions, agents, or skills. Pass this boundary in delegated prompts;
+  external task artifacts and loaded skill assets use their exact paths.
 
 ## Coordinators
 

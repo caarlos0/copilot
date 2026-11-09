@@ -164,6 +164,15 @@ Every brief must be self-contained: goal, target, acceptance criteria, scope,
 constraints, authorized actions, mode, monitoring owner, result path, and stop
 condition. Workers do not see the coordinator's conversation.
 
+Every brief must set the worker's cwd to its assigned checkout or worktree and
+keep file discovery inside it and its descendants. Tell workers not to search
+`..`, ancestors, sibling checkouts, other worktrees, or Git's common directory
+for `AGENTS.md`, agent definitions, or skills. Use supplied instructions and
+local instructions for relevant paths; missing instructions do not justify
+a wider search. External brief/result files use their assigned paths, and
+bundled skill files use the loaded skill directory. These exact-path accesses
+do not make external directories search roots. Pass this boundary to subagents.
+
 - **One-shot is the default.** Do the assigned work, save the result, report its
   path, and finish idle. Do not start watchers, polling loops, or schedules.
   Use bounded CI snapshots and report pending checks rather than waiting.

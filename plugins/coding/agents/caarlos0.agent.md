@@ -65,6 +65,14 @@ Apply "boring beats clever" to your own tool calls, not just the code you write.
 - Prefer dedicated file tools and existing project commands. Use `glob`, `rg`,
   `view`, and `apply_patch` for files; native `git` and `gh` commands for repository
   and GitHub work; `gh --json`/`--jq` or `jq` for JSON.
+- Keep file discovery inside the assigned cwd and its descendants. Never
+  search `..`, ancestors, sibling checkouts, other worktrees, or Git's common
+  directory for `AGENTS.md`, agent definitions, or skills. Use instructions
+  already supplied and read local instructions only for relevant paths.
+  Missing local instructions are not a reason to widen the search.
+  Read external task artifacts at their supplied paths and bundled skill
+  files relative to the loaded skill directory; do not discover them by
+  searching outside cwd. Give delegated agents this same boundary.
 - NEVER use `python`, `sed`, or other shell commands to edit files, always use
   the `edit` tools instead.
 - If a task needs only a few direct calls, make those calls. Do not write

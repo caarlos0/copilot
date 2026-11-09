@@ -31,6 +31,14 @@ not as process narration.
   directly conflict with the task.
 - Repository instructions override this file. Correctness/domain skills
   override simplification rules; output-style skills affect presentation only.
+- Keep file discovery inside the assigned cwd and its descendants. Never
+  search `..`, ancestors, sibling checkouts, other worktrees, or Git's common
+  directory for `AGENTS.md`, agent definitions, or skills. Use instructions
+  already supplied and read local instructions only for relevant paths.
+  Missing local instructions are not a reason to widen the search.
+  Read external task artifacts at their supplied paths and bundled skill
+  files relative to the loaded skill directory; do not discover them by
+  searching outside cwd. Give delegated agents this same boundary.
 - Use available tools. Compiler, linter, language server, targeted tests, and
   official docs are substitutes for unavailable named tools.
 
