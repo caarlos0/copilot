@@ -63,6 +63,16 @@ Coordination also provides `coordination:implement` and
 `coordination:review`. Coordinators require Rex and preload the
 shared coordinator skill. That skill cannot be invoked independently.
 
+PR review workers run `review -k` for your own PRs and retain their panes through
+merge. Other authors' PRs use `review` and close after verified review results.
+Implementation panes stay open through PR creation and merge. A blocker keeps
+these retained panes open; waiting does not authorize a merge. The `review`
+command comes from your machine setup, not this plugin.
+
+Workers publish cumulative result files. A bundled filesystem waiter wakes
+unscheduled coordinators on result changes, without periodic pane checks or
+requiring the board server. Scheduled coordinator passes remain finite.
+
 ## Update
 
 ```sh
@@ -113,8 +123,8 @@ edits. Once the repository is published, uninstall its installed plugins,
 remove the local marketplace with `copilot plugin marketplace remove caarlos0`,
 then follow the GitHub installation steps.
 
-Run the coordinator board checks from the repository root:
+Run the coordinator checks from the repository root:
 
 ```sh
-node --test plugins/coordination/skills/coordinator/board.test.cjs
+node --test plugins/coordination/skills/coordinator/*.test.cjs
 ```

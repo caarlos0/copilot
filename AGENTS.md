@@ -58,7 +58,9 @@ The skill disables model/user invocation; agents preload it through `skills:`.
 Each project has one writer per role and a persistent `<project>-reviewer.json`,
 `<project>-implementer.json`, or `<project>-coordinator.json` under
 `~/.local/state/copilot-coordinator/`. The board reads that same handoff.
-One-shot workers save results without watchers.
+Workers atomically save cumulative results. The bundled `wait.mjs` notifies
+unscheduled coordinators of content changes without a state-polling loop.
+Scheduled passes remain finite; general one-shot workers do not watch GitHub.
 
 The skill ships `board.html`, `handoff.example.json`, and a dependency-free
 loopback server. Run `node serve.mjs` from the resolved coordinator skill
@@ -67,8 +69,14 @@ Shared JSON validation lives beside the skill in `board-data.mjs`.
 
 Worker Copilot sessions and Rex tabs share the issue/PR title, or a descriptive
 title from the prompt. Shorten to 100 characters and pass `--name` as one literal
-quoted argument. Idle review panes can close without a push or merge; worktree
-removal is separate and preserves reused worktrees and unfinished work.
+quoted argument for direct Copilot launches. PR reviews run `review -k` for the
+authenticated user's PRs and `review` for other authors. Review wrappers load
+task briefs through startup custom instructions; preserve their generated
+Copilot name until it can be renamed at an idle prompt. The user's review panes
+and implementation panes stay through merge; other authors' review panes close
+after verified results. Blocked retained panes stay open. Waiting does not
+grant merge authority. Worktree removal is separate and preserves reused
+worktrees and unfinished work.
 
 ## Validation
 
@@ -76,5 +84,7 @@ Load local changes with `copilot --plugin-dir /path/to/copilot/plugins/coding`
 in a new session. Avoid also loading an installed copy.
 
 Run `node --test plugins/coordination/skills/coordinator/board.test.cjs`
-for board changes. Check discovery with
+for board changes and
+`node --test plugins/coordination/skills/coordinator/wait.test.cjs`
+for result notification changes. Check discovery with
 `copilot --plugin-dir /path/to/copilot/plugins/coding skill list --json`.

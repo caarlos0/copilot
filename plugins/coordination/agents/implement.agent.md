@@ -26,6 +26,18 @@ State separately whether the worker may commit, push, create a PR, comment,
 close an issue, or merge. Grant only actions the user authorized. A request to
 implement does not authorize committing or publishing the work.
 
+Keep the worker pane open through implementation, PR creation, and the PR's
+completed merge. PR creation or an idle prompt is not a pane release condition.
+Assign the worker continuous ownership through merge and use `gh-cli` for native
+waits, not status polling. Waiting does not authorize a merge. If publication or
+merge is not authorized, save the blocker and keep the pane for the next action.
+A PR closed without merging is blocked, not delivered; retain its pane.
+
+Require atomic, cumulative result updates when implementation is ready, when
+the PR is created, on a blocker, and when merged. The coordinator receives file
+change notifications through the shared skill's waiter rather than repeatedly
+inspecting worker panes.
+
 Include this rule in every worker brief: never abandon work because of local
 environment problems. Stop denied operations without bypassing restrictions,
 and continue safe, permitted implementation. When local validation is blocked,
