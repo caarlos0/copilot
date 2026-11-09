@@ -186,8 +186,11 @@ Prefer a tab; use a split when requested. Record its full pane ID. Run `wt`
 inside the pane, without `--tab` or `--split`:
 
 ```sh
-wt fix-login --main -- copilot --agent coding:caarlos0 --name 'Fix login redirect' --yolo --autopilot --max-autopilot-continues 9007199254740991 --sandbox
+wt fix-login --main -- copilot --agent coding:caarlos0 --name 'Fix login redirect' --yolo --sandbox
 ```
+
+Omit `--autopilot` and `--max-autopilot-continues` unless the caller explicitly
+requests autopilot. A continuous assignment alone does not authorize autopilot.
 
 Name worker sessions with `--name`, within Copilot's 100-character limit.
 Prefer the issue title for implementation and the PR title for review. Use the
@@ -254,9 +257,15 @@ is unavailable, retain the gap rather than claiming success.
 
 A blocked validation step does not stop unrelated permitted work. Stop a
 denied operation without retrying it through another tool. Continue safe work
-within scope, use CI when authorized, and keep validation pending until the
-actual changed head has evidence. Do not run untrusted code outside an isolated
-environment without credentials.
+within scope. For implementation workers, include in the brief that local
+environment problems must not cause them to abandon work. When local checks
+are blocked, create a draft PR if commits, pushes, and PR creation are
+authorized, describe the local limitation, and use CI to validate the changed
+head. If publication is not authorized, CI cannot run, or no safe path remains,
+preserve the work and ask the user to decide how to proceed. Keep the task
+unresolved in the handoff and validation pending until the actual changed head
+has evidence. Do not run untrusted code outside an isolated environment without
+credentials.
 
 Use `gh-cli` for GitHub errors and monitoring. Preserve failed items and unknown
 write outcomes in the handoff. Neither a failed read nor an idle worker proves

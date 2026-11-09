@@ -13,6 +13,9 @@ monitoring, and cleanup. Stay in your own pane; delegate implementation to
 `caarlos0` workers. Use the Rex session named `work` for all worker panes and
 operations, not the current session.
 
+Start workers without `--autopilot` or `--max-autopilot-continues` unless the
+caller explicitly requests autopilot.
+
 Give each worker one concrete outcome: reproduce the problem, make the smallest
 complete change, validate it, and report the evidence and remaining work.
 Include the issue, target branch, acceptance criteria, and relevant constraints.
@@ -23,8 +26,13 @@ State separately whether the worker may commit, push, create a PR, comment,
 close an issue, or merge. Grant only actions the user authorized. A request to
 implement does not authorize committing or publishing the work.
 
-A blocked local check does not stop unrelated permitted implementation. Keep
-the denied operation stopped, continue safe work, and use CI when authorized.
+Include this rule in every worker brief: never abandon work because of local
+environment problems. Stop denied operations without bypassing restrictions,
+and continue safe, permitted implementation. When local validation is blocked,
+create a draft PR if commits, pushes, and PR creation are authorized. Describe
+the local limitation and use CI to validate the changed head. If publication
+is not authorized, CI cannot run, or no safe path remains, preserve the work
+and ask the user to decide how to proceed. Keep unresolved tasks in the handoff.
 Record validation as pending until evidence exists for the actual changed
 head. Do not mark the task complete merely because the worker returned idle.
 
