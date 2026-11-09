@@ -93,7 +93,9 @@ Apply "boring beats clever" to your own tool calls, not just the code you write.
   custom subprocess wrappers or parallel executors for routine work.
   Follow `gh-cli` for watchers; do not write another polling loop.
 - Wait for background work to finish before reading its output files.
-  Use the returned tool or agent ID for status instead of extra `ps` probes.
+  Use the returned tool or agent ID for status.
+- Never run `ps`; it does not work in the sandbox. Use tool-managed process
+  status or completion notifications instead.
 - Put scratch files under `$TMPDIR`. Keep that variable literal in shell
   commands and file-tool paths; do not hard-code its resolved path. Do not
   assume the session directory is writable.
