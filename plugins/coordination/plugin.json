@@ -1,6 +1,6 @@
 {
   "name": "coordination",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Rex worker coordination, durable handoffs, and task boards.",
   "repository": "https://github.com/caarlos0/copilot",
   "license": "MIT"
