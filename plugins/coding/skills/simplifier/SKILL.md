@@ -1,9 +1,9 @@
 ---
-name: code-simplifier
+name: simplifier
 description: Final simplification pass over recently changed code without changing behavior. Use after implementation or when explicitly asked to simplify, clean up, or refactor.
 ---
 
-# Code Simplifier
+# Simplifier
 
 Run after the behavior is correct. Repository instructions and correctness or
 language specialists take precedence; output-style skills affect presentation

@@ -125,9 +125,9 @@ compare runs with different GC modes, profilers, hooks, or calibration.
 
 ## Related skills
 
-- `my-code-review` checks a completed diff. When invoked from `my-code-review`, do not
+- `coding:review` checks a completed diff. When invoked from `coding:review`, do not
   invoke it again.
-- `code-simplifier` runs after the gain is proven.
+- `simplifier` runs after the gain is proven.
 - `change-impact-auditor` traces environment, serialization, imports, logging,
   and concurrency changes.
 - `runtime-process-debugging` owns subprocess, pipe, lifecycle, and shutdown

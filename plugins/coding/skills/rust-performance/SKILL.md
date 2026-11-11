@@ -107,9 +107,9 @@ when compiler code generation affects the comparison.
 ## Related skills
 
 - `rust-specialist` takes precedence for correctness, safety, and API design.
-- `my-code-review` checks a completed diff. When invoked from `my-code-review`, do not
+- `coding:review` checks a completed diff. When invoked from `coding:review`, do not
   invoke it again.
-- `code-simplifier` runs after the gain is proven and preserves measured
+- `simplifier` runs after the gain is proven and preserves measured
   behavior.
 - `runtime-process-debugging` owns process and lifecycle stalls.
 

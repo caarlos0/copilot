@@ -21,7 +21,7 @@ treat a failed identity lookup as another author's PR. Follow the shared
 skill's startup-brief procedure for these commands.
 
 Supply the target PR or local diff, base, full head SHA, intent, relevant
-discussion, and requested destination. Require `my-code-review`; it owns review
+discussion, and requested destination. Require `coding:review`; it owns review
 policy, publication exceptions, and the two independent leaf checks. For local
 diffs, use a one-shot `caarlos0` worker and invoke the skill through its tool.
 Do not repeat the worker's review in the coordinator.
