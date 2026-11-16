@@ -89,6 +89,7 @@ async function update(file, values) {
   rootPatch.updated_at = values["updated-at"] ?? now;
 
   const tasks = tasksById(current.tasks, "tasks");
+  const addingTask = values.task !== undefined && !tasks.has(values.task);
   if (values.task !== undefined) {
     const taskUpdate = { id: values.task, updated_at: values["task-updated-at"] ?? now, ...taskPatch(values) };
     tasks.set(values.task, merge(tasks.get(values.task) ?? {}, taskUpdate));
@@ -96,6 +97,11 @@ async function update(file, values) {
   current = merge(current, rootPatch);
   current.tasks = [...tasks.values()];
   validate(current);
+  if (addingTask) {
+    const cutoff = Date.parse(now) - 7 * 24 * 60 * 60 * 1000;
+    current.tasks = current.tasks.filter((task) =>
+      task.id === values.task || task.status !== "done" || Date.parse(task.updated_at) >= cutoff);
+  }
 
   const temporary = `${file}.${randomUUID()}.tmp`;
   const handle = await open(temporary, "wx", 0o600);
@@ -181,7 +187,9 @@ Task options:
 
 The handoff ID comes from FILE's basename. A new task needs --goal,
 --status, and --next-action. Its repository comes from the handoff's --project.
-Only supplied fields change. Tasks omitted from a command are preserved.
+Only supplied fields change. Adding a new task ID removes existing done tasks
+last updated more than seven days ago, measured at write time. Other updates
+preserve omitted tasks. Artifact files are not removed.
 When leaving blocked status, clear any blocker with --blocker null.
 The helper validates the complete handoff before writing. Success is silent.
 Errors go to stderr. Exit: 0 on success, 1 on invalid data or I/O, 2 on usage.

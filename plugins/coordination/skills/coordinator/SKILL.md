@@ -131,8 +131,14 @@ Use real task data, not these placeholders. A new task needs `--task`, `--goal`,
 `--status`, and `--next-action`. Its repository is inherited from the handoff;
 do not repeat it for each task. Existing handoffs with task-level `repository`
 fields remain readable, but new updates use the root `project`. Omitted fields
-and tasks are preserved. Use the same task ID for later updates; this command
-does not deduplicate by URL. It never removes tasks.
+are preserved. Use the same task ID for later updates; this command does not
+deduplicate by URL.
+
+Adding a new task ID removes existing `done` tasks whose `updated_at` is more
+than seven days before the current write time. Tasks exactly seven days old,
+unfinished tasks, and the newly added task stay. Explicit timestamp flags do
+not change the cleanup cutoff. Updates to existing tasks or run fields do not
+remove tasks. Cleanup changes only the handoff; brief/result files stay on disk.
 
 Run and updated-task timestamps default to the write time. Use `--updated-at`
 or `--task-updated-at` with ISO 8601 timestamps and timezone for earlier
@@ -179,7 +185,8 @@ Pending means not started; Running means assigned work is active; Verifying
 means required evidence, checks, or publication remain pending; Blocked means
 progress needs an action or decision; Done means the coordinator verified the
 acceptance criteria. An idle or closed pane does not make a task Done.
-Keep blocked and completed tasks in the array.
+Keep unfinished tasks in the array, including blocked tasks. Completed tasks
+stay until the helper removes them under the seven-day cleanup rule.
 
 Use `active`, `paused`, `blocked`, or `finished` for run status. Set run and task
 `updated_at` to the last coordinator observation, using ISO 8601 with timezone,

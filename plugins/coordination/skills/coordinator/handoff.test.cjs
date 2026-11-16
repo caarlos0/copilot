@@ -9,16 +9,22 @@ const { test } = require("node:test");
 const script = join(__dirname, "handoff.mjs");
 const example = JSON.parse(readFileSync(join(__dirname, "handoff.example.json"), "utf8"));
 
-async function fixture(t, data = example) {
+async function fixture(t, data = example, now) {
   const directory = await mkdtemp(join(tmpdir(), "coordinator-handoff-test-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const file = join(directory, "project-coordinator.json");
   if (data !== null) await writeFile(file, JSON.stringify(data));
+  const nodeArgs = now === undefined ? [] : [
+    "--import", `data:text/javascript,${encodeURIComponent(`
+      import { mock } from "node:test";
+      mock.timers.enable({ apis: ["Date"], now: ${Date.parse(now)} });
+    `)}`,
+  ];
   return {
     directory,
     file,
     read: async () => JSON.parse(await readFile(file, "utf8")),
-    run: (...args) => spawnSync(process.execPath, [script, file, ...args], { encoding: "utf8" }),
+    run: (...args) => spawnSync(process.execPath, [...nodeArgs, script, file, ...args], { encoding: "utf8" }),
   };
 }
 
@@ -88,6 +94,69 @@ test("adds and updates tasks without repeating the handoff project or losing tas
   assert.ok(Date.parse(data.updated_at) >= started, data.updated_at);
   const { validate } = await import("./board-data.mjs");
   validate(data);
+});
+
+test("adding a task removes only existing done tasks older than seven days and keeps artifact files", async (t) => {
+  const initial = structuredClone(example);
+  initial.tasks = [
+    ["expired", "done", "2026-11-01T18:00:00Z"],
+    ["expired-edge", "done", "2026-11-09T17:59:59.999Z"],
+    ["cutoff", "done", "2026-11-09T15:00:00-03:00"],
+    ["recent", "done", "2026-11-10T18:00:00Z"],
+    ...["pending", "running", "verifying", "blocked"].map((status) => [
+      status, status, "2026-11-01T18:00:00Z",
+    ]),
+  ].map(([id, status, updated_at]) => ({ ...example.tasks[0], id, status, updated_at }));
+  initial.tasks[0].brief = "expired-brief.md";
+  initial.tasks[0].result = "expired-result.json";
+  const f = await fixture(t, initial, "2026-11-16T18:00:00Z");
+  await writeFile(join(f.directory, "expired-brief.md"), "Saved brief");
+  await writeFile(join(f.directory, "expired-result.json"), '{"evidence":"Saved result"}');
+  success(f.run(
+    "--task", "new",
+    "--goal", "Backfill completed work",
+    "--status", "done",
+    "--next-action", "None",
+    "--updated-at", "2000-01-01T00:00:00Z",
+    "--task-updated-at", "2000-01-01T00:00:00Z",
+  ));
+  const data = await f.read();
+  assert.deepEqual(data.tasks.map((task) => task.id), [
+    "cutoff", "recent", "pending", "running", "verifying", "blocked", "new",
+  ]);
+  assert.deepEqual(data.tasks.slice(0, -1), initial.tasks.slice(2));
+  assert.equal(data.tasks.at(-1).updated_at, "2000-01-01T00:00:00Z");
+  assert.equal(await readFile(join(f.directory, "expired-brief.md"), "utf8"), "Saved brief");
+  assert.equal(await readFile(join(f.directory, "expired-result.json"), "utf8"), '{"evidence":"Saved result"}');
+});
+
+test("task cleanup does not run on updates or failed additions and does not hide invalid saved tasks", async (t) => {
+  const initial = structuredClone(example);
+  initial.tasks[0].status = "done";
+  const f = await fixture(t, initial, "2026-11-16T18:00:00Z");
+  success(f.run("--run-status", "paused"));
+  assert.deepEqual((await f.read()).tasks, initial.tasks);
+  success(f.run(
+    "--task", "task-1", "--goal", "Updated goal",
+    "--task-updated-at", initial.tasks[0].updated_at,
+  ));
+  assert.deepEqual((await f.read()).tasks, [{ ...initial.tasks[0], goal: "Updated goal" }]);
+  const original = await readFile(f.file, "utf8");
+  const incomplete = f.run("--task", "new", "--goal", "Incomplete");
+  assert.equal(incomplete.status, 1, incomplete.stderr);
+  assert.equal(incomplete.stdout, "");
+  assert.match(incomplete.stderr, /task.next_action/);
+  assert.equal(await readFile(f.file, "utf8"), original);
+
+  const corrupt = await f.read();
+  corrupt.tasks[0].worker = "";
+  const invalidState = JSON.stringify(corrupt);
+  await writeFile(f.file, invalidState);
+  const invalid = f.run("--task", "new", "--goal", "New work", "--status", "pending", "--next-action", "Assign");
+  assert.equal(invalid.status, 1, invalid.stderr);
+  assert.equal(invalid.stdout, "");
+  assert.match(invalid.stderr, /task.worker/);
+  assert.equal(await readFile(f.file, "utf8"), invalidState);
 });
 
 test("updates run fields, accepts explicit timestamps, and clears nullable task fields", async (t) => {
