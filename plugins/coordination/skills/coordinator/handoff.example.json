@@ -8,7 +8,6 @@
   "tasks": [
     {
       "id": "task-1",
-      "repository": "owner/repository",
       "goal": "Describe the task's goal",
       "status": "pending",
       "worker": null,

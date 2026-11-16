@@ -69,6 +69,11 @@ The skill ships `board.html`, `handoff.example.json`, and a dependency-free
 loopback server. Run `node serve.mjs` from the resolved coordinator skill
 directory, or use Bun. Use one server for all runs; do not generate HTML per run.
 Shared JSON validation lives beside the skill in `board-data.mjs`.
+Coordinators must write handoffs with the bundled `handoff.mjs` flags. It
+validates the complete state and atomically replaces the file. The handoff
+stores its project once; tasks merge by ID without dropping the queue. Keep the
+project/role owner lock while using it. Workers still write their own cumulative
+result files.
 
 Worker Copilot sessions and Rex tabs share the issue/PR title, or a descriptive
 title from the prompt. Shorten to 100 characters and pass `--name` as one literal
@@ -87,7 +92,9 @@ Load local changes with `copilot --plugin-dir /path/to/copilot/plugins/coding`
 in a new session. Avoid also loading an installed copy.
 
 Run `node --test plugins/coordination/skills/coordinator/board.test.cjs`
-for board changes and
+for board changes,
+`node --test plugins/coordination/skills/coordinator/handoff.test.cjs`
+for handoff writes, and
 `node --test plugins/coordination/skills/coordinator/wait.test.cjs`
 for result notification changes. Check discovery with
 `copilot --plugin-dir /path/to/copilot/plugins/coding skill list --json`.

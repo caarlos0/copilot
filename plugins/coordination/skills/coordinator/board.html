@@ -93,10 +93,10 @@
         return node;
       }
 
-      function card(task, expanded, file) {
+      function card(task, expanded, file, project) {
         const node = element("article", null, "card");
         node.append(
-          element("p", `${task.id} / ${task.repository}`, "muted"),
+          element("p", `${project ?? task.repository} / ${task.id}`, "muted"),
           element("h3", task.goal),
           element("p", `Worker: ${task.worker ?? "Unknown"}`),
           element("p", `Observed: ${task.updated_at}`, "muted"),
@@ -135,7 +135,7 @@
           const column = element("section", null, "column");
           column.dataset.status = status;
           column.append(element("h2", `${status[0].toUpperCase()}${status.slice(1)} (${tasks.length})`));
-          for (const task of tasks) column.append(card(task, expanded, file));
+          for (const task of tasks) column.append(card(task, expanded, file, data.project));
           if (!tasks.length) column.append(element("p", "No tasks", "muted"));
           return column;
         });

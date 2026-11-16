@@ -184,6 +184,7 @@ test("renders JSON tasks fetched over HTTP in all five columns as text", async (
     assert.equal(column.dataset.status, statuses[index]);
     assert.match(column.children[0].textContent, /\(1\)$/);
     const card = column.children[1];
+    assert.equal(card.children[0].textContent, `${data.project} / ${data.tasks[index].id}`);
     assert.match(card.textContent, /Worker: Unknown/);
     assert.match(card.textContent, /Evidence and task details/);
     const links = card.children.find((node) => node.className === "links");
@@ -228,6 +229,7 @@ test("rejects malformed or invalid snapshots without partially replacing the boa
     ["Duplicate task ID", (data) => { data.tasks.push(data.tasks[0]); }],
     ["timezone", (data) => { data.updated_at = "2026-11-05T05:00:00"; }],
     ["task.next_action", (data) => { delete data.tasks[0].next_action; }],
+    ["task.worker", (data) => { data.tasks[0].worker = {}; }],
     ["filename", (data) => { data.tasks[0].result = "../private.json"; }],
     ["GitHub", (data) => { data.tasks[0].pr = "javascript:alert(1)"; }],
   ];

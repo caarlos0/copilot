@@ -48,7 +48,8 @@ projects, choose one stable, unique filename-safe key. Use these filenames:
 
 Do not add dates, run IDs, or Copilot session IDs to these names. Split
 multi-project assignments between their project files. Use
-[handoff.example.json](handoff.example.json) as the JSON shape, not real data.
+[handoff.example.json](handoff.example.json) as the JSON shape, not real data,
+and the bundled `handoff.mjs` below for every handoff write.
 Tell the user the persistent handoff path and board URL.
 
 Allow only one coordinator writer per project and role. Claim ownership with
@@ -87,11 +88,12 @@ artifacts. Clear archived `brief`/`result` links and retain archive paths in
 `details`. Check other tasks and workers first; leave artifacts with unknown
 users in place. Do not delete saved evidence.
 
-Record each task's repository, goal, acceptance criteria, brief/result paths,
-authorized actions, backend, session and pane IDs, worktree path and whether
-this run created or reused it, Copilot session name, mode, monitoring owner,
-current status, blockers, and remaining work. For PR work, retain the URL and
-full head SHA, including in-flight and last-completed heads.
+Record the project repository once in the handoff. For each task, record its
+goal, acceptance criteria, brief/result paths, authorized actions, backend,
+session and pane IDs, worktree path and whether this run created or reused it,
+Copilot session name, mode, monitoring owner, current status, blockers, and
+remaining work. For PR work, retain the URL and full head SHA, including
+in-flight and last-completed heads.
 
 Record tasks that cannot start or finish, with the exact error, what was tried,
 and the next action. Keep them pending or blocked; never drop them from the
@@ -101,14 +103,68 @@ After a restart or lost pane, read the handoff and inspect the pane, worktree,
 and linked PR before resuming or replacing a worker. Pane IDs can be reused:
 verify identity before sending input. Do not duplicate possibly running work.
 
+### Write validated updates
+
+Resolve `handoff.mjs` beside this loaded skill and run it with Node or Bun.
+Hold and verify your project/role owner lock first. Create the state directory
+if needed. Pass the canonical handoff path and explicit flags:
+
+```sh
+node handoff.mjs ~/.local/state/copilot-coordinator/owner.repo-implementer.json \
+  --project owner/repo --role implementer --run-goal "Implement work for owner/repo"
+```
+
+The handoff ID comes from the filename. A new handoff requires `--project`,
+`--role`, and `--run-goal`; its run status defaults to `active`. For an existing
+handoff, supply only changed fields. Add or update tasks by ID:
+
+```sh
+node handoff.mjs ~/.local/state/copilot-coordinator/owner.repo-implementer.json \
+  --task issue-42 --goal "Fix issue 42" --status pending \
+  --next-action "Write the worker brief"
+node handoff.mjs ~/.local/state/copilot-coordinator/owner.repo-implementer.json \
+  --task issue-42 --status running --worker block:actual-worker-id \
+  --next-action "Read the worker result"
+```
+
+Use real task data, not these placeholders. A new task needs `--task`, `--goal`,
+`--status`, and `--next-action`. Its repository is inherited from the handoff;
+do not repeat it for each task. Existing handoffs with task-level `repository`
+fields remain readable, but new updates use the root `project`. Omitted fields
+and tasks are preserved. Use the same task ID for later updates; this command
+does not deduplicate by URL. It never removes tasks.
+
+Run and updated-task timestamps default to the write time. Use `--updated-at`
+or `--task-updated-at` with ISO 8601 timestamps and timezone for earlier
+observations or migrations. Unmentioned task timestamps stay unchanged.
+`--worker` and `--blocker` accept non-empty strings or the literal `null`, not
+an empty value or object. Use `--worker null` only when the worker is unknown,
+not to discard a known identity. Optional flags include `--brief`, `--result`,
+and `--pr`; `null` clears these fields. Use `--details JSON` for nested task
+metadata; objects merge recursively and arrays replace.
+
+The command reads the latest file, checks the complete merged handoff with the
+board validator, and atomically saves a private file. Invalid input fails
+without changing the handoff. Success is silent; failures name the file on
+stderr (exit 1 for data/I/O, 2 for usage). Use `--help` for all options. It also
+rejects a file that changed during preparation; this check does not replace the
+owner lock. On conflict, reread and reconcile instead of retrying stale data.
+An invalid existing field can be explicitly repaired, but malformed JSON or
+ambiguous task IDs require reconciliation first.
+
+Do not hand-edit, regenerate the full handoff, or use ad hoc JSON-writing
+scripts. This helper is for the coordinator handoff, not worker result files;
+workers still atomically publish their cumulative evidence to their assigned
+result paths.
+
 ## Keep a task board
 
 Use the ready-made [board.html](board.html); never generate HTML per run.
 It reads the JSON handoff directly, so there is no separate board state.
 The coordinator alone updates the handoff when tasks change, on each monitoring
-pass, and before pausing or ending the run. Write complete JSON to a temporary
-file beside the handoff, then rename it into place so readers never see a
-partial write. Reuse this same file after completion and on later requests.
+pass, and before pausing or ending the run. Use `handoff.mjs` for validated,
+atomic updates so readers never see invalid or partial writes. Reuse this same
+file after completion and on later requests.
 The board reads the canonical handoff; do not create a separate board JSON,
 per-run copy, or projection. Keep historical records in task history or the
 archive, not as additional active handoffs.

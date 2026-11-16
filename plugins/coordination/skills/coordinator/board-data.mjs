@@ -37,6 +37,8 @@ export function validate(data) {
     throw new Error("Handoff must be a JSON object.");
   }
   text(data.id, "id");
+  if (data.project != null) text(data.project, "project");
+  if (data.role != null) text(data.role, "role");
   text(data.goal, "goal");
   timestamp(data.updated_at, "updated_at");
   if (!runStatuses.includes(data.status) || !Array.isArray(data.tasks)) {
@@ -47,8 +49,12 @@ export function validate(data) {
     if (!task || typeof task !== "object" || Array.isArray(task)) {
       throw new Error("Each task must be a JSON object.");
     }
-    for (const field of ["id", "repository", "goal", "next_action"]) {
+    for (const field of ["id", "goal", "next_action"]) {
       text(task[field], `task.${field}`);
+    }
+    if (task.repository != null) text(task.repository, "task.repository");
+    if (data.project == null && task.repository == null) {
+      throw new Error(`Task ${task.id} needs a repository or a handoff project.`);
     }
     timestamp(task.updated_at, "task.updated_at");
     if (!statuses.includes(task.status)) {
