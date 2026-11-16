@@ -73,6 +73,9 @@ Workers publish cumulative result files. A bundled filesystem waiter wakes
 unscheduled coordinators on result changes, without periodic pane checks or
 requiring the board server. Scheduled coordinator passes remain finite.
 
+Use `/coding:review` for code reviews and `/coding:simplifier` for a final
+behavior-preserving cleanup pass.
+
 ## Update
 
 ```sh

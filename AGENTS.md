@@ -25,9 +25,11 @@ structure or workflows change.
 
 - Use Conventional Commits with scope and explicit sign-off (`git commit -s`).
   Wait for an explicit commit request. Integrate upstream with merge, not rebase.
-- Use short agent names within their plugin namespace, such as
-  `coordination:review` or `security:engineer`. Update launchers and references
-  together when renaming agents. Preserve skill names and preload behavior.
+- Use short agent and skill names within their plugin namespace, such as
+  `coding:simplifier`, `coding:review`, or `security:engineer`. Do not repeat
+  code context already supplied by the namespace. Keep the shared `coordinator`
+  skill name. Update paths, launchers, references, and preloads
+  together when renaming entries. Preserve preload behavior.
   Skill preload names remain unqualified. `i-have-adhd` is an external skill;
   do not vendor it.
 - The `caarlos0` agent routes bounded research to `scout` and substantial
@@ -36,7 +38,7 @@ structure or workflows change.
   required-check fail-fast watching for CI, `gh wait` for PR changes or
   default-branch commits, and `gh wait --merge` for completed merges.
   Do not add sleep-and-poll loops.
-- Review policy lives in the coding plugin's `my-code-review` skill.
+- Review policy lives in the coding plugin's `review` skill.
   Assess need and solution placement before implementation details.
 - Resolve bundled assets relative to the loaded skill directory, not
   `~/.copilot/skills/` or a checkout path.

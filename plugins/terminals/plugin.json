@@ -1,6 +1,6 @@
 {
   "name": "terminals",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Command-line and terminal UI design.",
   "repository": "https://github.com/caarlos0/copilot",
   "license": "MIT"

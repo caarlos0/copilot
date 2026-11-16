@@ -1,9 +1,9 @@
 ---
-name: code-simplifier
+name: simplifier
 description: Final simplification pass over recently changed code without changing behavior. Use after implementation or when explicitly asked to simplify, clean up, or refactor.
 ---
 
-# Code Simplifier
+# Simplifier
 
 Run after the behavior is correct. Repository instructions and correctness or
 language specialists take precedence; output-style skills affect presentation
@@ -12,7 +12,8 @@ only.
 ## Scope
 
 Inspect only the current change against its base. Follow references outside the
-diff only to remove code orphaned by this change or text made false by it.
+diff only to find reuse opportunities for changed code, remove code orphaned by
+this change, or update text made false by it.
 
 Read repository instructions and the matching guide under `languages/`:
 
@@ -26,6 +27,10 @@ Read repository instructions and the matching guide under `languages/`:
 ## Pass
 
 - Preserve APIs, signatures, outputs, and behavior.
+- For every added function, search the repository and check the standard library
+  for existing functions that do the same or similar work. Prefer reuse over
+  duplication. If a small, compatible change to an existing helper serves both
+  uses, adapt or generalize it instead of adding another function.
 - Remove unnecessary indirection, one-use abstractions, repeated branches, and
   comments that restate code.
 - Prefer clear statements over clever expressions.

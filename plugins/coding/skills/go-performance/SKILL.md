@@ -147,9 +147,9 @@ controlled.
 ## Related skills
 
 - `go-conventions` takes precedence for correctness and API design.
-- `my-code-review` checks a completed diff. When invoked from `my-code-review`, do not
+- `coding:review` checks a completed diff. When invoked from `coding:review`, do not
   invoke it again.
-- `code-simplifier` runs after the gain is proven.
+- `simplifier` runs after the gain is proven.
 - `runtime-process-debugging` owns process and lifecycle stalls.
 
 Correctness overrides performance.

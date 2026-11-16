@@ -1,5 +1,5 @@
 ---
-name: my-code-review
+name: review
 description: Review code, diffs, branches, commits, and pull requests for necessity, solution placement, alternatives, correctness, tests, simplicity, performance, and usability.
 user_invocable: true
 ---
@@ -109,7 +109,7 @@ leaf prompt; supplied external artifact paths are not search roots.
   Verify that the feature or fix solves a real problem, especially when the
   change appears fully automated without human input.
 
-These are leaf tasks: agents must not invoke `my-code-review`, request agents, edit,
+These are leaf tasks: agents must not invoke `coding:review`, request agents, edit,
 or mutate GitHub. For code findings, require exact file/line, reachable scenario,
 impact, evidence, smallest fix, and test. For design objections, require evidence,
 the concrete cost or limitation, and a better alternative, including no change.
@@ -179,7 +179,7 @@ focused test can cover it.
 
 ## Related skills
 
-- `code-simplifier`: assess simpler alternatives without editing files.
+- `simplifier`: assess simpler alternatives without editing files.
 - `writing-tests`: review regression coverage, test isolation, and determinism.
 - `gh-cli`: GitHub operations and waiting for new pushes.
 - `infographic`: explain findings visually when that makes them clearer; follow
@@ -192,7 +192,7 @@ focused test can cover it.
 - `go-performance`, `rust-performance`, `typescript-performance`, or
   `python-performance`: matching language performance work.
 
-Use `code-simplifier` and `writing-tests` in read-only mode. Invoke the other
+Use `simplifier` and `writing-tests` in read-only mode. Invoke the other
 skills only when relevant.
 
 ## Validation and result
