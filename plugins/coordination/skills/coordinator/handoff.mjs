@@ -172,7 +172,7 @@ Task options:
   --status VALUE        pending, running, verifying, blocked, or done
   --next-action VALUE   Next action (required for new tasks)
   --worker VALUE        Worker identity, or null when unknown
-  --blocker VALUE       Blocker text, or null to clear
+  --blocker VALUE       Blocker text (only with blocked status), or null to clear
   --brief VALUE         State-directory filename, or null to clear
   --result VALUE        State-directory filename, or null to clear
   --pr VALUE            GitHub PR URL, or null to clear
@@ -182,6 +182,7 @@ Task options:
 The handoff ID comes from FILE's basename. A new task needs --goal,
 --status, and --next-action. Its repository comes from the handoff's --project.
 Only supplied fields change. Tasks omitted from a command are preserved.
+When leaving blocked status, clear any blocker with --blocker null.
 The helper validates the complete handoff before writing. Success is silent.
 Errors go to stderr. Exit: 0 on success, 1 on invalid data or I/O, 2 on usage.
 Use literal null only for nullable fields. Use -- before a FILE beginning with -.

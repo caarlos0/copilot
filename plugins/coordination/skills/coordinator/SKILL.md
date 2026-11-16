@@ -139,7 +139,12 @@ or `--task-updated-at` with ISO 8601 timestamps and timezone for earlier
 observations or migrations. Unmentioned task timestamps stay unchanged.
 `--worker` and `--blocker` accept non-empty strings or the literal `null`, not
 an empty value or object. Use `--worker null` only when the worker is unknown,
-not to discard a known identity. Optional flags include `--brief`, `--result`,
+not to discard a known identity. A non-null `blocker` is valid only when the
+task status is `blocked`. When leaving that status, pass `--blocker null` in
+the same update. To repair stale blocker text on a non-blocked task, clear it
+with `--blocker null`.
+
+Optional flags include `--brief`, `--result`,
 and `--pr`; `null` clears these fields. Use `--details JSON` for nested task
 metadata; objects merge recursively and arrays replace.
 

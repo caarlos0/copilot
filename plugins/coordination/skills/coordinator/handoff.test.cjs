@@ -110,12 +110,30 @@ test("updates run fields, accepts explicit timestamps, and clears nullable task 
   assert.deepEqual((await f.read()).tasks[0].details.evidence, ["first", "second"]);
 });
 
+test("blocker text is allowed only while a task is blocked and must be cleared on transition", async (t) => {
+  const f = await fixture(t);
+  success(f.run("--task", "task-1", "--status", "blocked", "--blocker", "Needs approval"));
+  const blocked = await readFile(f.file, "utf8");
+  for (const status of ["pending", "running", "verifying", "done"]) {
+    const result = f.run("--task", "task-1", "--status", status);
+    assert.equal(result.status, 1, JSON.stringify({ taskStatus: status, ...result }));
+    assert.equal(result.stdout, "");
+    assert.match(result.stderr, /task-1.*blocker.*blocked/);
+    assert.equal(await readFile(f.file, "utf8"), blocked);
+  }
+  success(f.run("--task", "task-1", "--status", "running", "--blocker", "null"));
+  const data = await f.read();
+  assert.equal(data.tasks[0].status, "running");
+  assert.equal(data.tasks[0].blocker, null);
+});
+
 test("rejects invalid flags without changing the saved file", async (t) => {
   const f = await fixture(t);
   const original = await readFile(f.file, "utf8");
   const cases = [
     [["--task", "task-1", "--worker", ""], /task.worker must be a non-empty string/],
     [["--task", "task-1", "--blocker", ""], /task.blocker must be a non-empty string/],
+    [["--task", "task-1", "--blocker", "Needs approval"], /task-1.*blocker.*blocked/],
     [["--task", "task-1", "--status", "idle"], /Unknown status/],
     [["--task", "task-1", "--brief", "/absolute/brief.md"], /filename in the state directory/],
     [["--task", "task-1", "--pr", "https://example.com/o/r/pull/1"], /HTTPS GitHub pull request URL/],

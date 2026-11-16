@@ -75,7 +75,8 @@ Coordinators must write handoffs with the bundled `handoff.mjs` flags. It
 validates the complete state and atomically replaces the file. The handoff
 stores its project once; tasks merge by ID without dropping the queue. Keep the
 project/role owner lock while using it. Workers still write their own cumulative
-result files.
+result files. Task `blocker` text is valid only with `blocked` status; clear it
+when the status changes.
 
 Worker Copilot sessions and Rex tabs share the issue/PR title, or a descriptive
 title from the prompt. Shorten to 100 characters and pass `--name` as one literal

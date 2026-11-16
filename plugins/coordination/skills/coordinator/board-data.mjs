@@ -65,6 +65,9 @@ export function validate(data) {
     for (const field of ["worker", "blocker"]) {
       if (task[field] != null) text(task[field], `task.${field}`);
     }
+    if (task.blocker != null && task.status !== "blocked") {
+      throw new Error(`Task ${task.id}: blocker is allowed only when status is blocked; clear it with --blocker null.`);
+    }
     for (const field of ["brief", "result"]) {
       if (task[field] != null) artifactName(task[field], `task.${field}`);
     }

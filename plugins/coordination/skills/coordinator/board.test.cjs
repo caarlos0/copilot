@@ -230,6 +230,7 @@ test("rejects malformed or invalid snapshots without partially replacing the boa
     ["timezone", (data) => { data.updated_at = "2026-11-05T05:00:00"; }],
     ["task.next_action", (data) => { delete data.tasks[0].next_action; }],
     ["task.worker", (data) => { data.tasks[0].worker = {}; }],
+    ["blocker", (data) => { data.tasks[0].blocker = "Needs approval"; }],
     ["filename", (data) => { data.tasks[0].result = "../private.json"; }],
     ["GitHub", (data) => { data.tasks[0].pr = "javascript:alert(1)"; }],
   ];
