@@ -92,8 +92,9 @@ Record the project repository once in the handoff. For each task, record its
 goal, acceptance criteria, brief/result paths, authorized actions, backend,
 session and pane IDs, worktree path and whether this run created or reused it,
 Copilot session name, mode, monitoring owner, current status, blockers, and
-remaining work. For PR work, retain the URL and full head SHA, including
-in-flight and last-completed heads.
+remaining work. Always record known issue and PR URLs in `links`, including
+related issues and PRs that provide context. For PR work, retain the full head
+SHA, including in-flight and last-completed heads.
 
 Record tasks that cannot start or finish, with the exact error, what was tried,
 and the next action. Keep them pending or blocked; never drop them from the
@@ -121,7 +122,8 @@ handoff, supply only changed fields. Add or update tasks by ID:
 ```sh
 node handoff.mjs ~/.local/state/copilot-coordinator/owner.repo-implementer.json \
   --task issue-42 --goal "Fix issue 42" --status pending \
-  --next-action "Write the worker brief"
+  --next-action "Write the worker brief" \
+  --links '["https://github.com/owner/repo/issues/42"]'
 node handoff.mjs ~/.local/state/copilot-coordinator/owner.repo-implementer.json \
   --task issue-42 --status running --worker block:actual-worker-id \
   --next-action "Read the worker result"
@@ -150,9 +152,13 @@ task status is `blocked`. When leaving that status, pass `--blocker null` in
 the same update. To repair stale blocker text on a non-blocked task, clear it
 with `--blocker null`.
 
-Optional flags include `--brief`, `--result`,
-and `--pr`; `null` clears these fields. Use `--details JSON` for nested task
-metadata; objects merge recursively and arrays replace.
+Optional flags include `--brief`, `--result`, and `--pr`; `null` clears these
+fields. Use `--links JSON` to set any number of HTTPS GitHub issue and PR URLs,
+for example `--links '["https://github.com/owner/repo/issues/42","https://github.com/owner/repo/pull/43"]'`.
+This replaces the whole list; include all known context links when updating it.
+Omitting the flag preserves the list; `--links '[]'` clears it. Existing `pr`
+fields remain supported. Use `--details JSON` for nested task metadata; objects
+merge recursively and arrays replace.
 
 The command reads the latest file, checks the complete merged handoff with the
 board validator, and atomically saves a private file. Invalid input fails
@@ -193,10 +199,14 @@ Use `active`, `paused`, `blocked`, or `finished` for run status. Set run and tas
 not the browser's read time. Update task timestamps only when observed.
 Use null for unknown optional fields. Artifact links (`brief`, `result`) must
 be filenames in the state directory, not absolute paths; `pr` is an HTTPS
-GitHub PR URL. Put acceptance criteria, authority, pane/worktree identity, full
-SHAs, evidence, and remaining work in `details`. Add fields there as needed;
-the board displays them without changing its HTML. Keep credentials and
-sensitive worker output out of the handoff and linked artifacts.
+GitHub PR URL. The `links` array holds all known issue and PR URLs for the task
+and its context. The board displays these and the existing `pr` field as
+`#<number>` links, with each URL shown once. Hovering a link shows its full URL.
+Keep these URLs in `links`, not only in `details`, so they are always clickable.
+Put acceptance criteria, authority, pane/worktree identity, full SHAs, evidence,
+and remaining work in `details`. Add fields there as needed; the board displays
+them without changing its HTML. Keep credentials and sensitive worker output
+out of the handoff and linked artifacts.
 
 Use the dependency-free local server to view the board. Resolve `serve.mjs`
 beside this loaded `SKILL.md`, and run it from that skill directory:

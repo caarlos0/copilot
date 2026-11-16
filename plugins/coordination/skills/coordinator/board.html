@@ -66,7 +66,7 @@
     <main id="board" aria-label="Task status board"></main>
     <noscript>Enable JavaScript to read the JSON handoff.</noscript>
     <script type="module">
-      import { statuses, artifactName, prURL, validate } from "./board-data.mjs";
+      import { statuses, artifactName, githubURL, validate } from "./board-data.mjs";
 
       "use strict";
 
@@ -110,7 +110,13 @@
             links.append(link(field, `/api/artifact?${query}`));
           }
         }
-        if (task.pr) links.append(link("Pull request", prURL(task.pr)));
+        const references = new Set([...(task.pr ? [task.pr] : []), ...(task.links ?? [])]);
+        for (const href of references) {
+          const url = githubURL(href);
+          const reference = link(`#${url.pathname.split("/").pop()}`, url.href);
+          reference.title = url.href;
+          links.append(reference);
+        }
         node.append(links);
         if (task.details != null) {
           const details = element("details");

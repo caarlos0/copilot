@@ -23,10 +23,18 @@ export function artifactName(value, field = "artifact") {
   return value;
 }
 
-export function prURL(value) {
-  const url = new URL(text(value, "pr"));
+export function githubURL(value, field = "link") {
+  const url = new URL(text(value, field));
   if (url.origin !== "https://github.com" || url.username || url.password ||
-      !/^\/[^/]+\/[^/]+\/pull\/\d+$/.test(url.pathname)) {
+      !/^\/[^/]+\/[^/]+\/(issues|pull)\/\d+$/.test(url.pathname)) {
+    throw new Error(`${field} must be an HTTPS GitHub issue or pull request URL.`);
+  }
+  return url;
+}
+
+export function prURL(value) {
+  const url = githubURL(value, "pr");
+  if (url.pathname.split("/")[3] !== "pull") {
     throw new Error("pr must be an HTTPS GitHub pull request URL.");
   }
   return url.href;
@@ -72,5 +80,9 @@ export function validate(data) {
       if (task[field] != null) artifactName(task[field], `task.${field}`);
     }
     if (task.pr != null) prURL(task.pr);
+    if (task.links != null) {
+      if (!Array.isArray(task.links)) throw new Error("task.links must be an array.");
+      for (const value of task.links) githubURL(value, "task.links[]");
+    }
   }
 }

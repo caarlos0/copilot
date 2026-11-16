@@ -196,6 +196,25 @@ test("blocker text is allowed only while a task is blocked and must be cleared o
   assert.equal(data.tasks[0].blocker, null);
 });
 
+test("saves multiple issue and PR links, preserves omitted links, and replaces or clears them", async (t) => {
+  const f = await fixture(t);
+  const links = [
+    "https://github.com/owner/repository/issues/42",
+    "https://github.com/owner/repository/pull/43",
+    "https://github.com/other/repository/issues/7",
+  ];
+  success(f.run("--task", "task-1", "--links", JSON.stringify(links)));
+  assert.deepEqual((await f.read()).tasks[0].links, links);
+  success(f.run("--task", "task-1", "--status", "running", "--pr", links[1]));
+  const data = await f.read();
+  assert.deepEqual(data.tasks[0].links, links);
+  assert.equal(data.tasks[0].pr, links[1]);
+  success(f.run("--task", "task-1", "--links", JSON.stringify([links[2]])));
+  assert.deepEqual((await f.read()).tasks[0].links, [links[2]]);
+  success(f.run("--task", "task-1", "--links", "[]"));
+  assert.deepEqual((await f.read()).tasks[0].links, []);
+});
+
 test("rejects invalid flags without changing the saved file", async (t) => {
   const f = await fixture(t);
   const original = await readFile(f.file, "utf8");
@@ -205,7 +224,15 @@ test("rejects invalid flags without changing the saved file", async (t) => {
     [["--task", "task-1", "--blocker", "Needs approval"], /task-1.*blocker.*blocked/],
     [["--task", "task-1", "--status", "idle"], /Unknown status/],
     [["--task", "task-1", "--brief", "/absolute/brief.md"], /filename in the state directory/],
-    [["--task", "task-1", "--pr", "https://example.com/o/r/pull/1"], /HTTPS GitHub pull request URL/],
+    [["--task", "task-1", "--pr", "https://example.com/o/r/pull/1"], /pr must be an HTTPS GitHub issue or pull request URL/],
+    [["--task", "task-1", "--pr", "https://github.com/o/r/issues/1"], /pr must be an HTTPS GitHub pull request URL/],
+    [["--task", "task-1", "--links", "{}"], /task.links must be an array/],
+    [["--task", "task-1", "--links", "["], /JSON/],
+    [["--task", "task-1", "--links", '["javascript:alert(1)"]'], /HTTPS GitHub issue or pull request URL/],
+    [["--task", "task-1", "--links", '["https://github.com/o/r/issues/no-number"]'], /HTTPS GitHub issue or pull request URL/],
+    [["--task", "task-1", "--links", '["https://github.com/o/r/commit/123"]'], /HTTPS GitHub issue or pull request URL/],
+    [["--task", "task-1", "--links", '["https://user@github.com/o/r/issues/1"]'], /HTTPS GitHub issue or pull request URL/],
+    [["--task", "task-1", "--links", "[42]"], /task.links\[\] must be a non-empty string/],
     [["--task", "task-1", "--details", "[]"], /--details must be a JSON object/],
     [["--task", "new", "--goal", "Incomplete"], /task.next_action must be a non-empty string/],
     [["--goal", "No task ID"], /Task options require --task ID/],
@@ -349,6 +376,10 @@ test("CLI help, usage, missing files, and dash-prefixed paths have stable stream
     assert.match(result.stderr, /--help/);
     assert.deepEqual(await readdir(f.directory), []);
   }
+  const withoutTask = invoke(f.file, "--links", "[]");
+  assert.equal(withoutTask.status, 2, withoutTask.stderr);
+  assert.equal(withoutTask.stdout, "");
+  assert.match(withoutTask.stderr, /Task options require --task ID/);
   const missingPath = join(f.directory, "missing", "run.json");
   const missing = spawnSync(process.execPath, [
     script, missingPath, ...createArgs,

@@ -52,6 +52,7 @@ function taskPatch(values) {
         ["worker", "blocker", "brief", "result", "pr"].includes(option) ? null : values[option];
     }
   }
+  if (values.links !== undefined) patch.links = JSON.parse(values.links);
   if (values.details !== undefined) {
     patch.details = JSON.parse(values.details);
     if (!isObject(patch.details)) throw new Error("--details must be a JSON object.");
@@ -142,6 +143,7 @@ async function main() {
         brief: { type: "string" },
         result: { type: "string" },
         pr: { type: "string" },
+        links: { type: "string" },
         details: { type: "string" },
         "task-updated-at": { type: "string" },
       },
@@ -182,6 +184,7 @@ Task options:
   --brief VALUE         State-directory filename, or null to clear
   --result VALUE        State-directory filename, or null to clear
   --pr VALUE            GitHub PR URL, or null to clear
+  --links JSON          Replace GitHub issue/PR URL array; [] clears it
   --details JSON        Merge a JSON object into task details
   --task-updated-at VALUE  Explicit task timestamp (ISO 8601 with timezone)
 
@@ -201,7 +204,7 @@ Keep the coordinator's project/role owner lock while using this command.`);
     [file] = positionals;
     if (values.task === undefined && [
       "goal", "status", "next-action", "worker", "blocker", "brief", "result", "pr",
-      "details", "task-updated-at",
+      "links", "details", "task-updated-at",
     ].some((field) => values[field] !== undefined)) {
       throw new Error("Task options require --task ID.");
     }

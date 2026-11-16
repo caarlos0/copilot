@@ -163,6 +163,7 @@ test("renders JSON tasks fetched over HTTP in all five columns as text", async (
   const data = structuredClone(example);
   const statuses = ["pending", "running", "verifying", "blocked", "done"];
   data.goal = '<img src=x onerror="alert(1)">';
+  delete data.tasks[0].links;
   data.tasks = statuses.map((status) => ({
     ...data.tasks[0],
     id: status,
@@ -193,8 +194,34 @@ test("renders JSON tasks fetched over HTTP in all five columns as text", async (
     assert.equal(artifact.searchParams.get("file"), "example-handoff.json");
     assert.equal(artifact.searchParams.get("name"), `${statuses[index]}-brief.md`);
     assert.equal(links.children[1].href, data.tasks[index].pr);
+    assert.equal(links.children[1].textContent, "#42");
   }
   assert.match(columns[3].textContent, /Blocked: Needs approval/);
+});
+
+test("shows every issue and PR context link as its number without repeating the legacy PR", async (t) => {
+  const data = structuredClone(example);
+  const pr = "https://github.com/owner/repository/pull/43";
+  const issue = "https://github.com/owner/repository/issues/42";
+  const otherIssue = "https://github.com/other/repository/issues/42";
+  const otherPR = "https://github.com/owner/repository/pull/44";
+  data.tasks[0].pr = pr;
+  data.tasks[0].links = [issue, pr, otherIssue, otherPR, issue];
+  const view = await board(t, data);
+  assert.equal(view.nodes.error.hidden, true, view.nodes.error.textContent);
+  const card = view.nodes.board.children[0].children[1];
+  const links = card.children.find((node) => node.className === "links");
+  assert.deepEqual(links.children.map((node) => [node.textContent, node.href]), [
+    ["#43", pr], ["#42", issue], ["#42", otherIssue], ["#44", otherPR],
+  ]);
+  for (const node of links.children) assert.equal(node.title, node.href);
+
+  data.tasks[0].pr = null;
+  data.tasks[0].links = [issue];
+  await view.refresh(data);
+  const issueCard = view.nodes.board.children[0].children[1];
+  const issueLinks = issueCard.children.find((node) => node.className === "links");
+  assert.deepEqual(issueLinks.children.map((node) => [node.textContent, node.href]), [["#42", issue]]);
 });
 
 test("atomic JSON replacements refresh the board; failed reads retain evidence and recover", async (t) => {
@@ -233,6 +260,8 @@ test("rejects malformed or invalid snapshots without partially replacing the boa
     ["blocker", (data) => { data.tasks[0].blocker = "Needs approval"; }],
     ["filename", (data) => { data.tasks[0].result = "../private.json"; }],
     ["GitHub", (data) => { data.tasks[0].pr = "javascript:alert(1)"; }],
+    ["task.links", (data) => { data.tasks[0].links = {}; }],
+    ["GitHub", (data) => { data.tasks[0].links = ["https://example.com/owner/repo/issues/42"]; }],
   ];
   for (const [message, change] of invalidCases) {
     const data = structuredClone(example);
