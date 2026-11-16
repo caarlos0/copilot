@@ -163,7 +163,8 @@
           placeholder.value = "";
           const match = data.boards.find((board) => board.file === selection || board.path === selection);
           const choices = data.boards.map((board) => {
-            const option = element("option", `${board.goal} / ${board.status} / ${board.task_count} tasks / ${board.file}`);
+            const count = `${board.task_count} ${board.task_count === 1 ? "task" : "tasks"}`;
+            const option = element("option", `${board.file} / ${count}`);
             option.value = board === match ? selection : board.file;
             return option;
           });

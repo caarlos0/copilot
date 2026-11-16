@@ -251,11 +251,12 @@ test("the root page discovers choices without a query and notices newly created 
   const view = await board(t, example, { search: "" });
   assert.equal(view.nodes.board.children.length, 0);
   assert.equal(view.nodes.coordinator.children.length, 2);
-  assert.match(view.nodes.coordinator.children[1].textContent, /example-handoff.json/);
+  assert.equal(view.nodes.coordinator.children[1].textContent, "example-handoff.json / 1 task");
+  assert.doesNotMatch(view.nodes.coordinator.children[1].textContent, /Example coordinator|active/);
   await view.server.write("second-handoff.json", { ...example, id: "second", goal: "New coordinator" });
   await view.refresh();
   assert.equal(view.nodes.coordinator.children.length, 3);
-  assert.match(view.nodes.coordinator.children[2].textContent, /second-handoff.json/);
+  assert.equal(view.nodes.coordinator.children[2].textContent, "second-handoff.json / 1 task");
   await view.choose("second-handoff.json");
   assert.equal(view.nodes.goal.textContent, "New coordinator");
   assert.equal(view.location.searchParams.get("file"), "second-handoff.json");
