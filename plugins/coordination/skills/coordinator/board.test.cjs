@@ -148,7 +148,7 @@ async function board(t, data = structuredClone(example), options = {}) {
     async refresh(next) {
       if (next !== undefined) await server.write("example-handoff.json", next);
       const timer = timers.shift();
-      assert.equal(timer.delay, 5000);
+      assert.equal(timer.delay, 60000);
       await timer.callback();
       assert.equal(timers.length, 1, "schedule the next refresh only after this one finishes");
     },

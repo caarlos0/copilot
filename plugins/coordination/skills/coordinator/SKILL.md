@@ -207,7 +207,7 @@ access grant is needed. A direct link can add `?file=<URL-encoded filename>`;
 absolute JSON paths also work when directly inside the configured directory.
 Do not open the browser for the user.
 
-The browser rereads the list and selected handoff every five seconds, without
+The browser rereads the list and selected handoff every minute, without
 caching, and retains the last valid snapshot with an error on failed reads.
 The server serves only the board assets, validated handoffs, and their
 referenced brief/result files. It does not inspect workers or grant monitoring
