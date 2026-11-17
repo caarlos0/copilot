@@ -45,6 +45,11 @@ new worker) to run `git merge main` and resolve the conflict there. When a
 check fails or a result is unclear, create or reopen a task for a worker to
 investigate. Do not investigate it yourself.
 
+The coordinator never uses the `task`, `read_agent` or `write_agent` tools for
+factory work. Every worker, including backlog, discovery, and improve workers,
+is a Copilot session in a Rex tab with a brief, a result file, and
+`broker.mjs emit`.
+
 ```
 initial -> investigation -> implementation <-> review -> resolved
                  any open state <-> blocked
@@ -691,6 +696,12 @@ Tell every worker:
   blocked and publication is authorized, open a draft PR, state the limitation,
   and use CI to validate the changed head. If no safe path remains, save the
   blocker and wait for the user.
+- On a GitHub rate-limit error ("API rate limit already exceeded", which can be
+  the secondary limit while `gh api rate_limit` still shows quota), do not
+  block and do not emit `worker.blocked`. Save a `waiting` result whose
+  `summary` names the rate limit and the reset time, and emit `worker.result`.
+  Until the reset, make at most one REST check (`gh api`) every 5 minutes or
+  more; then resume `gh wait`.
 
 ### Investigation worker
 
@@ -731,10 +742,13 @@ It writes `blocked` only for a user decision or an outside action.
 
 Use the coding plugin's `gh-cli` native watchers for local wakeups: required
 checks with fail-fast watching, `gh wait` for PR changes, and `gh wait --merge`
-for a pending merge. Feed each event into a bounded shepherd pass. Do not
-also create an automation or scheduled poller. When a task includes a code
-review, account for its result on the current head before landing; a clean
-model review never replaces GitHub's required reviews or checks.
+for a pending merge. You are the only worker that watches the PR; the review
+worker does not. Feed each event into a bounded shepherd pass. Do not
+also create an automation or scheduled poller. If a watcher fails with a
+rate-limit error, follow the rate-limit rule in "Brief the workers". When a
+task includes a code review, account for its result on the current head before
+landing; a clean model review never replaces GitHub's required reviews or
+checks.
 
 The implementation worker is the sole landing writer. It stays alive until
 the PR merges, closes, or needs a user decision, saving a result when the PR
@@ -773,7 +787,10 @@ model choices within the user's preferences and the resolved spend budget.
 The worker must never checkout, switch, reset, or clean a shared implementation
 worktree. It reads the exact remote PR head, not uncommitted worker edits; for
 a task without a PR, it reads the recorded local `head` commit.
-It watches for new heads with `gh wait` and saves a result for each review.
+It runs no `gh wait` watcher: the implementation worker is the only watcher of
+a PR, and two watchers on one PR double GraphQL use and trigger rate limits.
+The review worker reads the PR on each `worker.result` or head change the
+factory passes to it, and saves a result for each review.
 Publish only when authorized; a clean precision review posts nothing.
 If a draft is skipped, record it as unreviewed and resume when it becomes
 ready. A skipped or failed review is not a clean result.
@@ -872,6 +889,10 @@ Rules:
    use it only for a bounded check, never as a poll loop.
 7. If nothing needs action, re-arm without writing a timestamp or an
    acknowledgement; do not create a wake/write loop.
+8. A lane whose result is `waiting` for a rate limit is not stuck and not
+   blocked. On the next wake, reconcile it: once its reset time has passed,
+   re-arm the lane by telling the worker to resume `gh wait` (`rex send`
+   reaches idle workers only). Do not start a timed loop to check the reset.
 
 Events do not prove a worker is alive. If a worker crashed before it emitted,
 nothing wakes you; every turn still runs `reconcile.mjs`, which reads result

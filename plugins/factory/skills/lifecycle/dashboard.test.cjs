@@ -933,6 +933,8 @@ test("the delegate-always rule is present in the agent, skill, and plugin rules"
     assert.match(text, /git merge main/, file);
     assert.match(text, /never\s+waits?\s+on\s+another\s+task/i, file);
     assert.match(text, /only\s+for\s+a\s+user\s+decision/i, file);
+    assert.match(text, /never\s+uses?\s+the\s+`task`,\s+`read_agent`,?\s+or\s+`write_agent`\s+tools/i, file);
+    assert.match(text, /Copilot\s+session\s+in\s+a\s+Rex\s+tab/, file);
   }
 });
 

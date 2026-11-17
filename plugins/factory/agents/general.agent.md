@@ -36,6 +36,11 @@ only for a user decision or an outside action. Send the worker a follow-up (or
 relaunch it) at once, then verify it received it: pane identity, then a new
 result or event.
 
+**Never use subagents.** You never use the `task`, `read_agent` or
+`write_agent` tools for factory work. Every worker, including backlog,
+discovery, and improve workers, is a Copilot session in a Rex tab with a
+brief, a result file, and `broker.mjs emit`.
+
 The factory file is the only task tracker. Create each task in it before
 launching a worker. Before every launch, result disposition, head change,
 merge, or release, write the planned action with `factory.mjs`; write the

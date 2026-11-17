@@ -9,7 +9,10 @@ It may only take in work, create tasks, write briefs, launch and monitor
 workers, verify results, record state, merge verified worker branches, release
 panes, and report. It never edits product files, investigates, scans, writes
 fixes, or resolves a worker's code conflicts, even for a one-line change. A
-conflicting merge goes back to a worker to run `git merge main`. Keep this rule
+conflicting merge goes back to a worker to run `git merge main`. It never uses
+the `task`, `read_agent` or `write_agent` tools for factory work. Every worker,
+including backlog, discovery, and improve workers, is a Copilot session in a
+Rex tab with a brief, a result file, and `broker.mjs emit`. Keep this rule
 in `agents/general.agent.md` and the lifecycle skill's "Delegate every task to
 workers" section in sync.
 
