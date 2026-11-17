@@ -572,8 +572,10 @@ directory defaults to `~/.local/state/copilot-coordinator/`
 (`--directory PATH`). Do not stop another process to take a port. Share the
 printed HTTP URL, not a `file://` link. Do not open the browser for the user.
 
-The page draws the flow as a flowchart with a task count per state. A moving
-token shows each new transition from the file history. Click a state to open
+The page draws the flow as a flowchart with a task count per state. Below
+Resolved, each resolution outcome has its own count and opens a filtered task
+list. The Resolved total opens all resolved tasks. A moving token shows each
+new transition from the file history. Click a state to open
 a modal task list, with links (opened in a new tab), time in state, blocker or
 resolution, the full history, and expandable worker, head, cycle, merge, and
 syntax-highlighted evidence details. A task's **Move** button opens a second

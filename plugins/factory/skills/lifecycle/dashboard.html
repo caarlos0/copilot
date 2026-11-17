@@ -84,8 +84,8 @@
       .controls { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
       .muted { color: var(--fg-muted); }
       a:focus-visible, button:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible,
-      .node:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-      .node:focus-visible { outline-offset: 4px; }
+      .node:focus-visible, .outcome:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      .node:focus-visible, .outcome:focus-visible { outline-offset: 4px; }
       #error, #discovery-error, .blocker, .save-error { padding: 16px; border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
         border-radius: 6px; background: color-mix(in srgb, var(--danger) 10%, var(--bg)); }
 
@@ -109,6 +109,12 @@
       .node .name { fill: var(--c); font-size: 14px; font-weight: 600; text-anchor: middle; }
       .node .count { fill: var(--fg); font-size: 40px; font-weight: 600; text-anchor: middle; }
       .node .sub { fill: var(--fg-muted); font-size: 12px; text-anchor: middle; }
+      .outcome { cursor: pointer; }
+      .outcome rect { fill: transparent; }
+      .outcome:hover rect, .outcome.selected rect { fill: color-mix(in srgb, var(--resolved) 14%, var(--bg)); }
+      .outcome text { fill: var(--fg-muted); font-size: 12px; }
+      .outcome.selected text { fill: var(--resolved); }
+      .outcome .outcome-count { fill: var(--fg); font-weight: 600; text-anchor: end; font-variant-numeric: tabular-nums; }
       .ring { fill: none; stroke: var(--c); stroke-width: 2; opacity: 0; transform-box: fill-box; transform-origin: center; }
       .active .ring { animation: ring 2s ease-out infinite; }
       .node.bump { animation: bump .6s ease-out; transform-box: fill-box; transform-origin: center; }
@@ -221,11 +227,13 @@
     </main>
     <noscript>Enable JavaScript to read the factory.</noscript>
     <script type="module">
-      import { states, artifactName, githubURL, validate, countByState, hopsSince, entered, cyclesOf, operatorStates, operatorOutcomes } from "./factory-data.mjs";
+      import { states, outcomes, artifactName, githubURL, validate, countByState, hopsSince, entered, cyclesOf, operatorStates, operatorOutcomes } from "./factory-data.mjs";
 
       const SVG = "http://www.w3.org/2000/svg";
       const NODE = { w: 160, h: 110 };
       const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+      const outcomeTitles = Object.fromEntries(outcomes.map((outcome) =>
+        [outcome, outcome[0].toUpperCase() + outcome.slice(1).replaceAll("-", " ")]));
       const places = {
         initial: { x: 20, y: 170, title: "Initial" },
         investigation: { x: 230, y: 170, title: "Investigation" },
@@ -293,12 +301,19 @@
       }
 
       function openState() {
-        const state = location.hash.slice(1);
+        const [state, outcome] = location.hash.slice(1).split("/");
+        if (outcome && (state !== "resolved" || !outcomes.includes(outcome))) return null;
         return states.includes(state) ? state : null;
       }
 
-      function choose(state) {
-        const next = openState() === state ? "" : `#${state}`;
+      function openOutcome() {
+        const outcome = location.hash.split("/")[1];
+        return openState() === "resolved" && outcomes.includes(outcome) ? outcome : null;
+      }
+
+      function choose(state, outcome = null) {
+        const next = !state || (openState() === state && openOutcome() === outcome)
+          ? "" : `#${state}${outcome ? `/${outcome}` : ""}`;
         history.replaceState(null, "", `${location.pathname}${location.search}${next}`);
         draw();
       }
@@ -357,7 +372,28 @@
           nodes.append(group);
         });
 
-        flow.replaceChildren(defs, edges, labels, nodes, svg("g", { id: "tokens" }));
+        const resolutions = svg("g", { role: "group", "aria-label": "Resolved tasks by outcome" });
+        outcomes.forEach((outcome, index) => {
+          const x = places.resolved.x;
+          const y = places.resolved.y + NODE.h + 16 + index * 32;
+          const group = svg("g", { class: "outcome", tabindex: 0, role: "button" });
+          group.dataset.outcome = outcome;
+          group.append(
+            svg("rect", { x, y, width: NODE.w, height: 28, rx: 4 }),
+            svg("text", { x: x + 12, y: y + 19 }, outcomeTitles[outcome]),
+            svg("text", { class: "outcome-count", x: x + NODE.w - 12, y: y + 19 }, "0"),
+          );
+          group.addEventListener("click", () => choose("resolved", outcome));
+          group.addEventListener("keydown", (event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              choose("resolved", outcome);
+            }
+          });
+          resolutions.append(group);
+        });
+
+        flow.replaceChildren(defs, edges, labels, nodes, resolutions, svg("g", { id: "tokens" }));
       }
 
       function nodeOf(state) {
@@ -381,6 +417,16 @@
             : (tasks.length ? idle : "");
           group.setAttribute("aria-label",
             `${places[state].title}: ${tasks.length} ${tasks.length === 1 ? "task" : "tasks"}`);
+        }
+        for (const group of flow.querySelectorAll(".outcome")) {
+          const outcome = group.dataset.outcome;
+          const count = snapshot.tasks.filter((task) => task.resolution?.outcome === outcome).length;
+          const selected = openOutcome() === outcome;
+          group.querySelector(".outcome-count").textContent = String(count);
+          group.classList.toggle("selected", selected);
+          group.setAttribute("aria-pressed", String(selected));
+          group.setAttribute("aria-label",
+            `Resolved: ${outcomeTitles[outcome]}, ${count} ${count === 1 ? "task" : "tasks"}`);
         }
         const counts = countByState(snapshot.tasks);
         Object.assign(targets, counts);
@@ -540,7 +586,7 @@
         resolution.name = "resolution";
         resolution.required = true;
         for (const value of operatorOutcomes) {
-          const option = element("option", value[0].toUpperCase() + value.slice(1).replaceAll("-", " "));
+          const option = element("option", outcomeTitles[value]);
           option.value = value;
           resolution.append(option);
         }
@@ -752,20 +798,24 @@
           moveDialog.close();
           dialog.close();
           dialog.dataset.state = "";
+          dialog.dataset.outcome = "";
           list.replaceChildren();
           list.dataset.signature = "";
           return;
         }
+        const outcome = state === "resolved" ? openOutcome() : null;
+        const sameList = dialog.dataset.state === state && dialog.dataset.outcome === (outcome ?? "");
         const expanded = new Set([...list.querySelectorAll("details[open]")].map((node) => node.dataset.taskId));
-        const tasks = snapshot.tasks.filter((task) => task.state === state)
+        const tasks = snapshot.tasks.filter((task) => task.state === state &&
+          (!outcome || task.resolution.outcome === outcome))
           .sort((a, b) => Date.parse(entered(a)) - Date.parse(entered(b)));
         const title = document.getElementById("detail-title");
-        title.textContent = places[state].title;
+        title.textContent = outcome ? `Resolved: ${outcomeTitles[outcome]}` : places[state].title;
         title.append(element("span", String(tasks.length), "counter"));
-        const signature = JSON.stringify([selection, state, tasks]);
+        const signature = JSON.stringify([selection, state, outcome, tasks]);
         if (list.dataset.signature !== signature) {
           const rows = tasks.map((task) => taskRow(task, expanded));
-          if (!reduced && dialog.dataset.state === state) {
+          if (!reduced && sameList) {
             [...list.children].forEach((row, index) => {
               if (tasks.some((task) => task.id === row.dataset.taskId)) return;
               rows.splice(index, 0, row);
@@ -783,8 +833,11 @@
           list.dataset.signature = signature;
         }
         document.getElementById("detail-empty").hidden = list.children.length > 0;
-        if (dialog.dataset.state !== state) document.getElementById("detail-status").textContent = "";
+        document.getElementById("detail-empty").textContent = outcome
+          ? "No tasks with this outcome." : "No tasks in this state.";
+        if (!sameList) document.getElementById("detail-status").textContent = "";
         dialog.dataset.state = state;
+        dialog.dataset.outcome = outcome ?? "";
         if (!dialog.open) {
           dialog.showModal();
           dialog.focus();
@@ -931,12 +984,12 @@
       });
       document.getElementById("refresh").addEventListener("click", refresh);
       window.addEventListener("hashchange", draw);
-      document.getElementById("close-detail").addEventListener("click", () => choose(openState()));
+      document.getElementById("close-detail").addEventListener("click", () => choose(null));
       dialog.addEventListener("cancel", (event) => {
         event.preventDefault();
-        choose(openState());
+        choose(null);
       });
-      closeOnBackdrop(dialog, () => choose(openState()));
+      closeOnBackdrop(dialog, () => choose(null));
       document.getElementById("close-move").addEventListener("click", () => moveDialog.close());
       closeOnBackdrop(moveDialog, () => moveDialog.close());
 

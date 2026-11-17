@@ -280,6 +280,7 @@ async function dashboard(t, { reducedMotion = true } = {}) {
   const document = {
     getElementById: (id) => elements.get(id),
     createElement: (tag) => new Element(tag),
+    createElementNS: (_, tag) => new Element(tag),
   };
   class Element {
     constructor(tag) {
@@ -292,6 +293,16 @@ async function dashboard(t, { reducedMotion = true } = {}) {
       this.open = false;
       this.hidden = false;
       this.className = "";
+      this.classList = {
+        add: (name) => this.classList.toggle(name, true),
+        remove: (name) => this.classList.toggle(name, false),
+        toggle: (name, enabled) => {
+          const names = new Set(this.className.split(" ").filter(Boolean));
+          if (enabled ?? !names.has(name)) names.add(name);
+          else names.delete(name);
+          this.className = [...names].join(" ");
+        },
+      };
     }
     append(...children) {
       for (const child of children) if (child instanceof Element) child.parentNode = this;
@@ -311,7 +322,7 @@ async function dashboard(t, { reducedMotion = true } = {}) {
     get textContent() { return this.children.map((child) => typeof child === "string" ? child : child.textContent).join(""); }
     set textContent(value) { this.children = [String(value)]; }
     get options() { return this.children.filter((child) => child.tag === "option"); }
-    setAttribute(name, value) { this[name] = value; }
+    setAttribute(name, value) { this[name === "class" ? "className" : name] = value; }
     addEventListener(name, callback) { this.listeners.set(name, callback); }
     async fire(name, event = {}) { await this.listeners.get(name)?.({ target: this, preventDefault() {}, ...event }); }
     getBoundingClientRect() { return { left: 100, right: 900, top: 100, bottom: 700 }; }
@@ -321,14 +332,15 @@ async function dashboard(t, { reducedMotion = true } = {}) {
     close() { this.open = false; }
     querySelector(selector) { return this.querySelectorAll(selector)[0] ?? null; }
     querySelectorAll(selector) {
-      const match = /^([a-z]+|\.[\w-]+)(\[open\])?$/.exec(selector);
+      const match = /^([a-z]+|\.[\w-]+)(?:\[(open|data-state)(?:="([^"]*)")?\])?$/.exec(selector);
       assert.ok(match, `Unsupported test selector: ${selector}`);
-      const [, name, open] = match;
+      const [, name, attribute, value] = match;
       return this.children.flatMap((child) => {
         if (!(child instanceof Element)) return [];
         const matches = name.startsWith(".") ? child.className.split(" ").includes(name.slice(1)) : child.tag === name;
+        const attributeMatches = !attribute || (attribute === "open" ? child.open : child.dataset.state === value);
         return [
-          ...(matches && (!open || child.open) ? [child] : []),
+          ...(matches && attributeMatches ? [child] : []),
           ...child.querySelectorAll(selector),
         ];
       });
@@ -345,6 +357,8 @@ async function dashboard(t, { reducedMotion = true } = {}) {
     history: { replaceState: (_, __, value) => { location.href = new URL(value, location).href; } },
     window: { addEventListener() {} },
     matchMedia: () => ({ matches: reducedMotion }),
+    performance: { now: () => 0 },
+    requestAnimationFrame: (callback) => callback(2000),
     setTimeout() {}, clearTimeout() {},
     fetch: (path, options = {}) => get(url, path, {
       ...options,
@@ -354,8 +368,8 @@ async function dashboard(t, { reducedMotion = true } = {}) {
   const script = html.match(/<script type="module">([\s\S]*?)<\/script>/)[1]
     .replace(/^\s*import .+;\s*/m, "").replace(/\s*buildFlow\(\);\s*refresh\(\);\s*$/, "");
   vm.runInContext(script, context);
-  // Flow animation is outside these interaction tests.
-  vm.runInContext("draw = () => renderDetail(openState()); animate = () => {};", context);
+  // Token flight is outside these interaction tests; counters finish in one frame.
+  vm.runInContext("animate = () => {}; buildFlow();", context);
   const run = (source) => vm.runInContext(source, context);
   await run("refresh()");
   return { run, document, directory, get: (id) => elements.get(id) };
@@ -416,6 +430,85 @@ test("rows show history, open references in a new tab, and highlight evidence", 
   assert.deepEqual(tokens("key"), ['"note"', '"count"', '"ok"', '"gone"', '"list"']);
   assert.deepEqual(tokens("string"), ['"say \\"a\\": 1"', '"x"']);
   assert.deepEqual(tokens("literal"), ["-2500", "true", "null", "1"]);
+});
+
+test("resolved sublists count each outcome and open only matching tasks", async (t) => {
+  const ui = await dashboard(t, { reducedMotion: false });
+  const data = structuredClone(example);
+  const { operatorOutcomes } = await import("./factory-data.mjs");
+  for (const [index, outcome] of [...operatorOutcomes, "duplicate"].entries()) {
+    const task = structuredClone(example.tasks.find((task) => task.state === "initial"));
+    task.id = `resolution-${index}`;
+    task.title = `${outcome} task ${index}`;
+    task.issue = null;
+    task.state = "resolved";
+    task.resolution = { outcome, at: data.updated_at, note: "Resolved for this outcome." };
+    task.history.push({ state: "resolved", at: data.updated_at });
+    data.tasks.push(task);
+  }
+  await writeFile(join(ui.directory, factoryFile), JSON.stringify(data));
+  await ui.run("refresh()");
+  const outcomes = ui.get("flow").querySelectorAll(".outcome");
+  assert.equal(outcomes.length, 6);
+  assert.deepEqual(Object.fromEntries(outcomes.map((node) =>
+    [node.dataset.outcome, Number(node.querySelector(".outcome-count").textContent)])), {
+    merged: 1, "already-fixed": 1, duplicate: 2, invalid: 1, cancelled: 1, completed: 1,
+  });
+  const total = ui.run("nodeOf('resolved')");
+  assert.equal(total.querySelector(".count").textContent, "7");
+  const duplicate = outcomes.find((node) => node.dataset.outcome === "duplicate");
+  assert.equal(duplicate["aria-label"], "Resolved: Duplicate, 2 tasks");
+  await duplicate.fire("click");
+  assert.equal(ui.run("location.hash"), "#resolved/duplicate");
+  assert.match(ui.get("detail-title").textContent, /^Resolved: Duplicate/);
+  assert.equal(ui.get("task-list").children.length, 2);
+  assert.ok(ui.get("task-list").children.every((row) => row.textContent.includes("duplicate task")));
+  await ui.run("refresh()");
+  assert.equal(ui.get("task-list").children.length, 2);
+  await outcomes.find((node) => node.dataset.outcome === "merged").fire("keydown", { key: "Enter" });
+  assert.equal(ui.get("task-list").children.length, 1, "Changing the outcome must not fade the old sublist.");
+  assert.equal(ui.get("task-list").querySelector(".move"), null);
+  await outcomes.find((node) => node.dataset.outcome === "cancelled").fire("keydown", { key: " " });
+  assert.equal(ui.get("task-list").children.length, 1);
+  assert.match(ui.get("task-list").textContent, /cancelled task/);
+  await total.fire("click");
+  assert.equal(ui.run("location.hash"), "#resolved");
+  assert.equal(ui.get("task-list").children.length, 7);
+  await duplicate.fire("click");
+  await ui.get("close-detail").fire("click");
+  assert.equal(ui.get("detail").open, false, "Close must close the filtered list, not clear its filter.");
+  assert.equal(ui.run("location.hash"), "");
+});
+
+test("resolution counts and sublists update when a task is resolved and reopened", async (t) => {
+  const ui = await dashboard(t);
+  const completed = ui.get("flow").querySelectorAll(".outcome")
+    .find((node) => node.dataset.outcome === "completed");
+  assert.ok(completed, "Completed must be listed even when its count is zero.");
+  await completed.fire("click");
+  assert.equal(completed.querySelector(".outcome-count").textContent, "0");
+  assert.equal(ui.get("task-list").children.length, 0);
+  assert.equal(ui.get("detail-empty").hidden, false);
+  await ui.get("detail").fire("cancel");
+  assert.equal(ui.get("detail").open, false);
+  ui.run("choose('initial')");
+  await ui.get("task-list").querySelector(".move").fire("click");
+  let form = ui.get("move-body").querySelector("form");
+  form.querySelector("select").value = "resolved";
+  await form.querySelector("select").fire("change");
+  form.querySelector("textarea").value = "Work completed.";
+  await form.fire("submit");
+  assert.equal(completed.querySelector(".outcome-count").textContent, "1");
+  await completed.fire("click");
+  assert.equal(ui.get("task-list").children.length, 1);
+  await ui.get("task-list").querySelector(".move").fire("click");
+  form = ui.get("move-body").querySelector("form");
+  form.querySelector("textarea").value = "Reopen for more work.";
+  await form.fire("submit");
+  assert.equal(completed.querySelector(".outcome-count").textContent, "0");
+  assert.equal(ui.run("location.hash"), "#resolved/completed");
+  assert.equal(ui.get("task-list").children.length, 0);
+  assert.equal(ui.get("detail-empty").hidden, false);
 });
 
 test("Move opens a separate popup whose draft survives refresh and conflict", async (t) => {
