@@ -1084,7 +1084,8 @@ run, worker and its result), the user-links source, and the skipped list. A
 separate Self-improve section lists `improve` rules the same way; they are not
 counted in the node or its next due time.
 Click a state to open
-a modal task list, with links (opened in a new tab), time in state, blocker or
+a task list docked on the left of the flowchart, which shrinks or scrolls
+while it is open, with links (opened in a new tab), time in state, blocker or
 resolution, the full history, and expandable worker, head, cycle, merge, and
 syntax-highlighted evidence details. A task's **Move** button opens a second
 popup that saves an allowed return state or a direct move to `resolved`,
@@ -1092,8 +1093,9 @@ with a required operator comment. Cmd+Enter or Ctrl+Enter saves it.
 Resolving also requires a non-merge outcome.
 The task list stays on the state it showed. Departing rows fade out unless
 reduced motion is enabled. It shows acknowledgement status
-without claiming that a worker stopped or restarted. Close a popup with its
-button, Escape, or a click outside it. The move popup retains its draft and
+without claiming that a worker stopped or restarted. Close the task list with
+its button or Escape; it stays open while you click other states. Close a popup
+with its button, Escape, or a click outside it. The move popup retains its draft and
 original revision during refresh; on conflict, reload the task,
 review the destination, and save again. It rereads the file every 10
 seconds and keeps the last good snapshot when a read fails. It lists only
