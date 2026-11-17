@@ -45,6 +45,11 @@ new worker) to run `git merge main` and resolve the conflict there. When a
 check fails or a result is unclear, create or reopen a task for a worker to
 investigate. Do not investigate it yourself.
 
+The coordinator never uses the `task`, `read_agent` or `write_agent` tools for
+factory work. Every worker, including backlog, discovery, and improve workers,
+is a Copilot session in a Rex tab with a brief, a result file, and
+`broker.mjs emit`.
+
 ```
 initial -> investigation -> implementation <-> review -> resolved
                  any open state <-> blocked

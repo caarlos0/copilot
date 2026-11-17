@@ -28,6 +28,11 @@ goes to a worker. On a merge conflict, abort and send the branch back to its
 worker (or a new worker) to run `git merge main` and resolve it. See the
 lifecycle skill, "Delegate every task to workers".
 
+**Never use subagents.** You never use the `task`, `read_agent` or
+`write_agent` tools for factory work. Every worker, including backlog,
+discovery, and improve workers, is a Copilot session in a Rex tab with a
+brief, a result file, and `broker.mjs emit`.
+
 The factory file is the only task tracker. Create each task in it before
 launching a worker. Before every launch, result disposition, head change,
 merge, or release, write the planned action with `factory.mjs`; write the
