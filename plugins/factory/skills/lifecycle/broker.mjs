@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { watch } from "node:fs";
-import { open, readFile, realpath, stat } from "node:fs/promises";
+import { readFileSync, unlinkSync, watch } from "node:fs";
+import { link, open, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
@@ -22,7 +22,67 @@ const eventTypes = {
 const eventsFile = (file) =>
   join(dirname(file), `${basename(file, extname(file))}-events.jsonl`);
 
+const waiterFile = (file) =>
+  join(dirname(file), `${basename(file, extname(file))}-waiter.pid`);
+
 class UsageError extends Error {}
+
+function alive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === "EPERM";
+  }
+}
+
+// The PID of the armed waiter for this factory, or null when none runs. A PID file
+// whose process is gone is stale and counts as no waiter.
+export async function waiterPid(factory) {
+  let text;
+  try {
+    text = await readFile(waiterFile(factory), "utf8");
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+  const pid = Number.parseInt(text, 10);
+  return Number.isInteger(pid) && pid > 0 && alive(pid) ? pid : null;
+}
+
+// A hard link makes the claim atomic and never exposes a half-written PID file.
+async function claimWaiter(factory) {
+  const path = waiterFile(factory);
+  const temp = `${path}.${process.pid}.tmp`;
+  await writeFile(temp, `${process.pid}\n`, { mode: 0o600 });
+  try {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        await link(temp, path);
+        return;
+      } catch (error) {
+        if (error.code !== "EEXIST") throw error;
+      }
+      const pid = await waiterPid(factory);
+      if (pid !== null) {
+        throw new Error(`A waiter (pid ${pid}) is already armed for this factory. Keep exactly one waiter; wait for it to exit or stop it first.`);
+      }
+      await rm(path, { force: true });
+    }
+    throw new Error("Another waiter claimed this factory at the same moment. Keep exactly one waiter.");
+  } finally {
+    await rm(temp, { force: true });
+  }
+}
+
+function releaseWaiter(factory) {
+  const path = waiterFile(factory);
+  try {
+    if (readFileSync(path, "utf8").trim() === String(process.pid)) unlinkSync(path);
+  } catch {
+    // Nothing to release.
+  }
+}
 
 function validateEvent({ type, task, source, data }) {
   const schema = eventTypes[type];
@@ -99,6 +159,19 @@ async function readEvents(file, offset) {
 }
 
 async function waitForEvents(factory, { since, timeout, exclude = [], due = false }) {
+  await claimWaiter(factory);
+  const release = () => releaseWaiter(factory);
+  process.on("exit", release);
+  for (const [signal, code] of [["SIGINT", 130], ["SIGTERM", 143]]) process.once(signal, () => process.exit(code));
+  try {
+    return await armedWait(factory, { since, timeout, exclude, due });
+  } finally {
+    release();
+    process.off("exit", release);
+  }
+}
+
+async function armedWait(factory, { since, timeout, exclude, due }) {
   const file = eventsFile(factory);
   let cursor = since ?? await size(file);
   const state = async () => JSON.parse(await readFile(factory, "utf8"));
@@ -190,6 +263,7 @@ Usage: node broker.mjs wait FACTORY_FILE [--since CURSOR] [--timeout SECONDS]
                        [--exclude-source SOURCE ...] [--due]
        node broker.mjs emit FACTORY_FILE TYPE [--task ID] [--source SOURCE] [--data JSON]
        node broker.mjs cursor FACTORY_FILE
+       node broker.mjs armed FACTORY_FILE
 
 The log is <owner.repo>-factory-events.jsonl beside FACTORY_FILE (mode 0600). A cursor is a
 byte offset in it. Events are notifications; the factory JSON stays the source of truth.
@@ -209,6 +283,11 @@ emit    Appends one event and prints it. Types: ${Object.keys(eventTypes).join("
         worker.result outcome: ${workerOutcomes.join(", ")}. --source defaults to worker.
         factory.mjs emits task.moved, task.updated, and feedback.pending after every write.
 cursor  Prints {"cursor":"N"} for the current end of the log.
+armed   Read-only. Prints {"armed":true,"pid":N} and exits 0 when a waiter for this factory is
+        alive, or {"armed":false} and exits 1 when none is. wait records its PID in
+        <owner.repo>-factory-waiter.pid and removes it on exit; a PID file whose process is
+        gone is stale. A second wait for the same factory refuses with exit 1 unless the first
+        is stale, so there is exactly one waiter. A turn must never end while armed exits 1.
 
 Progress and errors go to stderr. Exit: 0 success, 1 operational failure, 2 invalid usage.`;
 
@@ -236,7 +315,7 @@ async function main() {
       return;
     }
     [command, factory, ...args] = positionals;
-    if (!["wait", "emit", "cursor"].includes(command)) throw new Error(`Unknown command ${command}.`);
+    if (!["wait", "emit", "cursor", "armed"].includes(command)) throw new Error(`Unknown command ${command}.`);
     if (!factory) throw new Error("A factory FILE is required.");
     if (command === "emit") {
       if (args.length !== 1) throw new Error("emit needs exactly one TYPE.");
@@ -248,7 +327,7 @@ async function main() {
       };
     } else {
       if (args.length) throw new Error(`Unexpected argument: ${args[0]}.`);
-      if (command === "cursor") args = {};
+      if (command === "cursor" || command === "armed") args = {};
       else {
         if (values.since !== undefined && !/^\d+$/.test(values.since)) throw new Error("--since must be a cursor printed by wait or cursor.");
         const timeout = values.timeout === undefined ? undefined : Number(values.timeout);
@@ -272,6 +351,10 @@ async function main() {
       console.log(JSON.stringify(await emit(factory, args)));
     } else if (command === "cursor") {
       console.log(JSON.stringify({ cursor: String(await size(eventsFile(factory))) }));
+    } else if (command === "armed") {
+      const pid = await waiterPid(factory);
+      console.log(JSON.stringify(pid === null ? { armed: false } : { armed: true, pid }));
+      if (pid === null) process.exitCode = 1;
     } else {
       console.log(JSON.stringify(await waitForEvents(factory, args)));
     }

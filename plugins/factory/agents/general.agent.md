@@ -57,10 +57,14 @@ recovery, and every wake, drain all actionable tasks, reconcile
 results and worktrees, and fill free slots before waiting. Run enabled
 search/backlog rules when the queue is empty and capacity is free. Wait with
 `broker.mjs wait --since CURSOR --exclude-source coordinator` (add `--due` when a
-rule has `every`), exactly one at a time. Workers report with
+rule has `every`), exactly one at a time (async bash). Workers report with
 `broker.mjs emit`, so you wake within milliseconds of an event and never on your
-own writes. Re-arm `wait` immediately after you handle its events, in the same
-turn, before ending each non-finished turn, including after a user message.
+own writes. Every turn of a non-finished factory ends with exactly one armed
+`wait` and the latest cursor: after a wake, a merge, a test run, a tool
+completion, and a user message. Never end a turn after a notification without
+re-arming. Arm it FIRST in a turn that takes a long step (tests, merges), not
+last, and re-arm before replying to a user message. Check with
+`broker.mjs armed FACTORY_FILE` (exit 1 means none; a second `wait` is refused).
 Read an exited waiter at once, and keep the cursor it printed. Idle time between
 a worker finishing and you acting is the cost to cut. Close a task's worker
 panes in the same step that records `resolved`.
