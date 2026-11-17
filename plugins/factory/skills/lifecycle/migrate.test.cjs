@@ -192,3 +192,19 @@ test("fails on a missing project argument and on a project without legacy handof
   assert.equal(none.status, 1);
   assert.match(none.stderr, /No implementer or coordinator handoff/);
 });
+
+test("reads each handoff from the new directory, else the legacy one, and writes to the new one", async (t) => {
+  const home = await mkdtemp(join(tmpdir(), "factory-migrate-home-"));
+  t.after(() => rm(home, { recursive: true, force: true }));
+  const legacy = join(home, ".local/state/copilot-coordinator");
+  const current = join(home, ".local/state/copilot-factory");
+  await mkdir(legacy, { recursive: true });
+  await mkdir(current, { recursive: true });
+  await writeFile(join(legacy, "owner.repo-implementer.json"), JSON.stringify(handoff("implementer", [old("old-1", "pending")])));
+  await writeFile(join(current, "owner.repo-coordinator.json"), JSON.stringify(handoff("coordinator", [old("new-1", "pending")])));
+  const result = spawnSync(process.execPath, [script, "--project", "owner/repo"], { encoding: "utf8", env: { ...process.env, HOME: home } });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).tasks, 2);
+  assert.deepEqual(await readdir(legacy), ["owner.repo-implementer.json"]);
+  assert.ok((await readdir(current)).includes("owner.repo-factory.json"));
+});

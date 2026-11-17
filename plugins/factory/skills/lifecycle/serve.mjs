@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { countByState, isObject, validate } from "./factory-data.mjs";
 import { ConflictError, update } from "./factory.mjs";
-import { stateDirectory } from "./state-dir.mjs";
+import { stateDirectories } from "./state-dir.mjs";
 
 const factoryFile = /-factory\.json$/i;
 const maxBody = 16384;
@@ -41,32 +41,47 @@ async function main() {
 Usage: node serve.mjs [--directory PATH] [--port PORT]
        bun serve.mjs [--directory PATH] [--port PORT]
 
-  --directory PATH  State directory (default: ~/.local/state/copilot-factory, or the
-                    legacy ~/.local/state/copilot-coordinator when only that exists)
+  --directory PATH  Only this state directory (default: both ~/.local/state/copilot-factory
+                    and the legacy ~/.local/state/copilot-coordinator, whichever exist;
+                    the new one wins on a name clash)
   --port PORT       Listening port (default: 8766; 0 chooses an available port)
   -h, --help        Show help
 
-Open the printed HTTP URL. It lists every <owner.repo>-factory.json in the directory.
+Open the printed HTTP URL. It lists every <owner.repo>-factory.json in the directories.
 Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup failures exit 1.`);
     return;
   }
 
-  const configuredDirectory = resolve(options.directory ?? stateDirectory());
-  const directory = await realpath(configuredDirectory);
-  await readdir(directory);
+  // An explicit --directory means only that directory. Otherwise a file may live
+  // in either state directory, and the first one that has it (the new one) wins.
+  const directories = [];
+  for (const configured of options.directory ? [resolve(options.directory)] : stateDirectories()) {
+    const directory = await realpath(configured);
+    await readdir(directory);
+    directories.push({ configured, directory });
+  }
   const assets = dirname(fileURLToPath(import.meta.url));
 
   async function localFile(value) {
     if (!value || value.includes("\0")) throw new HttpError(400, "A filename is required.");
-    const candidate = resolve(directory, value);
-    if (dirname(candidate) !== directory && dirname(candidate) !== configuredDirectory) {
-      throw new HttpError(403, "File must be directly inside the configured state directory.");
+    for (const { configured, directory } of directories) {
+      const candidate = resolve(configured, value);
+      if (dirname(candidate) !== directory && dirname(candidate) !== configured) {
+        throw new HttpError(403, "File must be directly inside the configured state directory.");
+      }
+      let target;
+      try {
+        target = await realpath(candidate);
+      } catch (error) {
+        if (error.code === "ENOENT") continue;
+        throw error;
+      }
+      if (dirname(target) !== directory || !(await stat(target)).isFile()) {
+        throw new HttpError(403, "File must be a regular file inside the state directory.");
+      }
+      return target;
     }
-    const target = await realpath(candidate);
-    if (dirname(target) !== directory || !(await stat(target)).isFile()) {
-      throw new HttpError(403, "File must be a regular file inside the state directory.");
-    }
-    return target;
+    throw new HttpError(404, `${value} is not in the state directory.`);
   }
 
   async function loadFactory(file) {
@@ -85,10 +100,15 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
   async function listFactories() {
     const factories = [];
     const errors = [];
-    for (const entry of await readdir(directory, { withFileTypes: true })) {
-      const file = entry.name;
-      if ((!entry.isFile() && !entry.isSymbolicLink()) || !factoryFile.test(file) ||
-          file.startsWith(".")) continue;
+    const names = new Set();
+    for (const { directory } of directories) {
+      for (const entry of await readdir(directory, { withFileTypes: true })) {
+        if ((!entry.isFile() && !entry.isSymbolicLink()) || !factoryFile.test(entry.name) ||
+            entry.name.startsWith(".")) continue;
+        names.add(entry.name);
+      }
+    }
+    for (const file of names) {
       try {
         const data = await loadFactory(file);
         factories.push({
@@ -108,7 +128,7 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
     factories.sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at) ||
       a.file.localeCompare(b.file));
     errors.sort((a, b) => a.file.localeCompare(b.file));
-    return { directory, factories, errors };
+    return { directories: directories.map(({ directory }) => directory), factories, errors };
   }
 
   function send(response, status, body, type = "application/json; charset=utf-8") {

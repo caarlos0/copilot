@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import { access, link, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { basename, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { countByState, defaultLimits, format, githubResourceURL, githubURL, prURL, validate } from "./factory-data.mjs";
-import { stateDirectory } from "./state-dir.mjs";
+import { stateFile } from "./state-dir.mjs";
 
 const sources = ["implementer", "coordinator"];
 
@@ -246,8 +246,8 @@ Usage: node migrate.mjs --project owner/repo [--directory PATH] [--dry-run] [--a
        bun migrate.mjs --project owner/repo [options]
 
 Reads <owner.repo>-implementer.json and <owner.repo>-coordinator.json and writes
-<owner.repo>-factory.json in the state directory (default ~/.local/state/copilot-factory, or the
-legacy ~/.local/state/copilot-coordinator when only that exists).
+<owner.repo>-factory.json in ~/.local/state/copilot-factory. Each handoff is read from there, else from
+the legacy ~/.local/state/copilot-coordinator. --directory PATH uses only that directory.
 A <owner.repo>-reviewer.json is read only to attach reviews to migrated tasks with the same
 PR; its other tasks (other authors' PRs) are not imported and stay with coordination:review.
 
@@ -275,22 +275,25 @@ It refuses to overwrite an existing factory.json, and stops when a legacy owner 
 
   const project = options.project;
   const key = project.replace("/", ".");
-  const directory = resolve(options.directory ?? stateDirectory());
-  const target = join(directory, `${key}-factory.json`);
+  // Each file comes from the new directory, else the legacy one. The factory file
+  // is created in the new directory. An explicit --directory means only that one.
+  const locate = options.directory ? (name) => join(resolve(options.directory), name) : stateFile;
+  const target = locate(`${key}-factory.json`);
+  const directory = dirname(target);
   const warnings = [];
 
   const loaded = [];
   for (const role of sources) {
-    const file = join(directory, `${key}-${role}.json`);
+    const file = locate(`${key}-${role}.json`);
     if (await exists(file)) loaded.push({ role, source: await readSource(file) });
   }
-  if (!loaded.length) throw new Error(`No ${sources.join(" or ")} handoff found for ${project} in ${directory}.`);
-  const reviewerFile = join(directory, `${key}-reviewer.json`);
+  if (!loaded.length) throw new Error(`No ${sources.join(" or ")} handoff found for ${project}.`);
+  const reviewerFile = locate(`${key}-reviewer.json`);
   const reviewers = (await exists(reviewerFile)) ? [await readSource(reviewerFile)] : [];
 
   const locks = [];
   for (const { role } of loaded) {
-    if (await exists(join(directory, `${key}-${role}.lock`))) locks.push(`${key}-${role}.lock`);
+    if (await exists(locate(`${key}-${role}.lock`))) locks.push(`${key}-${role}.lock`);
   }
   if (locks.length && !options["ignore-locks"] && !options["dry-run"]) {
     throw new Error(`Legacy owner lock exists: ${locks.join(", ")}. Stop the legacy coordinator and release its lock first.`);
@@ -324,6 +327,7 @@ It refuses to overwrite an existing factory.json, and stops when a legacy owner 
     for (const [, destination] of moves) {
       if (await exists(destination)) throw new Error(`${destination} already exists; archive by hand.`);
     }
+    await mkdir(directory, { recursive: true });
     const temporary = `${target}.${randomUUID()}.tmp`;
     await writeFile(temporary, `${JSON.stringify(data, null, 2)}\n`, { mode: 0o600, flag: "wx" });
     try {
