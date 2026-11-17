@@ -213,9 +213,10 @@ leave work behind. Treat each finding as unfinished work:
 
 - `unprocessed-result`: a `complete` result is newer than its task. Mirror and
   verify it now, then advance the task.
-- `branch-ahead`: an open task's branch has commits not in the default branch.
-  Expected while an implementation or review worker still runs; otherwise
-  verify and land or block it.
+- `branch-ahead`: an open issue-less task's branch (it lands by local merge)
+  has commits not in the default branch. Tasks with an issue or PR land on
+  GitHub and are never flagged. Expected while an implementation or review
+  worker still runs; otherwise verify and land or block it.
 - `open-window`: a resolved task still has an open Rex window. Release it as in
   "Release panes".
 

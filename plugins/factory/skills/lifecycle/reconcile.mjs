@@ -54,7 +54,8 @@ async function reconcile(file, defaultBranch = "main") {
       }
     }
 
-    if (!task.worktree?.path) continue;
+    // Tasks with an issue or PR land on GitHub; only local-merge tasks can be left behind.
+    if (!task.worktree?.path || task.issue || task.pr) continue;
     try {
       const ahead = Number(git(task.worktree.path, "rev-list", "--count", `${defaultBranch}..HEAD`));
       if (ahead > 0) {
