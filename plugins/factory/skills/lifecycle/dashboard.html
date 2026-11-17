@@ -125,6 +125,7 @@
 
       dialog { width: min(960px, calc(100% - 32px)); max-height: 85vh; padding: 0;
         color: var(--fg); background: var(--bg); border: 1px solid var(--border); border-radius: 12px; }
+      dialog:focus { outline: none; }
       dialog::backdrop { background: rgb(0 0 0 / .5); }
       #move-dialog { width: min(560px, calc(100% - 32px)); }
       body:has(dialog[open]) { overflow: hidden; }
@@ -198,11 +199,11 @@
     </header>
     <main>
       <svg id="flow" viewBox="0 0 1160 560" role="group" aria-label="Factory flow: tasks per state"></svg>
-      <dialog id="detail" aria-labelledby="detail-title">
+      <dialog id="detail" aria-labelledby="detail-title" tabindex="-1">
         <div class="detail-head">
           <h2 id="detail-title"></h2>
-          <button id="close-detail" class="close-button action-danger" type="button"
-            aria-label="Close task list" title="Close task list" autofocus>&times;</button>
+          <button id="close-detail" class="close-button action-danger" type="button" tabindex="-1"
+            aria-label="Close task list" title="Close task list">&times;</button>
         </div>
         <p id="detail-status" role="status"></p>
         <ul id="task-list"></ul>
@@ -211,7 +212,7 @@
       <dialog id="move-dialog" aria-labelledby="move-title">
         <div class="detail-head">
           <h2 id="move-title"></h2>
-          <button id="close-move" class="close-button action-danger" type="button"
+          <button id="close-move" class="close-button action-danger" type="button" tabindex="-1"
             aria-label="Cancel move" title="Cancel move">&times;</button>
         </div>
         <div id="move-body"></div>
@@ -634,7 +635,7 @@
               load(data, file);
               document.getElementById("detail-status").textContent =
                 `Moved "${task.title}" to ${places[destination].title}. Comment saved; awaiting factory acknowledgement.`;
-              document.getElementById("close-detail").focus();
+              dialog.focus();
             }
           } catch (cause) {
             failed(new Error(`Move was not confirmed: ${cause.message} Reload the task before trying again.`));
@@ -761,7 +762,10 @@
         document.getElementById("detail-empty").hidden = tasks.length > 0;
         if (dialog.dataset.state !== state) document.getElementById("detail-status").textContent = "";
         dialog.dataset.state = state;
-        if (!dialog.open) dialog.showModal();
+        if (!dialog.open) {
+          dialog.showModal();
+          dialog.focus();
+        }
       }
 
       async function requestJSON(path, options = {}) {

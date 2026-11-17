@@ -355,6 +355,7 @@ test("state selection opens a modal list that can close and reopen", async (t) =
   ui.run("choose('blocked')");
   assert.equal(ui.get("detail").tag, "dialog");
   assert.equal(ui.get("detail").open, true);
+  assert.equal(ui.document.activeElement, ui.get("detail"), "Opening the list must not focus the close button.");
   assert.equal(ui.get("task-list").tag, "ul");
   assert.equal(ui.get("task-list").children.length, 1);
   assert.match(ui.get("task-list").textContent, /Docs build fails on a clean checkout/);
@@ -445,7 +446,7 @@ test("Move opens a separate popup whose draft survives refresh and conflict", as
   assert.equal(ui.get("detail").open, true);
   assert.equal(ui.get("detail").dataset.state, "blocked", "The list must stay on the state it showed.");
   assert.equal(ui.get("task-list").children.length, 0);
-  assert.equal(ui.document.activeElement, ui.get("close-detail"), "After saving, focus must stay in the task popup.");
+  assert.equal(ui.document.activeElement, ui.get("detail"), "After saving, focus must stay in the task popup.");
   assert.match(ui.get("detail-status").textContent, /to Initial\. Comment saved; awaiting factory acknowledgement/);
 });
 
