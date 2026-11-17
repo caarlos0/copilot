@@ -198,10 +198,12 @@ Before launching any worker, create its task in the factory file if it does
 not exist. Then write the planned role with `unknown` status, worktree, and
 exact result filename with `factory.mjs`; set `next_action` to the launch.
 If either write fails or is refused, stop; resolve the conflict and reread the
-file before any launch. After Rex returns the pane and window IDs, write those
-IDs, the worker session, and `running` status to the file before sending the
-worker its brief. If that write fails, do not send the brief; stop the idle
-worker and reconcile the pane record.
+file before any launch. The worker starts at launch with its brief in the
+command (see "Launch rules"), so the planned role with `unknown` status must
+already be in the file. Right after Rex returns the pane and window IDs, write
+those IDs, the worker session, and `running` status. A short gap between launch
+and this write cannot be avoided. If the write fails, stop the worker and
+reconcile the pane record.
 
 For every result, branch-head change, merge attempt, and worker or worktree
 release, write the intended action to the task's `next_action` or `details`
@@ -653,7 +655,7 @@ the result, close its pane.
 Continuous. Use a new worktree for every task:
 
 ```sh
-wt fix-login -- copilot --agent coding:caarlos0 --name 'Fix login redirect' --yolo --sandbox
+wt fix-login -- copilot --agent coding:caarlos0 --name 'Fix login redirect' --yolo --sandbox -i 'Read /abs/brief.md and do it.'
 ```
 
 Run `wt` inside the new tab, without `--tab` or `--split`, and without
@@ -737,17 +739,22 @@ launch loses these instructions, record a blocker. Never start an unconstrained
 worker. Do not edit the product worktree or a shared instructions directory.
 
 Open the tab in the factory's session with the task title as its label. Verify
-the visible label. Wait for the input prompt, then send
-`Read <absolute brief path> and do it.` as literal text and press Enter
-separately. Pass `--name` as one quoted argument, up to 100 characters. Prefer
+the visible label. Pass the first message in the launch command with
+`-i`/`--interactive`: `copilot ... -i 'Read <absolute brief path> and do it.'`.
+It starts the interactive session and runs the prompt at once. Use no fixed
+sleep, no wait for the input prompt, and no `rex send` for the first message.
+Use `rex send` only for follow-ups to an idle worker you created. Run the launch
+command in the foreground of the new tab; a backgrounded launch once lost the
+brief. Pass `--name` as one quoted argument, up to 100 characters. Prefer
 the issue title for investigation and implementation and the PR title for
 review. Never type into a pane you did not create or whose recorded identity no
 longer matches. Pane IDs can be reused: verify identity first. If a launch
 fails, inspect new panes once before you retry.
 
 Record the Copilot session ID, pane, window, name, brief, result, and worktree
-with `--workers` and `--worktree`. This write must happen before sending the
-brief or otherwise allowing the worker to act.
+with `--workers` and `--worktree` right after launch. The worker already runs,
+so the file must hold the planned role with `unknown` status before launch;
+the IDs follow immediately, in the same turn.
 
 ## Receive worker events
 

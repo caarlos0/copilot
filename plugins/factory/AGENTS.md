@@ -31,6 +31,13 @@ workers. Implementation worktrees come from the local default branch: launch
 plain `wt NAME` in the main checkout, never `wt NAME --main`, which uses
 `origin/<default>` and loses unpushed local commits.
 
+Workers start with their brief in the launch command
+(`copilot ... -i 'Read <brief> and do it.'`), so there is no fixed sleep and no
+`rex send` for the first message; `rex send` is only for follow-ups to idle
+workers. The planned role with `unknown` status is in the factory file before
+launch, and the pane and window IDs are written right after it. The short gap
+between them cannot be removed.
+
 Every brief sets a write boundary. The worker's assigned worktree is the only
 writable root; the result path and `$TMPDIR` are the only other writable
 paths. Workers never create a worktree, switch or check out a branch in
