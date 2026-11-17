@@ -16,7 +16,7 @@ const commandPatterns = {
 const statusRead = /\bgh\s+(?:pr\s+(?:view|checks)|run\s+(?:view|list))\b/;
 
 // Counts only: no message, command, or file content leaves this function.
-export function measure(lines) {
+function measure(lines) {
   const tools = {};
   const calls = new Map();
   const commands = { sleep: 0, gh_wait: 0, watch: 0, status_reads: 0 };

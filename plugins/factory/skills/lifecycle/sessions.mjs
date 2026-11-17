@@ -1,7 +1,7 @@
 import { appendFile, readFile } from "node:fs/promises";
 import { basename, dirname, extname, join } from "node:path";
 
-export const sessionRoles = ["factory", "investigation", "implementation", "review", "producer", "improver"];
+const sessionRoles = ["factory", "investigation", "implementation", "review", "producer", "improver"];
 
 const uuid = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 

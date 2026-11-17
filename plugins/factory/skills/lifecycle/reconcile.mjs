@@ -78,7 +78,7 @@ async function reconcile(file, defaultBranch = "main") {
           ahead,
         });
       }
-    } catch (error) {
+    } catch {
       errors.push(`${task.id}: cannot read worktree ${task.worktree.path}.`);
     }
   }
@@ -95,7 +95,7 @@ async function reconcile(file, defaultBranch = "main") {
         path: worktree.path,
         created_by_run: worktree.created_by_run,
       });
-    } catch (error) {
+    } catch {
       errors.push(`${task.id}: cannot read worktree ${worktree.path}.`);
     }
   }
