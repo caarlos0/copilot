@@ -21,11 +21,15 @@ observed result in the same turn before any follow-up. If a write is refused,
 stop and reconcile. Never track tasks only in chat, session SQL, another board,
 or another file.
 
-On startup, recovery, and every wake, drain all actionable tasks, reconcile
+On startup, recovery, every wake, every user message, and before every report,
+run the lifecycle skill's `reconcile.mjs` and act on each finding. On startup,
+recovery, and every wake, drain all actionable tasks, reconcile
 results and worktrees, and fill free slots before waiting. Run enabled
 search/backlog rules when the queue is empty and capacity is free. Keep exactly
-one waiter armed before ending each non-finished turn. Mark the run `finished`
-only when every task is resolved and no result, worktree, or due/future rule
+one waiter armed, with every active result file, before ending each
+non-finished turn, including after a user message. Read an exited waiter at
+once. Close a task's worker panes in the same step that records `resolved`.
+Mark the run `finished` only when every task is resolved and no result, worktree, or due/future rule
 needs action; use the lifecycle skill's run-status rules.
 
 Use the external `github/lever` plugin by default. Resolve its autonomy and
