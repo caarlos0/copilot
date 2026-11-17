@@ -1,7 +1,8 @@
 const assert = require("node:assert/strict");
 const { readFileSync } = require("node:fs");
-const { mkdtemp, rm, symlink, writeFile } = require("node:fs/promises");
-const { spawn } = require("node:child_process");
+const { mkdtemp, readFile, readdir, rm, symlink, writeFile } = require("node:fs/promises");
+const { spawn, spawnSync } = require("node:child_process");
+const { createHash } = require("node:crypto");
 const http = require("node:http");
 const { join } = require("node:path");
 const { tmpdir } = require("node:os");
@@ -45,6 +46,12 @@ async function server(t) {
 }
 
 const get = async (base, path, init) => fetch(new URL(path, base), init);
+const move = (url, body, file = factoryFile, headers = {}) => get(url, `/api/move?file=${encodeURIComponent(file)}`, {
+  method: "POST",
+  headers: { Origin: new URL(url).origin, "Content-Type": "application/json", ...headers },
+  body: JSON.stringify(body),
+});
+const unblocked = { task: "issue-5", state: "initial", comment: "This is now unblocked.", revision: 0 };
 
 test("serves the dashboard and the shared data module without caching", async (t) => {
   const { url } = await server(t);
@@ -101,6 +108,148 @@ test("serves only artifacts that the selected factory references, inside the sta
   assert.doesNotMatch(await escaped.text(), /secret/);
 });
 
+test("moving back persists the comment, keeps worker context, and rejects a stale browser", async (t) => {
+  const { url, directory } = await server(t);
+  const response = await move(url, unblocked);
+  assert.equal(response.status, 200, await response.clone().text());
+  const data = await response.json();
+  const task = data.tasks.find((item) => item.id === unblocked.task);
+  assert.equal(task.state, "initial");
+  assert.equal(task.blocker, null);
+  assert.equal(task.revision, 1);
+  assert.deepEqual(task.history.at(-1), {
+    state: "initial", at: task.updated_at, note: unblocked.comment,
+    source: "dashboard", feedback_id: task.feedback.id,
+  });
+  assert.equal(task.feedback.acknowledged_id, null);
+  assert.deepEqual(JSON.parse(await readFile(join(directory, factoryFile), "utf8")), data);
+  assert.deepEqual(await (await get(url, `/api/factory?file=${factoryFile}`)).json(), data);
+  const stale = await move(url, unblocked);
+  assert.equal(stale.status, 409);
+  assert.match((await stale.json()).error, /changed since it was read/);
+  const review = example.tasks.find((item) => item.state === "review");
+  const returned = await move(url, { ...unblocked, task: review.id, state: "investigation" });
+  assert.equal(returned.status, 200, await returned.clone().text());
+  const updated = (await returned.json()).tasks.find((item) => item.id === review.id);
+  assert.deepEqual(updated.workers, review.workers);
+  assert.deepEqual(updated.worktree, review.worktree);
+  assert.equal(updated.pr, review.pr);
+  assert.equal(updated.merge, null);
+  assert.deepEqual((await readdir(directory)).sort(),
+    [factoryFile, "owner.repo-issue-9-implementation-brief.md", "owner.repo-issue-9-investigation-brief.md", "unrelated-notes.md"].sort());
+});
+
+test("the dashboard can resolve a task directly from every open state", async (t) => {
+  const { update } = await import("./factory.mjs");
+  for (const [state, outcome] of [
+    ["initial", "completed"], ["investigation", "already-fixed"], ["implementation", "duplicate"],
+    ["review", "invalid"], ["blocked", "cancelled"],
+  ]) {
+    await t.test(state, async (t) => {
+      const { url, directory } = await server(t);
+      const file = join(directory, factoryFile);
+      let before = example.tasks.find((task) => task.state === (state === "investigation" ? "initial" : state));
+      if (state === "investigation") {
+        const data = await update(file, { task: before.id, state });
+        before = data.tasks.find((task) => task.id === before.id);
+      }
+      const comment = `Resolve as ${outcome}; no further work is needed.`;
+      const response = await move(url, {
+        task: before.id, state: "resolved", resolution: outcome, comment, revision: before.revision ?? 0,
+      });
+      assert.equal(response.status, 200, await response.clone().text());
+      const data = await response.json();
+      const task = data.tasks.find((item) => item.id === before.id);
+      assert.equal(task.state, "resolved");
+      assert.equal(task.blocker, null);
+      assert.deepEqual(task.resolution, { outcome, note: comment, at: task.updated_at });
+      assert.equal(task.history.at(-1).note, comment);
+      assert.equal(task.feedback.acknowledged_id, null);
+      assert.deepEqual(task.workers, before.workers);
+      assert.equal(task.pr, before.pr);
+      assert.deepEqual(JSON.parse(await readFile(file, "utf8")), data);
+    });
+  }
+});
+
+test("CLI and dashboard share the write lock; overlapping moves cannot overwrite each other", async (t) => {
+  const { url, directory } = await server(t);
+  const file = join(directory, factoryFile);
+  const original = await readFile(file, "utf8");
+  await writeFile(`${file}.write.lock`, "", { flag: "wx" });
+  const locked = await move(url, unblocked);
+  assert.equal(locked.status, 409);
+  const cli = spawnSync(process.execPath, [join(__dirname, "factory.mjs"), file,
+    "--task", unblocked.task, "--state", "initial"], { encoding: "utf8" });
+  assert.equal(cli.status, 1, cli.stderr);
+  assert.match(cli.stderr, /write is locked/);
+  assert.equal(await readFile(file, "utf8"), original);
+  await rm(`${file}.write.lock`);
+  const results = await Promise.all([move(url, unblocked), move(url, { ...unblocked, comment: "A competing direction" })]);
+  assert.deepEqual(results.map((result) => result.status).sort(), [200, 409]);
+  const data = JSON.parse(await readFile(file, "utf8"));
+  const task = data.tasks.find((item) => item.id === unblocked.task);
+  assert.equal(task.history.filter((item) => item.source === "dashboard").length, 1);
+  assert.equal(task.revision, 1);
+});
+
+test("move endpoint rejects foreign pages, invalid moves and unconfined files without writes", async (t) => {
+  const { url, directory } = await server(t);
+  const file = join(directory, factoryFile);
+  const original = await readFile(file, "utf8");
+  const cases = [
+    { headers: { Origin: "https://evil.example" }, status: 403 },
+    { headers: { Origin: "null" }, status: 403 },
+    { headers: { "Sec-Fetch-Site": "cross-site" }, status: 403 },
+    { headers: { "Content-Type": "text/plain" }, status: 415 },
+    { body: { ...unblocked, comment: "x".repeat(20000) }, status: 413 },
+    { body: { ...unblocked, comment: " " }, status: 400 },
+    { body: { ...unblocked, revision: -1 }, status: 400 },
+    { body: { ...unblocked, workers: {} }, status: 400 },
+    { body: { ...unblocked, task: "missing" }, status: 404 },
+    { body: { ...unblocked, state: "review" }, status: 400 },
+    { body: { ...unblocked, state: "resolved" }, status: 400 },
+    { body: { ...unblocked, state: "resolved", resolution: "unknown" }, status: 400 },
+    { body: { ...unblocked, state: "resolved", resolution: "merged" }, status: 400 },
+    { body: { ...unblocked, resolution: "completed" }, status: 400 },
+    { body: { ...unblocked, task: "issue-3" }, status: 400 },
+    { file: "../owner.repo-factory.json", status: 400 },
+    { file: "unrelated-notes.md", status: 400 },
+  ];
+  for (const item of cases) {
+    const response = await move(url, item.body ?? unblocked, item.file, item.headers);
+    assert.equal(response.status, item.status, JSON.stringify({ item, body: await response.text() }));
+    assert.equal(await readFile(file, "utf8"), original);
+  }
+});
+
+test("a dashboard edit wakes the factory waiter even with no worker results", { timeout: 10000 }, async (t) => {
+  const { url, directory } = await server(t);
+  const file = join(directory, factoryFile);
+  const cursor = join(directory, "cursor.json");
+  const content = await readFile(file);
+  await writeFile(cursor, JSON.stringify({ [file]: createHash("sha256").update(content).digest("hex") }));
+  const child = spawn(process.execPath, [join(__dirname, "wait.mjs"), "--cursor", cursor, file],
+    { stdio: ["ignore", "pipe", "pipe"] });
+  let stdout = "";
+  let stderr = "";
+  const closed = new Promise((resolve) => child.once("close", resolve));
+  t.after(async () => { child.kill(); await closed; });
+  await new Promise((resolve, reject) => {
+    child.stdout.on("data", (chunk) => { stdout += chunk; });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+      if (stderr.includes("Watching result files.")) resolve();
+    });
+    child.once("error", reject);
+    child.once("close", (code) => reject(new Error(`Waiter exited ${code}: ${stderr}`)));
+  });
+  const response = await move(url, unblocked);
+  assert.equal(response.status, 200, await response.clone().text());
+  assert.equal(await closed, 0, stderr);
+  assert.deepEqual(JSON.parse(stdout), { changed: [file] });
+});
+
 test("accepts only GET on loopback host names", async (t) => {
   const { url } = await server(t);
   assert.equal((await get(url, "/", { method: "POST" })).status, 405);
@@ -122,4 +271,167 @@ test("the page script parses, never renders data as HTML, and finds its elements
   for (const [, id] of script.matchAll(/getElementById\("([^"]+)"\)/g)) {
     assert.ok(ids.has(id), `Missing element #${id}`);
   }
+});
+
+// Model only the DOM operations used by the task list; HTTP and the page script are real.
+async function dashboard(t) {
+  const { url, directory } = await server(t);
+  const elements = new Map();
+  const document = {
+    getElementById: (id) => elements.get(id),
+    createElement: (tag) => new Element(tag),
+  };
+  class Element {
+    constructor(tag) {
+      this.tag = tag;
+      this.children = [];
+      this.dataset = {};
+      this.style = { setProperty() {} };
+      this.listeners = new Map();
+      this.value = "";
+      this.open = false;
+      this.hidden = false;
+      this.className = "";
+    }
+    append(...children) { this.children.push(...children); }
+    replaceChildren(...children) {
+      this.children = children;
+      if (this.tag === "select") this.value = children[0]?.value ?? "";
+    }
+    get textContent() { return this.children.map((child) => typeof child === "string" ? child : child.textContent).join(""); }
+    set textContent(value) { this.children = [String(value)]; }
+    get options() { return this.children.filter((child) => child.tag === "option"); }
+    setAttribute(name, value) { this[name] = value; }
+    addEventListener(name, callback) { this.listeners.set(name, callback); }
+    async fire(name) { await this.listeners.get(name)?.({ preventDefault() {} }); }
+    focus() { document.activeElement = this; }
+    showModal() { this.open = true; }
+    close() { this.open = false; }
+    querySelector(selector) { return this.querySelectorAll(selector)[0] ?? null; }
+    querySelectorAll(selector) {
+      const match = /^([a-z]+|\.[\w-]+)(\[open\])?$/.exec(selector);
+      assert.ok(match, `Unsupported test selector: ${selector}`);
+      const [, name, open] = match;
+      return this.children.flatMap((child) => {
+        if (!(child instanceof Element)) return [];
+        const matches = name.startsWith(".") ? child.className.split(" ").includes(name.slice(1)) : child.tag === name;
+        return [
+          ...(matches && (!open || child.open) ? [child] : []),
+          ...child.querySelectorAll(selector),
+        ];
+      });
+    }
+  }
+  for (const [, tag, id] of html.matchAll(/<(\w+)[^>]*\bid="([^"]+)"/g)) elements.set(id, new Element(tag));
+  elements.get("detail").append(...["detail-title", "close-detail", "detail-status", "task-list", "detail-empty"]
+    .map((id) => elements.get(id)));
+  const location = new URL(`?file=${factoryFile}`, url);
+  const context = vm.createContext({
+    ...await import("./factory-data.mjs"),
+    document, location, URL, URLSearchParams,
+    history: { replaceState: (_, __, value) => { location.href = new URL(value, location).href; } },
+    window: { addEventListener() {} },
+    matchMedia: () => ({ matches: true }),
+    setTimeout() {}, clearTimeout() {},
+    fetch: (path, options = {}) => get(url, path, {
+      ...options,
+      headers: { ...options.headers, ...(options.method === "POST" ? { Origin: new URL(url).origin } : {}) },
+    }),
+  });
+  const script = html.match(/<script type="module">([\s\S]*?)<\/script>/)[1]
+    .replace(/^\s*import .+;\s*/m, "").replace(/\s*buildFlow\(\);\s*refresh\(\);\s*$/, "");
+  vm.runInContext(script, context);
+  // Flow animation is outside these interaction tests.
+  vm.runInContext("draw = () => renderDetail(openState()); animate = () => {};", context);
+  const run = (source) => vm.runInContext(source, context);
+  await run("refresh()");
+  return { run, document, directory, get: (id) => elements.get(id) };
+}
+
+test("state selection opens a modal list that can close and reopen", async (t) => {
+  const ui = await dashboard(t);
+  ui.run("choose('blocked')");
+  assert.equal(ui.get("detail").tag, "dialog");
+  assert.equal(ui.get("detail").open, true);
+  assert.equal(ui.get("task-list").tag, "ul");
+  assert.equal(ui.get("task-list").children.length, 1);
+  assert.match(ui.get("task-list").textContent, /Docs build fails on a clean checkout/);
+  assert.equal(ui.get("task-list").children[0].tag, "li");
+  await ui.get("close-detail").fire("click");
+  assert.equal(ui.get("detail").open, false);
+  ui.run("choose('blocked')");
+  assert.equal(ui.get("task-list").children.length, 1);
+  await ui.get("detail").fire("cancel");
+  assert.equal(ui.get("detail").open, false);
+  ui.run("choose('investigation')");
+  assert.equal(ui.get("detail-empty").hidden, false);
+  assert.equal(ui.get("task-list").children.length, 0);
+});
+
+test("an open move draft survives refresh and conflict, then saves after explicit reload", async (t) => {
+  const ui = await dashboard(t);
+  ui.run("choose('blocked')");
+  const list = ui.get("task-list");
+  const editor = list.querySelector(".move");
+  editor.open = true;
+  const form = editor.querySelector("form");
+  const comment = form.querySelector("textarea");
+  const state = form.querySelector("select");
+  state.value = "initial";
+  comment.value = "This is now unblocked.\nUse the new docs setup.";
+  comment.focus();
+  const file = join(ui.directory, factoryFile);
+  const { update } = await import("./factory.mjs");
+  await update(file, { task: "issue-5", "next-action": "An agent changed the task while editing" });
+  await ui.run("refresh()");
+  assert.equal(list.querySelector("textarea"), comment);
+  assert.equal(ui.document.activeElement, comment);
+  assert.equal(state.value, "initial");
+  await form.fire("submit");
+  assert.match(form.querySelector(".save-error").textContent, /changed since it was read/);
+  assert.equal(form.querySelector(".save-error").hidden, false);
+  assert.equal(comment.value, "This is now unblocked.\nUse the new docs setup.");
+  assert.equal(JSON.parse(await readFile(file, "utf8")).tasks.find((task) => task.id === "issue-5").state, "blocked");
+  const reload = form.querySelectorAll("button").find((button) => button.textContent === "Reload task");
+  await reload.fire("click");
+  assert.equal(comment.value, "This is now unblocked.\nUse the new docs setup.");
+  await form.fire("submit");
+  const saved = JSON.parse(await readFile(file, "utf8")).tasks.find((task) => task.id === "issue-5");
+  assert.equal(saved.state, "initial");
+  assert.equal(saved.history.at(-1).note, comment.value);
+  assert.equal(saved.feedback.acknowledged_id, null);
+  assert.equal(ui.get("detail").dataset.state, "initial");
+  assert.equal(ui.get("task-list").children.length, 2);
+  assert.match(ui.get("detail-status").textContent, /Comment saved; awaiting factory acknowledgement/);
+});
+
+test("the popup can resolve an initial task with an outcome and comment", async (t) => {
+  const ui = await dashboard(t);
+  ui.run("choose('initial')");
+  const editor = ui.get("task-list").querySelector(".move");
+  assert.ok(editor, "An initial task must offer a move to resolved.");
+  editor.open = true;
+  const form = editor.querySelector("form");
+  const selects = form.querySelectorAll("select");
+  const state = selects.find((select) => select.name === "state");
+  const outcome = selects.find((select) => select.name === "resolution");
+  assert.ok(state.options.some((option) => option.value === "resolved"), "Resolved must be selectable.");
+  state.value = "resolved";
+  await state.fire("change");
+  assert.equal(outcome.disabled, false);
+  assert.equal(outcome.value, "completed");
+  outcome.value = "cancelled";
+  const comment = form.querySelector("textarea");
+  comment.value = "No longer needed. Stop work on this task.";
+  await ui.run("refresh()");
+  assert.equal(form.querySelectorAll("select").find((select) => select.name === "resolution").value, "cancelled");
+  await form.fire("submit");
+  const saved = JSON.parse(await readFile(join(ui.directory, factoryFile), "utf8"))
+    .tasks.find((task) => task.id === "issue-12");
+  assert.equal(saved.state, "resolved");
+  assert.equal(saved.resolution.outcome, "cancelled");
+  assert.equal(saved.resolution.note, comment.value);
+  assert.equal(saved.feedback.acknowledged_id, null);
+  assert.equal(ui.get("detail").dataset.state, "resolved");
+  assert.match(ui.get("detail-status").textContent, /Moved to Resolved/);
 });

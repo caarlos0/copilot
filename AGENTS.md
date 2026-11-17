@@ -107,14 +107,27 @@ It never creates or renames a Rex session; it records the session in the
 root `rex_session` field.
 
 State is one `<owner.repo>-factory.json` (`factory/v1`) per project under
-`~/.local/state/copilot-coordinator/`, with one writer guarded by
-`<project>-factory.lock`. Write it only with `factory.mjs`. It validates the
+`~/.local/state/copilot-coordinator/`, with one agent owner guarded by
+`<project>-factory.lock`. Agent and dashboard writes share `factory.mjs` and
+its short-lived `<file>.write.lock`. It validates the
 state flow (`initial`, `investigation`, `implementation`, `review`, `blocked`,
 `resolved`), keeps history, and replaces the file atomically. Every task has a
 GitHub issue. `factory-data.mjs` holds the schema and is shared by the writer,
 `migrate.mjs`, `serve.mjs` (port 8766, lists only `*-factory.json`), and
 `dashboard.html`. `migrate.mjs` moves the implementer and coordinator handoffs
 into the factory file. It refuses to run against a live legacy lock.
+
+The dashboard opens task lists in a modal and can move a task back or directly
+to `resolved` with an operator comment. Manual resolution requires a non-merge
+outcome; it does not merge or close GitHub items. Resolved tasks with pending
+feedback are not pruned. Task `revision` protects stale reads; old files start at zero.
+Comments remain in source-tagged history; `feedback` tracks the latest ID and
+acknowledgement. Reconcile all pending comments before worker results, include
+the current feedback ID in worker briefs/results, and acknowledge only after
+workers are safely rebriefed or parked. CLI writes after dashboard feedback need
+`--expected-revision` plus `--ack-feedback` or `--feedback-id`.
+The factory waiter watches its state file even when all workers are blocked.
+Dashboard changes do not stop workers, resume a paused run, or grant authority.
 
 Implementation workers use `pr-shepherd` and are the sole landing writers.
 They run `autonomy-dial`'s `may_merge` before every landing attempt. There is no

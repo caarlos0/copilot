@@ -1,10 +1,13 @@
 import { randomUUID } from "node:crypto";
-import { open, readFile, rename, rm } from "node:fs/promises";
-import { basename, extname, resolve } from "node:path";
+import { open, readFile, realpath, rename, rm } from "node:fs/promises";
+import { basename, dirname, extname, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
-import { checkTransition, format, outcomes, validate } from "./factory-data.mjs";
+import { checkTransition, format, operatorOutcomes, outcomes, validate } from "./factory-data.mjs";
 
 const defaultLimits = { investigation: 3, implementation: 3 };
+
+export class ConflictError extends Error {}
 
 function isObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -67,9 +70,9 @@ function newTask(values, now) {
   };
 }
 
-function changeState(task, values, now) {
+function changeState(task, values, now, operator) {
   const to = values.state;
-  checkTransition(task, to);
+  checkTransition(task, to, operator);
   const from = task.state;
   if (values.resolution !== undefined && to !== "resolved") {
     throw new Error("--resolution is allowed only when moving to resolved.");
@@ -82,8 +85,9 @@ function changeState(task, values, now) {
   }
   if (from === "blocked") task.blocker = null;
   if (to === "resolved") {
-    if (!outcomes.includes(values.resolution)) {
-      throw new Error(`Moving to resolved needs --resolution ${outcomes.join("|")}.`);
+    const allowed = operator ? operatorOutcomes : outcomes;
+    if (!allowed.includes(values.resolution)) {
+      throw new Error(`Moving to resolved needs --resolution ${allowed.join("|")}.`);
     }
     task.resolution = { outcome: values.resolution, note: values.note ?? null, at: now };
   }
@@ -120,7 +124,7 @@ function taskPatch(task, values) {
   return patch;
 }
 
-async function update(file, values) {
+async function writeFactory(file, values, operator) {
   const original = await readOptional(file);
   const isNew = original === null;
   const now = new Date().toISOString();
@@ -142,6 +146,7 @@ async function update(file, values) {
     }
     : JSON.parse(original);
   if (!isObject(current)) throw new Error("Factory must be a JSON object.");
+  if (!isNew) validate(current);
 
   const rootPatch = { updated_at: values["updated-at"] ?? now };
   for (const [option, field] of [
@@ -158,9 +163,44 @@ async function update(file, values) {
   if (values.task !== undefined) {
     const at = values["task-updated-at"] ?? now;
     const before = addingTask ? newTask(values, at) : tasks.find((task) => task.id === values.task);
+    const revision = before.revision ?? 0;
+    if (values["expected-revision"] !== undefined) {
+      if (!/^\d+$/.test(values["expected-revision"]) ||
+          !Number.isSafeInteger(Number(values["expected-revision"]))) {
+        throw new Error("--expected-revision must be a non-negative safe integer.");
+      }
+      if (addingTask || Number(values["expected-revision"]) !== revision) {
+        throw new ConflictError("Task changed since it was read. Reload it and reconcile before saving.");
+      }
+    } else if (operator || before.feedback) {
+      throw new ConflictError("This task needs --expected-revision from a fresh read.");
+    }
+    if (operator) {
+      if (addingTask) throw new Error("Select an existing task.");
+      if (typeof values.note !== "string" || !values.note.trim()) {
+        throw new Error("A comment is required when moving a task from the dashboard.");
+      }
+      checkTransition(before, values.state, true);
+    } else if (values["ack-feedback"] !== undefined) {
+      if (!before.feedback || values["ack-feedback"] !== before.feedback.id) {
+        throw new ConflictError("Dashboard feedback changed. Reread it before acknowledging.");
+      }
+      if (Object.keys(values).some((key) => !["task", "expected-revision", "ack-feedback"].includes(key))) {
+        throw new Error("Use --ack-feedback only with --task and --expected-revision.");
+      }
+    } else if (before.feedback) {
+      if (before.feedback.acknowledged_id !== before.feedback.id) {
+        throw new ConflictError("Dashboard feedback is pending. Reconcile workers, then use --ack-feedback ID.");
+      }
+      if (values["feedback-id"] !== before.feedback.id) {
+        throw new ConflictError("Worker feedback ID is stale or missing. Rebrief the worker before applying its result.");
+      }
+    } else if (values["feedback-id"] !== undefined) {
+      throw new ConflictError("This task has no dashboard feedback matching --feedback-id.");
+    }
     let task = structuredClone(before);
     if (values.state !== undefined && values.state !== task.state) {
-      changeState(task, values, at);
+      changeState(task, values, at, operator);
     } else {
       if (values.blocker !== undefined) {
         if (task.state !== "blocked") throw new Error("--blocker needs --state blocked or a blocked task.");
@@ -170,7 +210,16 @@ async function update(file, values) {
         throw new Error("--resolution is allowed only when moving to resolved.");
       }
     }
-    task = merge(task, { ...taskPatch(task, values), updated_at: at });
+    task = merge(task, { ...taskPatch(task, values), updated_at: at, revision: revision + 1 });
+    if (operator) {
+      const id = randomUUID();
+      Object.assign(task.history.at(-1), { source: "dashboard", feedback_id: id });
+      task.feedback = { id, acknowledged_id: before.feedback?.acknowledged_id ?? null };
+      task.merge = null;
+      task.next_action = "Read dashboard feedback and reconcile workers before continuing.";
+    } else if (values["ack-feedback"] !== undefined) {
+      task.feedback.acknowledged_id = values["ack-feedback"];
+    }
     tasks = addingTask ? [...tasks, task] : tasks.map((item) => (item.id === task.id ? task : item));
   }
   current = merge(current, rootPatch);
@@ -179,7 +228,8 @@ async function update(file, values) {
   if (addingTask) {
     const cutoff = Date.parse(now) - 7 * 24 * 60 * 60 * 1000;
     current.tasks = current.tasks.filter((task) =>
-      task.id === values.task || task.state !== "resolved" || Date.parse(task.updated_at) >= cutoff);
+      task.id === values.task || task.state !== "resolved" || Date.parse(task.updated_at) >= cutoff ||
+      (task.feedback && task.feedback.acknowledged_id !== task.feedback.id));
   }
 
   const temporary = `${file}.${randomUUID()}.tmp`;
@@ -191,17 +241,45 @@ async function update(file, values) {
       await handle.close();
     }
     if (await readOptional(file) !== original) {
-      throw new Error("Factory changed during update. Reread it and reconcile before retrying.");
+      throw new ConflictError("Factory changed during update. Reread it and reconcile before retrying.");
     }
     await rename(temporary, file);
   } finally {
     await rm(temporary, { force: true });
+  }
+  return current;
+}
+
+export async function update(file, values, { operator = false } = {}) {
+  try {
+    file = await realpath(file);
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+    file = join(await realpath(dirname(resolve(file))), basename(file));
+  }
+  const lockFile = `${file}.write.lock`;
+  let lock;
+  try {
+    lock = await open(lockFile, "wx", 0o600);
+  } catch (error) {
+    if (error.code !== "EEXIST") throw error;
+    throw new ConflictError("Factory write is locked. Reread before retrying; remove a stale .write.lock only after verifying no writer is active.");
+  }
+  try {
+    return await writeFactory(file, values, operator);
+  } finally {
+    try {
+      await lock.close();
+    } finally {
+      await rm(lockFile);
+    }
   }
 }
 
 const taskOptions = [
   "title", "issue", "pr", "head", "reviewed-head", "state", "note", "next-action", "blocker",
   "resolution", "links", "workers", "worktree", "merge", "details", "task-updated-at",
+  "expected-revision", "feedback-id", "ack-feedback",
 ];
 
 async function main() {
@@ -274,14 +352,25 @@ Task options:
                         Audit evidence only; recheck Lever's may_merge before landing
   --details JSON        Merge a JSON object into task details
   --task-updated-at VALUE  Explicit task and transition timestamp (ISO 8601 with timezone)
+  --expected-revision N  Task revision from a fresh read (missing revision means 0)
+                        Required after a dashboard move; rejects stale writes
+  --ack-feedback ID     Acknowledge dashboard direction after reconciling workers
+                        Use only with --task and --expected-revision
+  --feedback-id ID      Feedback ID from the worker result; required after acknowledgement
 
 Allowed moves: initial to investigation, investigation to implementation, implementation to
 review, review to implementation, any open state to blocked or resolved, blocked to any open
 state, and resolved to initial (reopen, not after a merge). The issue is required from
 investigation on, and a PR is required in review. Adding a new task removes resolved tasks last
-updated more than seven days ago. The helper validates the whole file before writing. Success is
+updated more than seven days ago, except those with pending dashboard feedback.
+The helper validates the whole file before writing. Success is
 silent. Errors go to stderr. Exit: 0 success, 1 invalid data or I/O, 2 usage. Use literal null
-only for nullable fields. Keep the factory's owner lock while using this command.`);
+only for nullable fields. Keep the factory's owner lock while using this command.
+The dashboard can move a task back or directly to resolved with a non-merge outcome and a comment.
+A short-lived FILE.write.lock serializes
+dashboard and CLI writes; it is separate from the factory owner lock. Each task write increments
+revision. Dashboard feedback blocks agent updates until acknowledged, then fences out results
+with an old feedback ID. A conflict is an error, never an automatic retry.`);
       return;
     }
     if (positionals.length !== 1 || !positionals[0]) throw new Error("Exactly one factory FILE is required.");
@@ -306,4 +395,4 @@ only for nullable fields. Keep the factory's owner lock while using this command
   }
 }
 
-await main();
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) await main();

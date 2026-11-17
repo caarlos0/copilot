@@ -120,6 +120,70 @@ test("a task can be reopened unless it was merged", async (t) => {
   f.fails(/was merged/, "--task", "issue-1", "--state", "initial");
 });
 
+test("revisions reject stale writes even when timestamps are identical", async (t) => {
+  const f = await started(t);
+  const before = (await f.read()).tasks[0];
+  f.ok("--task", "issue-1", "--expected-revision", String(before.revision),
+    "--task-updated-at", before.updated_at, "--next-action", "New direction");
+  const changed = await readFile(f.file, "utf8");
+  f.fails(/changed since it was read/, "--task", "issue-1", "--expected-revision", String(before.revision),
+    "--next-action", "Stale direction");
+  assert.equal(await readFile(f.file, "utf8"), changed);
+  f.fails(/non-negative safe integer/, "--task", "issue-1", "--expected-revision=-1");
+});
+
+test("dashboard directions must be acknowledged and old worker generations stay fenced", async (t) => {
+  const f = await fixture(t, example);
+  const { update } = await import("./factory.mjs");
+  const task = async () => (await f.read()).tasks.find((item) => item.id === "issue-7");
+  const data = await update(f.file, {
+    task: "issue-7", state: "implementation", note: "Check the edge case again", "expected-revision": "0",
+  }, { operator: true });
+  const first = data.tasks.find((item) => item.id === "issue-7");
+  f.fails(/needs --expected-revision/, "--task", first.id, "--state", "review");
+  f.fails(/feedback is pending/, "--task", first.id, "--expected-revision", "1",
+    "--feedback-id", first.feedback.id, "--state", "review");
+  f.fails(/only with --task/, "--task", first.id, "--expected-revision", "1",
+    "--ack-feedback", first.feedback.id, "--state", "review");
+  f.ok("--task", first.id, "--expected-revision", "1", "--ack-feedback", first.feedback.id);
+  f.ok("--task", first.id, "--expected-revision", "2", "--feedback-id", first.feedback.id,
+    "--state", "review");
+  await update(f.file, {
+    task: first.id, state: "initial", note: "Start over with the new context", "expected-revision": "3",
+  }, { operator: true });
+  const second = await task();
+  assert.equal(second.feedback.acknowledged_id, first.feedback.id);
+  assert.notEqual(second.feedback.id, first.feedback.id);
+  const saved = await readFile(f.file, "utf8");
+  f.fails(/feedback changed/, "--task", first.id, "--expected-revision", "4", "--ack-feedback", first.feedback.id);
+  assert.equal(await readFile(f.file, "utf8"), saved);
+  f.ok("--task", first.id, "--expected-revision", "4", "--ack-feedback", second.feedback.id);
+  for (const flags of [[], ["--feedback-id", first.feedback.id]]) {
+    f.fails(/feedback ID is stale or missing/, "--task", first.id, "--expected-revision", "5",
+      "--state", "investigation", ...flags);
+  }
+  f.ok("--task", first.id, "--expected-revision", "5", "--feedback-id", second.feedback.id,
+    "--state", "investigation");
+  const final = await task();
+  assert.deepEqual(final.history.filter((item) => item.source === "dashboard").map((item) => item.note),
+    ["Check the edge case again", "Start over with the new context"]);
+  assert.deepEqual(final.workers, first.workers);
+});
+
+test("operator moves do not broaden worker transitions or bypass prerequisites", async () => {
+  const { checkTransition, operatorStates } = await import("./factory-data.mjs");
+  const review = example.tasks.find((item) => item.state === "review");
+  assert.deepEqual(operatorStates(review), ["initial", "investigation", "implementation", "resolved"]);
+  assert.throws(() => checkTransition(review, "initial"), /cannot move/);
+  checkTransition(review, "initial", true);
+  const blocked = example.tasks.find((item) => item.state === "blocked");
+  assert.deepEqual(operatorStates(blocked), ["initial", "investigation", "implementation", "resolved"]);
+  assert.deepEqual(operatorStates({ ...blocked, issue: null }), ["initial", "resolved"]);
+  assert.deepEqual(operatorStates({ ...blocked, pr: pull(99) }),
+    ["initial", "investigation", "implementation", "review", "resolved"]);
+  assert.deepEqual(operatorStates(example.tasks.find((item) => item.state === "resolved")), []);
+});
+
 test("a new head clears the merge authorization and a stale one is rejected", async (t) => {
   const f = await started(t);
   f.ok("--task", "issue-1", "--state", "investigation");
@@ -186,6 +250,26 @@ test("adding a task removes resolved tasks older than seven days", async (t) => 
   f.ok("--task", "old", "--state", "resolved", "--resolution", "completed", "--task-updated-at", old);
   f.ok("--task", "issue-3", "--title", "New", "--issue", issue(3), "--next-action", "go");
   assert.deepEqual((await f.read()).tasks.map((task) => task.id), ["issue-1", "issue-3"]);
+});
+
+test("pending dashboard resolution comments survive pruning until acknowledged", async (t) => {
+  const f = await started(t);
+  const { update } = await import("./factory.mjs");
+  const old = "2020-01-01T00:00:00Z";
+  const before = (await f.read()).tasks[0];
+  await update(f.file, {
+    task: before.id, state: "resolved", resolution: "completed", note: "Handled outside the factory.",
+    "expected-revision": String(before.revision), "task-updated-at": old,
+  }, { operator: true });
+  f.ok("--task", "issue-2", "--title", "Next", "--issue", issue(2), "--next-action", "go");
+  const pending = (await f.read()).tasks.find((task) => task.id === before.id);
+  assert.ok(pending, "An unread operator comment must not be pruned.");
+  assert.equal(pending.history.at(-1).note, "Handled outside the factory.");
+  f.ok("--task", pending.id, "--expected-revision", String(pending.revision), "--ack-feedback", pending.feedback.id);
+  f.ok("--task", pending.id, "--expected-revision", String(pending.revision + 1),
+    "--feedback-id", pending.feedback.id, "--task-updated-at", old);
+  f.ok("--task", "issue-3", "--title", "More", "--issue", issue(3), "--next-action", "go");
+  assert.deepEqual((await f.read()).tasks.map((task) => task.id), ["issue-2", "issue-3"]);
 });
 
 test("usage errors exit 2 and malformed JSON flags exit 1", async (t) => {

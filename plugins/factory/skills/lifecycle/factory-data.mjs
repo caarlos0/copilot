@@ -10,6 +10,7 @@ const transitions = {
 };
 const runStatuses = ["active", "paused", "blocked", "finished"];
 export const outcomes = ["merged", "already-fixed", "duplicate", "invalid", "cancelled", "completed"];
+export const operatorOutcomes = outcomes.filter((outcome) => outcome !== "merged");
 const mergeSources = ["lever", "comment", "factory-session"];
 const workerRoles = ["investigation", "implementation", "review"];
 const workerModes = ["one-shot", "continuous"];
@@ -85,10 +86,19 @@ export function cyclesOf(task) {
     item.state === "implementation" && task.history[index - 1]?.state === "review").length;
 }
 
-export function checkTransition(task, to) {
-  if (task.state === to) return;
-  if (!transitions[task.state].includes(to)) {
-    throw new Error(`Task ${task.id} cannot move from ${task.state} to ${to}. Allowed: ${transitions[task.state].join(", ") || "none"}.`);
+export function operatorStates(task) {
+  const open = ["initial", "investigation", "implementation", "review"];
+  if (task.state === "resolved") return task.resolution?.outcome === "merged" ? [] : ["initial"];
+  const candidates = task.state === "blocked" ? open : open.slice(0, open.indexOf(task.state));
+  return [...candidates.filter((state) => (!issueStates.includes(state) || task.issue != null) &&
+    (state !== "review" || task.pr != null)), "resolved"];
+}
+
+export function checkTransition(task, to, operator = false) {
+  if (task.state === to && !operator) return;
+  const allowed = operator ? operatorStates(task) : transitions[task.state];
+  if (!allowed.includes(to)) {
+    throw new Error(`Task ${task.id} cannot move from ${task.state} to ${to}. Allowed: ${allowed.join(", ") || "none"}.`);
   }
   if (task.state === "resolved" && task.resolution?.outcome === "merged") {
     throw new Error(`Task ${task.id} was merged. Create a new task and issue instead of reopening it.`);
@@ -114,6 +124,9 @@ function validateTask(task, seen) {
   seen.ids.add(task.id);
   oneOf(task.state, states, `${at} state`);
   timestamp(task.updated_at, `${at} updated_at`);
+  if (task.revision !== undefined && (!Number.isSafeInteger(task.revision) || task.revision < 0)) {
+    throw new Error(`${at} revision must be a non-negative safe integer.`);
+  }
 
   for (const [field, check] of [["issue", issueURL], ["pr", prURL]]) {
     if (task[field] == null) continue;
@@ -132,14 +145,36 @@ function validateTask(task, seen) {
   if (!Array.isArray(task.history) || !task.history.length) {
     throw new Error(`${at} history must be a non-empty array.`);
   }
+  const feedbackIds = [];
   for (const item of task.history) {
     if (!isObject(item)) throw new Error(`${at} history entries must be objects.`);
     oneOf(item.state, states, `${at} history state`);
     timestamp(item.at, `${at} history at`);
     nullableText(item.note, `${at} history note`);
+    if (item.source !== undefined) {
+      oneOf(item.source, ["dashboard"], `${at} history source`);
+      text(item.note, `${at} dashboard comment`);
+      text(item.feedback_id, `${at} history feedback_id`);
+      if (feedbackIds.includes(item.feedback_id)) throw new Error(`${at}: duplicate feedback ID.`);
+      feedbackIds.push(item.feedback_id);
+    } else if (item.feedback_id !== undefined) {
+      throw new Error(`${at}: feedback history needs source dashboard.`);
+    }
   }
   if (task.history.at(-1).state !== task.state) {
     throw new Error(`${at}: the last history entry must match state ${task.state}.`);
+  }
+  if (task.feedback != null) {
+    if (!isObject(task.feedback)) throw new Error(`${at} feedback must be an object or null.`);
+    text(task.feedback.id, `${at} feedback.id`);
+    if (task.feedback.id !== feedbackIds.at(-1)) {
+      throw new Error(`${at}: feedback must reference the latest dashboard history entry.`);
+    }
+    if (task.feedback.acknowledged_id !== null && !feedbackIds.includes(task.feedback.acknowledged_id)) {
+      throw new Error(`${at}: feedback acknowledgement must reference dashboard history.`);
+    }
+  } else if (feedbackIds.length) {
+    throw new Error(`${at}: dashboard history needs a feedback record.`);
   }
 
   if (task.state === "blocked") {

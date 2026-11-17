@@ -5,6 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { countByState, validate } from "./factory-data.mjs";
+import { ConflictError, update } from "./factory.mjs";
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -115,6 +116,45 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
     response.end(typeof body === "object" && !Buffer.isBuffer(body) ? JSON.stringify(body) : body);
   }
 
+  async function moveTask(request, file) {
+    if (request.headers.origin !== `http://${request.headers.host}` ||
+        (request.headers["sec-fetch-site"] && request.headers["sec-fetch-site"] !== "same-origin")) {
+      throw new HttpError(403, "State changes must come from this dashboard.");
+    }
+    if (request.headers["content-type"]?.split(";")[0].trim() !== "application/json") {
+      throw new HttpError(415, "State changes require application/json.");
+    }
+    if (Number(request.headers["content-length"]) > 16384) {
+      throw new HttpError(413, "State change is too large (maximum 16 KiB).");
+    }
+    const chunks = [];
+    let size = 0;
+    for await (const chunk of request) {
+      size += chunk.length;
+      if (size > 16384) throw new HttpError(413, "State change is too large (maximum 16 KiB).");
+      chunks.push(chunk);
+    }
+    const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    if (!body || typeof body !== "object" || Array.isArray(body) ||
+        Object.keys(body).some((key) => !["task", "state", "comment", "revision", "resolution"].includes(key)) ||
+        !["task", "state", "comment"].every((key) => typeof body[key] === "string" && body[key].trim()) ||
+        !Number.isSafeInteger(body.revision) || body.revision < 0) {
+      throw new HttpError(400, "Provide task, state, a non-empty comment, and a non-negative task revision.");
+    }
+    const data = await loadFactory(file);
+    if (!data.tasks.some((task) => task.id === body.task)) throw new HttpError(404, "Task not found.");
+    try {
+      return await update(await localFile(file), {
+        task: body.task, state: body.state, note: body.comment,
+        "expected-revision": String(body.revision), resolution: body.resolution,
+      }, { operator: true });
+    } catch (error) {
+      if (error instanceof ConflictError) throw new HttpError(409, error.message);
+      if (error.code) throw error;
+      throw new HttpError(400, error.message);
+    }
+  }
+
   const server = createServer(async (request, response) => {
     try {
       const port = server.address().port;
@@ -123,9 +163,12 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
       if (!hosts.includes(request.headers.host)) {
         throw new HttpError(403, "Use the printed loopback URL.");
       }
-      if (request.method !== "GET") throw new HttpError(405, "Only GET requests are supported.");
       const url = new URL(request.url, `http://127.0.0.1:${port}`);
-      if (url.pathname === "/" || url.pathname === "/dashboard.html") {
+      if (request.method === "POST" && url.pathname === "/api/move") {
+        send(response, 200, await moveTask(request, url.searchParams.get("file")));
+      } else if (request.method !== "GET") {
+        throw new HttpError(405, "Use GET, or POST /api/move for dashboard state changes.");
+      } else if (url.pathname === "/" || url.pathname === "/dashboard.html") {
         send(response, 200, await readFile(join(assets, "dashboard.html")), "text/html; charset=utf-8");
       } else if (url.pathname === "/factory-data.mjs") {
         send(response, 200, await readFile(join(assets, "factory-data.mjs")), "text/javascript; charset=utf-8");

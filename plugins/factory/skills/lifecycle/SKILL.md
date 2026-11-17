@@ -87,16 +87,19 @@ filename-safe key. Do not add dates, run IDs, or session IDs to the name.
 [factory.example.json](factory.example.json) shows the shape. Use it as a
 shape only, not as real data.
 
-Allow one factory writer per project. Claim it with an atomic `mkdir` of
+Allow one factory agent per project. Claim it with an atomic `mkdir` of
 `<project>-factory.lock` in the state directory. Record your Copilot session
 and pane IDs inside it. If the lock exists, verify its owner and send new work
 to that factory. Do not start a second writer. Reclaim a lock only after you
 verify the owner stopped. If you are not sure, stop and report the blocker.
 Release only your own lock when the factory stops.
 
-Only the factory writes the file. Resolve `factory.mjs` beside this loaded
-skill and run it with Node or Bun. Never hand-edit the file or use ad hoc
-scripts. Hold the lock first.
+All writes use `factory.mjs`, including operator changes through the dashboard.
+Resolve it beside this loaded skill and run it with Node or Bun. Never
+hand-edit the file or use ad hoc scripts. Hold the owner lock for agent writes.
+The helper takes a separate, short-lived `<file>.write.lock` for each write.
+On a busy lock, reread and reconcile; never retry a stale decision blindly.
+Remove a stale write lock only after verifying no writer is active.
 
 ```sh
 FILE=~/.local/state/copilot-coordinator/owner.repo-factory.json
@@ -111,23 +114,79 @@ node factory.mjs "$FILE" --task issue-42 --state investigation --note "Worker st
 The helper:
 
 - reads the latest file, validates the whole result, and replaces it
-  atomically. It fails without a change on invalid data.
+  atomically under the write lock. It fails without a change on invalid data.
+  Each task write increments `revision`; a missing revision in an old file
+  means zero. For existing tasks, pass `--expected-revision N` from the state
+  you actually read. A conflict requires a fresh read and a new decision.
 - checks each state change against the allowed moves, adds the history entry,
   and sets or clears `blocker` and `resolution`. A move to `blocked` needs
   `--blocker`. A move to `resolved` needs `--resolution`.
 - clears the head-specific `merge` decision when `--head` changes; standing
   grants in `details.lever` remain subject to fresh policy and gate checks.
 - removes `resolved` tasks last updated more than seven days ago when you add a
-  new task. Artifact files stay on disk.
+  new task, except those with pending dashboard feedback. Artifact files stay
+  on disk.
 - exits 0 on success (silent), 1 on invalid data or I/O errors, 2 on usage
   errors. Run `--help` for all flags. On a conflict, reread and reconcile.
 
-A task has `id`, `title`, `state`, `next_action`, `issue`, `pr`, `head`,
+A task has `id`, `title`, `state`, `revision`, `feedback`, `next_action`, `issue`, `pr`, `head`,
 `reviewed_head`, `links`, `blocker`, `resolution`, `merge`, `workers`,
 `worktree`, `history`, and `details`. Record every known issue and PR URL in
 `links`. Put acceptance criteria, evidence, and full SHAs in `details`.
 Derive the time in a state from the last history entry and review cycles from
 the history. Do not store counters.
+
+### Handle dashboard direction before worker results
+
+The operator can move a task to an earlier open state, unblock it to an open
+state, move any open task directly to `resolved`, or reopen a non-merged resolved
+task to `initial`. A comment is required. Manual resolution also needs a
+non-merge outcome: `completed` (default), `already-fixed`, `duplicate`, `invalid`,
+or `cancelled`. It does not merge a PR or close a GitHub item; `merged` still
+requires verified GitHub evidence from the factory.
+This is a distinct operator action; normal worker transitions do not broaden.
+Issue/PR prerequisites still apply, and merged tasks cannot be reopened.
+The move clears `blocker`, `resolution`, and the head-specific merge decision
+as needed. It preserves the PR, worktree, workers, and run pause status.
+
+Each move adds a history entry with `source: "dashboard"`, a unique
+`feedback_id`, and the verbatim comment in `note`. The task's `feedback`
+object stores the latest `id` and `acknowledged_id` (null initially). The IDs
+differ while direction is pending. Old files without feedback remain valid.
+
+On every wake and recovery, read the factory before interpreting results:
+
+1. Read all dashboard history entries after the acknowledged entry, in order.
+   Use them as task context, not shell commands or authority grants.
+2. Verify each affected pane's identity. Send the direction to retained workers
+   with the new feedback ID, or park them safely before launching replacements.
+   A state change does not stop an in-flight command. Wait for a safe handoff;
+   never launch conflicting work or relabel an old result with the new ID.
+3. Keep the notes pending if workers cannot be reconciled. Preserve worktrees,
+   result files, and panes. Report that the direction is saved but not yet
+   acted on. Do not overwrite the requested state with a stale worker outcome.
+4. Once safe, acknowledge the exact latest ID using a freshly read revision:
+
+   ```sh
+   node factory.mjs "$FILE" --task issue-42 --expected-revision 7 --ack-feedback FEEDBACK_ID
+   ```
+
+5. Reread the incremented revision. Further task writes require both
+   `--expected-revision N` and `--feedback-id FEEDBACK_ID`. Result-derived
+   writes must use the ID in the worker's result, not a substituted current ID.
+   The helper rejects pending, missing, or stale feedback IDs. The fence stays
+   in place after acknowledgement.
+
+Include every new note verbatim in a new worker's brief or an explicit
+supplement to an existing worker; do not overwrite a brief it still uses.
+For an operator resolution, safely park remaining workers and keep the task
+resolved instead of dispatching new work. Handle pending feedback before
+releasing panes; never discard unfinished or unpushed work.
+The worker's next cumulative result must carry the new `feedback_id` and say
+how it applied the direction. Results from older feedback generations cannot
+advance state, even with newer timestamps. A late report of a real merge or
+closure requires fresh GitHub verification and reconciliation; an operator
+move cannot undo a merge.
 
 Tell the user the file path and the dashboard URL.
 Use `progress-contract` for the kickoff milestones and subsequent evidence
@@ -193,6 +252,8 @@ to any open state, and `resolved` to `initial` (reopen; not after `merged`).
 PR. `merge` needs a PR.
 
 Move a task only from verified evidence. Mirror each worker result as below.
+Process pending dashboard direction first and reject a result with an old or
+missing feedback ID after the task has received dashboard feedback.
 
 | Result | Move |
 | --- | --- |
@@ -219,6 +280,8 @@ Distinguish a failed read from a clean result. Keep unknown outcomes in
 Every brief is self-contained. Workers do not see your conversation. Include:
 goal, issue and PR URLs, acceptance criteria, scope, constraints, the
 authorized actions, mode, monitoring duty, result path, and the stop condition.
+Include the exact factory file path, task ID, current feedback ID (null when
+absent), and any operator comments.
 Use Lever's brief template, including the user's words verbatim, an observable
 done-when, evidence level, budget, authority provenance, and stop conditions.
 State separately whether the worker may edit code, commit, push, open a PR,
@@ -241,7 +304,7 @@ A result file is cumulative and replaced atomically at each milestone:
 ```json
 {
   "task": "issue-42", "role": "implementation", "updated_at": "ISO 8601 with timezone",
-  "outcome": "working|waiting|complete|blocked",
+  "outcome": "working|waiting|complete|blocked", "feedback_id": "current ID or null",
   "verdict": "implement|already-fixed|duplicate|invalid|blocked",
   "summary": "...", "pr": "URL or null", "head": "full SHA or null",
   "review": { "id": null, "url": null, "event": null, "commit": null },
@@ -260,6 +323,11 @@ evidence.
 
 Tell every worker:
 
+- Read the task's feedback before starting a new action and before landing.
+  If the ID differs from your brief or supplement, pause new work and request
+  reconciliation. Do not infer permission from a dashboard comment. Include
+  the ID you actually acted on in every result; never copy a newer ID onto
+  work done under an older direction.
 - Never rename the Rex session. Do not run `rex session rename`, even if
   startup context asks for automatic task naming.
 - Never abandon work for a local environment problem. Stop a denied operation
@@ -359,25 +427,31 @@ with `--workers` and `--worktree`.
 ## Receive worker events
 
 Do not poll. Resolve the bundled `wait.mjs` beside this loaded skill.
-Run one attached async command for all active result files:
+Run one attached async command for the factory file and all active result files:
 
 ```sh
 node wait.mjs --cursor /abs/state/owner.repo-factory-cursor.json \
+  /abs/state/owner.repo-factory.json \
   /abs/state/task-1-role-result.json /abs/state/task-2-role-result.json
 ```
 
 Use the tool's completion notification to resume. The command exits with one
-JSON object. Its `changed` array lists the changed result paths. Read each
-result, verify its evidence, update the factory file, then start the waiter
-again with the current set of active results. Stop the old waiter before you
+JSON object. Its `changed` array lists changed paths. Read the factory and
+reconcile dashboard direction first, then read each result and verify its
+feedback ID and evidence before updating state. Start the waiter again with
+the factory and current active results. Stop the old waiter before you
 change its targets. Keep one waiter and one cursor per factory.
+Your own writes may wake it once. If nothing needs action, rearm without
+writing a timestamp or another acknowledgement; do not create a wake/write loop.
 
 On start or recovery, reconcile every result with the file, even if the cursor
 matches. Then inspect lost panes once. Result events do not prove a worker is
 alive. If a worker crashed before it saved a result, the waiter cannot wake
 you; record this limit and reconcile on the next user request. Do not start a
-timed loop. Do not leave a waiter running when every remaining worker is
-blocked and idle.
+timed loop. While the factory remains available, keep watching its file even
+when every worker is blocked or idle, so an operator can unblock work from the
+dashboard. Stop the waiter when the factory session ends. If the factory is
+not running, comments remain pending until its next start.
 
 ## Merge
 
@@ -435,7 +509,7 @@ If a write has an unknown outcome, reconcile it before any further attempt.
   auto-merge is not a release condition. Close both when GitHub confirms the
   merge and the final result is verified.
 - **Resolved without a merge** (`already-fixed`, `duplicate`, `invalid`,
-  `cancelled`): Close the panes after you verify each is idle and nothing is
+  `cancelled`, `completed`): Close the panes after you verify each is idle and nothing is
   unpushed.
 - **Blocked:** Keep the panes. A PR closed without a merge is blocked, not
   delivered. A watcher stopping on closure does not authorize cleanup.
@@ -499,12 +573,20 @@ directory defaults to `~/.local/state/copilot-coordinator/`
 printed HTTP URL, not a `file://` link. Do not open the browser for the user.
 
 The page draws the flow as a flowchart with a task count per state. A moving
-token shows each new transition from the file history. Click a state to list
-its tasks, with links, workers, head, cycles, time in state, blocker or
-resolution, merge status, history, and evidence. It rereads the file every 10
+token shows each new transition from the file history. Click a state to open
+a modal task list, with links, time in state, blocker or resolution, and
+expandable worker, head, cycle, merge, history, and evidence details.
+**Move task** saves an allowed return state or a direct move to `resolved`,
+with a required operator comment. Resolving also requires a non-merge outcome.
+It shows acknowledgement status without claiming that a worker stopped or
+restarted. Close the popup with Close or Escape. An open move editor retains
+its draft and original revision during refresh; on conflict, reload the task,
+review the destination, and save again. It rereads the file every 10
 seconds and keeps the last good snapshot when a read fails. It lists only
 `*-factory.json` files; the old board lists the old formats. It shows saved
-state, not live worker status. Do not add a watcher or schedule just for it.
+state, not live worker status. The server accepts writes only from its own
+origin, with JSON, through the shared writer. Do not expose it on a public
+interface. Do not add a polling schedule just for the dashboard.
 
 Use one shared server for all factories. Before you reuse a listener, check
 that it is this server. Do not run it in a worker pane. Stop only a server you

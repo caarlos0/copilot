@@ -65,16 +65,18 @@
       a:hover { text-decoration: underline; }
       label { display: block; margin-bottom: 4px; font-weight: 600; }
       code, pre { font-family: var(--mono); font-size: 12px; }
-      button, select { font: inherit; line-height: 20px; color: var(--fg); border: 1px solid var(--border); border-radius: 6px; }
+      button, select, textarea { font: inherit; line-height: 20px; color: var(--fg); border: 1px solid var(--border); border-radius: 6px; }
       button { padding: 5px 16px; font-weight: 500; background: var(--btn-bg); cursor: pointer; }
       button:hover { background: var(--btn-hover); }
       select { width: 480px; max-width: 100%; padding: 5px 12px; background: var(--bg); }
+      textarea { width: 100%; padding: 8px 12px; background: var(--bg); resize: vertical; }
+      button:disabled { opacity: .6; cursor: default; }
       .controls { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
       .muted { color: var(--fg-muted); }
-      a:focus-visible, button:focus-visible, select:focus-visible, summary:focus-visible,
+      a:focus-visible, button:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible,
       .node:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
       .node:focus-visible { outline-offset: 4px; }
-      #error, #discovery-error, .blocker { padding: 16px; border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
+      #error, #discovery-error, .blocker, .save-error { padding: 16px; border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
         border-radius: 6px; background: color-mix(in srgb, var(--danger) 10%, var(--bg)); }
 
       #flow { width: 100%; height: auto; max-height: 70vh; display: block; }
@@ -111,26 +113,42 @@
         .ring { display: none; }
       }
 
-      #detail { margin-top: 24px; }
+      #detail { width: min(960px, calc(100% - 32px)); max-height: 85vh; padding: 0;
+        color: var(--fg); background: var(--bg); border: 1px solid var(--border); border-radius: 12px; }
+      #detail::backdrop { background: rgb(0 0 0 / .5); }
+      body:has(#detail[open]) { overflow: hidden; }
       .detail-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px;
-        padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+        position: sticky; top: 0; z-index: 1; padding: 16px 24px; background: var(--bg-muted);
+        border-bottom: 1px solid var(--border); }
+      #detail-status, #detail-empty { margin: 16px 24px; }
+      #detail-status:empty { display: none; }
       .counter { display: inline-block; min-width: 20px; margin-left: 8px; padding: 0 6px; border-radius: 2em;
         background: color-mix(in srgb, var(--neutral) 20%, transparent); font-size: 12px; font-weight: 500;
         line-height: 18px; text-align: center; vertical-align: middle; }
-      .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 16px; margin-top: 16px; }
-      .card { padding: 16px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; overflow-wrap: anywhere; }
+      #task-list { list-style: none; margin: 0; padding: 0; }
+      .task-row { padding: 16px 24px; overflow-wrap: anywhere; }
+      .task-row + .task-row { border-top: 1px solid var(--border); }
+      .row-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 16px; }
       .chips, .links { display: flex; flex-wrap: wrap; gap: 4px 8px; }
       .chip { padding: 0 7px; border: 1px solid var(--border); border-radius: 2em; color: var(--fg-muted);
         font-size: 12px; font-weight: 500; line-height: 18px; }
       .chip.state { color: var(--c); border-color: var(--c); }
       .blocker { padding: 8px 16px; }
+      .feedback-note { white-space: pre-wrap; border-left: 3px solid var(--accent); padding-left: 12px; }
+      .move { margin-top: 8px; }
+      .move-form { margin-top: 12px; padding: 16px; background: var(--bg-muted); border-radius: 6px; }
+      .move-form fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+      .move-form label + label { margin-top: 12px; }
+      .move-form label[hidden] { display: none; }
+      .move-form select, .move-form textarea { display: block; margin-top: 4px; font-weight: 400; }
+      .save-error { white-space: pre-wrap; }
       .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: var(--neutral); }
       .dot.running { background: var(--success); }
       .dot.unknown { background: var(--attention); }
       ul.workers, ol.history { margin: 8px 0; padding-left: 20px; }
       summary { cursor: pointer; color: var(--fg-muted); }
       pre { padding: 16px; border-radius: 6px; background: var(--bg-muted); white-space: pre-wrap; }
-      @media (max-width: 600px) { body { padding: 16px; } .cards { grid-template-columns: 1fr; } }
+      @media (max-width: 600px) { body { padding: 16px; } .detail-head, .task-row { padding: 16px; } }
     </style>
   </head>
   <body>
@@ -152,11 +170,19 @@
     </header>
     <main>
       <svg id="flow" viewBox="0 0 1160 560" role="group" aria-label="Factory flow: tasks per state"></svg>
-      <section id="detail" aria-live="polite" hidden></section>
+      <dialog id="detail" aria-labelledby="detail-title">
+        <div class="detail-head">
+          <h2 id="detail-title" tabindex="-1" autofocus></h2>
+          <button id="close-detail" type="button">Close</button>
+        </div>
+        <p id="detail-status" role="status"></p>
+        <ul id="task-list"></ul>
+        <p id="detail-empty" class="muted" hidden>No tasks in this state.</p>
+      </dialog>
     </main>
     <noscript>Enable JavaScript to read the factory.</noscript>
     <script type="module">
-      import { states, artifactName, githubURL, validate, countByState, hopsSince, entered, cyclesOf } from "./factory-data.mjs";
+      import { states, artifactName, githubURL, validate, countByState, hopsSince, entered, cyclesOf, operatorStates, operatorOutcomes } from "./factory-data.mjs";
 
       const SVG = "http://www.w3.org/2000/svg";
       const NODE = { w: 160, h: 110 };
@@ -196,6 +222,7 @@
       let refreshing = false;
       let pendingRefresh = false;
       let listedChoices = "";
+      let mutation = 0;
       const shown = Object.fromEntries(states.map((state) => [state, 0]));
       const targets = Object.fromEntries(states.map((state) => [state, 0]));
       const queue = [];
@@ -203,6 +230,7 @@
       let tweening = false;
 
       const flow = document.getElementById("flow");
+      const dialog = document.getElementById("detail");
 
       function element(tag, value, className) {
         const node = document.createElement(tag);
@@ -418,14 +446,141 @@
         return node;
       }
 
-      function taskCard(task, expanded) {
-        const node = element("article", null, "card");
+      function moveForm(task) {
+        const file = selection;
+        let current = task;
+        const editor = element("details", null, "move");
+        editor.append(element("summary", "Move task"));
+        const form = element("form", null, "move-form");
+        const fields = element("fieldset");
+        const stateLabel = element("label", "Move to");
+        const state = element("select");
+        state.name = "state";
+        const resolutionLabel = element("label", "Resolution outcome");
+        const resolution = element("select");
+        resolution.name = "resolution";
+        resolution.required = true;
+        for (const value of operatorOutcomes) {
+          const option = element("option", value[0].toUpperCase() + value.slice(1).replaceAll("-", " "));
+          option.value = value;
+          resolution.append(option);
+        }
+        resolution.value = "completed";
+        resolutionLabel.append(resolution);
+        const showResolution = () => {
+          resolutionLabel.hidden = state.value !== "resolved";
+          resolution.disabled = resolutionLabel.hidden;
+        };
+        state.addEventListener("change", showResolution);
+        const setChoices = () => {
+          const previous = state.value;
+          const choices = operatorStates(current);
+          state.replaceChildren(...choices.map((value) => {
+            const option = element("option", places[value].title);
+            option.value = value;
+            return option;
+          }));
+          if (choices.includes(previous)) state.value = previous;
+          showResolution();
+        };
+        setChoices();
+        stateLabel.append(state);
+        const commentLabel = element("label", "Comment for the factory");
+        const comment = element("textarea");
+        comment.name = "comment";
+        comment.required = true;
+        comment.maxLength = 4000;
+        comment.rows = 3;
+        comment.placeholder = "For example: This is now unblocked.";
+        commentLabel.append(comment);
+        const notice = element("p",
+          "The factory must read the saved comment and reconcile workers. This does not stop running workers or merge a PR.",
+          "muted");
+        const error = element("p", null, "save-error");
+        error.setAttribute("role", "alert");
+        error.hidden = true;
+        const save = element("button", "Save move");
+        save.type = "submit";
+        const reload = element("button", "Reload task");
+        reload.type = "button";
+        reload.hidden = true;
+        const actions = element("div", null, "controls");
+        actions.append(save, reload);
+        fields.append(stateLabel, resolutionLabel, commentLabel, notice, error, actions);
+        form.append(fields);
+        editor.append(form);
+        const failed = (cause) => {
+          error.textContent = cause.message;
+          error.hidden = false;
+          reload.hidden = false;
+        };
+        reload.addEventListener("click", async () => {
+          fields.disabled = true;
+          try {
+            const data = await requestJSON(`/api/factory?${new URLSearchParams({ file })}`);
+            validate(data);
+            const latest = data.tasks.find((item) => item.id === task.id);
+            if (!latest) {
+              save.disabled = true;
+              throw new Error("This task no longer exists. Your comment has not been discarded.");
+            }
+            current = latest;
+            setChoices();
+            save.disabled = !state.options.length;
+            notice.textContent = `Current state: ${places[current.state].title}. Your comment is kept. Review the destination before saving again.`;
+            error.hidden = true;
+            if (selection === file) load(data, file);
+          } catch (cause) {
+            failed(cause);
+          } finally {
+            fields.disabled = false;
+          }
+        });
+        form.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          if (fields.disabled) return;
+          fields.disabled = true;
+          error.hidden = true;
+          mutation += 1;
+          try {
+            const destination = state.value;
+            const data = await requestJSON(`/api/move?${new URLSearchParams({ file })}`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                task: task.id, state: destination, comment: comment.value, revision: current.revision ?? 0,
+                ...(destination === "resolved" ? { resolution: resolution.value } : {}),
+              }),
+            });
+            validate(data);
+            editor.open = false;
+            if (selection === file) {
+              history.replaceState(null, "", `${location.pathname}${location.search}#${destination}`);
+              load(data, file);
+              document.getElementById("detail-status").textContent =
+                `Moved to ${places[destination].title}. Comment saved; awaiting factory acknowledgement.`;
+              document.getElementById("detail-title").focus();
+            }
+          } catch (cause) {
+            failed(new Error(`Move was not confirmed: ${cause.message} Reload the task before trying again.`));
+          } finally {
+            mutation += 1;
+            fields.disabled = false;
+          }
+        });
+        return editor;
+      }
+
+      function taskRow(task, expanded) {
+        const node = element("li", null, "task-row");
         node.style.setProperty("--c", `var(--${task.state})`);
         const cycles = cyclesOf(task);
-        node.append(
-          element("p", `${snapshot.project} / ${task.id}`, "muted"),
-          element("h3", task.title),
-        );
+        const heading = element("div", null, "row-head");
+        const links = element("span", null, "links");
+        const references = new Set([...(task.issue ? [task.issue] : []), ...(task.pr ? [task.pr] : []), ...task.links]);
+        for (const href of references) links.append(reference(href));
+        heading.append(element("h3", task.title), links);
+        node.append(heading);
         const chips = element("p", null, "chips");
         chips.append(element("span", `${task.state} for ${age(entered(task))}`, "chip state"));
         if (cycles) chips.append(element("span", `${cycles} review ${cycles === 1 ? "cycle" : "cycles"}`, "chip"));
@@ -442,13 +597,23 @@
         if (task.resolution) {
           node.append(element("p", `Resolved: ${task.resolution.outcome}${task.resolution.note ? `. ${task.resolution.note}` : ""}`));
         }
+        if (task.feedback) {
+          const feedback = task.history.find((item) => item.feedback_id === task.feedback.id);
+          node.append(element("p", feedback.note, "feedback-note"),
+            element("p", task.feedback.acknowledged_id === task.feedback.id
+              ? "Factory acknowledged this direction." : "Awaiting factory acknowledgement.", "muted"));
+        }
+        node.append(element("p", `Next: ${task.next_action}`));
+        const more = element("details");
+        more.dataset.taskId = `${task.id}:details`;
+        more.open = expanded.has(more.dataset.taskId);
+        more.append(element("summary", "Task details"), element("p", `${snapshot.project} / ${task.id}`, "muted"));
         if (task.pr && task.state !== "resolved") {
           const merge = task.merge
             ? `Merge decision recorded for ${task.merge.authorized_by} (${task.merge.source}) ${age(task.merge.authorized_at)} ago${task.merge.requested_at ? "; landing requested" : ""}`
             : "Merge: no current-head decision recorded";
-          node.append(element("p", merge));
+          more.append(element("p", merge));
         }
-        node.append(element("p", `Next: ${task.next_action}`));
 
         const workers = Object.entries(task.workers).filter(([, worker]) => worker);
         if (workers.length) {
@@ -465,67 +630,68 @@
             }
             list.append(item);
           }
-          node.append(list);
+          more.append(list);
         }
-        if (task.worktree) node.append(element("p", `Worktree: ${task.worktree.path}`, "muted"));
-
-        const links = element("p", null, "links");
-        const references = new Set([...(task.issue ? [task.issue] : []), ...(task.pr ? [task.pr] : []), ...task.links]);
-        for (const href of references) links.append(reference(href));
-        node.append(links);
+        if (task.worktree) more.append(element("p", `Worktree: ${task.worktree.path}`, "muted"));
 
         const timeline = element("details");
         timeline.dataset.taskId = `${task.id}:history`;
         timeline.open = expanded.has(timeline.dataset.taskId);
         const items = element("ol", null, "history");
         for (const item of task.history) {
-          items.append(element("li", `${item.state}, ${item.at}${item.note ? `: ${item.note}` : ""}`));
+          items.append(element("li", `${item.state}, ${item.at}${item.source ? ` (${item.source})` : ""}${item.note ? `: ${item.note}` : ""}`));
         }
         timeline.append(element("summary", `History (${task.history.length})`), items);
-        node.append(timeline);
+        more.append(timeline);
         if (task.details && Object.keys(task.details).length) {
           const details = element("details");
           details.dataset.taskId = task.id;
           details.open = expanded.has(task.id);
           details.append(element("summary", "Evidence and task details"),
             element("pre", JSON.stringify(task.details, null, 2)));
-          node.append(details);
+          more.append(details);
         }
+        node.append(more);
+        if (operatorStates(task).length) node.append(moveForm(task));
         return node;
       }
 
       function renderDetail(state) {
-        const panel = document.getElementById("detail");
+        const list = document.getElementById("task-list");
         if (!state) {
-          panel.hidden = true;
-          panel.replaceChildren();
+          dialog.close();
+          dialog.dataset.state = "";
+          list.replaceChildren();
+          list.dataset.signature = "";
           return;
         }
-        const expanded = new Set([...panel.querySelectorAll("details[open]")].map((node) => node.dataset.taskId));
+        if (dialog.dataset.state === state && dialog.querySelector(".move[open]")) return;
+        const expanded = new Set([...list.querySelectorAll("details[open]")].map((node) => node.dataset.taskId));
         const tasks = snapshot.tasks.filter((task) => task.state === state)
           .sort((a, b) => Date.parse(entered(a)) - Date.parse(entered(b)));
-        const head = element("div", null, "detail-head");
-        const close = element("button", "Back to flow");
-        close.type = "button";
-        close.addEventListener("click", () => choose(state));
-        const title = element("h2", places[state].title);
+        const title = document.getElementById("detail-title");
+        title.textContent = places[state].title;
         title.append(element("span", String(tasks.length), "counter"));
-        head.append(title, close);
-        const cards = element("div", null, "cards");
-        for (const task of tasks) cards.append(taskCard(task, expanded));
-        panel.replaceChildren(head, tasks.length ? cards : element("p", "No tasks in this state.", "muted"));
-        panel.hidden = false;
+        const signature = JSON.stringify([selection, state, tasks]);
+        if (list.dataset.signature !== signature) {
+          list.replaceChildren(...tasks.map((task) => taskRow(task, expanded)));
+          list.dataset.signature = signature;
+        }
+        document.getElementById("detail-empty").hidden = tasks.length > 0;
+        if (dialog.dataset.state !== state) document.getElementById("detail-status").textContent = "";
+        dialog.dataset.state = state;
+        if (!dialog.open) dialog.showModal();
       }
 
-      async function getJSON(path) {
-        const response = await fetch(path, { cache: "no-store" });
+      async function requestJSON(path, options = {}) {
+        const response = await fetch(path, { ...options, cache: "no-store" });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error ?? `HTTP ${response.status}`);
         return data;
       }
 
       async function discover() {
-        const data = await getJSON("/api/factories");
+        const data = await requestJSON("/api/factories");
         const signature = JSON.stringify([selection, data.factories.map((item) => [item.file, item.task_count])]);
         if (signature !== listedChoices) {
           const selector = document.getElementById("factory");
@@ -573,6 +739,9 @@
         const before = sameSource ? snapshot : null;
         const hops = before ? hopsSince(data.tasks, cutoff) : [];
         snapshot = data;
+        lastSource = file;
+        lastRead = new Date().toISOString();
+        document.getElementById("error").hidden = true;
         cutoff = data.tasks.flatMap((task) => task.history.map((item) => item.at))
           .reduce((latest, at) => (Date.parse(at) > Date.parse(latest) ? at : latest), "1970-01-01T00:00:00Z");
         if (!sameSource) {
@@ -590,6 +759,7 @@
         document.title = `${data.project} - Factory`;
         draw();
         animate(hops);
+        freshness();
       }
 
       async function refresh() {
@@ -619,13 +789,11 @@
           const current = selection;
           if (current) {
             try {
-              const data = await getJSON(`/api/factory?${new URLSearchParams({ file: current })}`);
+              const version = mutation;
+              const data = await requestJSON(`/api/factory?${new URLSearchParams({ file: current })}`);
               validate(data);
-              if (current === selection) {
+              if (current === selection && version === mutation) {
                 load(data, current);
-                lastSource = current;
-                lastRead = new Date().toISOString();
-                document.getElementById("error").hidden = true;
               }
             } catch (cause) {
               if (current === selection) showError(cause);
@@ -649,16 +817,16 @@
         else url.searchParams.delete("file");
         url.hash = "";
         history.replaceState(null, "", url);
+        renderDetail(null);
         snapshot = lastSource = null;
         return refresh();
       });
       document.getElementById("refresh").addEventListener("click", refresh);
       window.addEventListener("hashchange", draw);
-      document.addEventListener("keydown", (event) => {
-        if (event.key === "Escape" && openState()) {
-          history.replaceState(null, "", `${location.pathname}${location.search}`);
-          draw();
-        }
+      document.getElementById("close-detail").addEventListener("click", () => choose(openState()));
+      dialog.addEventListener("cancel", (event) => {
+        event.preventDefault();
+        choose(openState());
       });
 
       buildFlow();

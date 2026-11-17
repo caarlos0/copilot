@@ -95,7 +95,13 @@ authority. Existing comment-based records are historical evidence only.
 State lives in `<owner.repo>-factory.json` (`factory/v1`) in
 `~/.local/state/copilot-coordinator/`. Run `node serve.mjs` from the
 `lifecycle` skill directory in the factory plugin for an animated flowchart
-dashboard. Click a state to list its tasks. Move an old project with
+dashboard. Click a state for a popup task list. Use **Move task** to return a
+task to an earlier state, unblock it, or move it directly to **Resolved**, with
+a comment for the factory. Resolution requires an outcome (default: completed)
+and does not merge or close GitHub items.
+The comment stays in history and is marked pending until the factory has
+reconciled its workers. The dashboard does not stop running workers or grant
+merge authority. Move an old project with
 `node migrate.mjs --project owner/repo` from the same directory. It merges the
 implementer and coordinator handoffs and leaves the old files in place unless
 you pass `--archive`.
