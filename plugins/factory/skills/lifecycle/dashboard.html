@@ -149,9 +149,12 @@
       .move-form .controls { justify-content: flex-end; }
       #detail-status, #detail-empty { margin: 16px 24px; }
       #detail-status:empty { display: none; }
-      .task-filter { margin: 16px 24px 8px; }
-      .task-filter p { margin: 4px 0 0; }
-      #task-filter-count { margin: 8px 24px; }
+      .global-filter { max-width: 720px; margin: 16px 0 8px; }
+      .global-filter .controls { align-items: center; }
+      .global-filter input { flex: 1; min-width: 240px; }
+      .global-filter p { margin: 4px 0 0; }
+      #global-filter-count { margin: 8px 0; }
+      #detail-filter-count { margin: 8px 24px; }
       .counter { display: inline-block; min-width: 20px; margin-left: 8px; padding: 0 6px; border-radius: 2em;
         background: color-mix(in srgb, var(--neutral) 20%, transparent); font-size: 12px; font-weight: 500;
         line-height: 18px; text-align: center; vertical-align: middle; }
@@ -203,6 +206,17 @@
         <select id="factory"><option value="">Choose a factory...</option></select>
         <button id="refresh" type="button">Refresh now</button>
       </div>
+      <div class="global-filter">
+        <label for="global-filter">Filter all tasks</label>
+        <div class="controls">
+          <input id="global-filter" type="search" autocomplete="off"
+            placeholder="state:review workers.review.status:running"
+            aria-describedby="global-filter-help global-filter-count">
+          <button id="clear-filter" type="button" hidden>Clear</button>
+        </div>
+        <p id="global-filter-help" class="muted">Search all fields. Separate terms with spaces to match all of them; use field:value for a field, or field.path:value for nested fields.</p>
+        <p id="global-filter-count" class="muted" role="status" hidden></p>
+      </div>
       <p id="run-state" class="muted">Choose a factory to display its flow.</p>
       <p id="freshness" class="muted"></p>
       <p id="discovery-error" role="alert" hidden></p>
@@ -221,13 +235,7 @@
             aria-label="Close task list" title="Close task list">&times;</button>
         </div>
         <p id="detail-status" role="status"></p>
-        <div class="task-filter">
-          <label for="task-filter">Filter tasks</label>
-          <input id="task-filter" type="search" autocomplete="off" placeholder="state:review workers.review.status:running"
-            aria-describedby="task-filter-help">
-          <p id="task-filter-help" class="muted">Search all fields. Separate terms with spaces to match all of them; use field:value for a field, or field.path:value for nested fields.</p>
-        </div>
-        <p id="task-filter-count" class="muted" role="status"></p>
+        <p id="detail-filter-count" class="muted" role="status"></p>
         <ul id="task-list"></ul>
         <p id="detail-empty" class="muted" hidden>No tasks in this state.</p>
       </dialog>
@@ -460,23 +468,25 @@
 
       function draw() {
         if (!snapshot) return;
+        const tasks = filteredTasks();
+        renderFilterStatus(tasks.length);
         const chosen = openState();
         for (const state of states) {
           const group = nodeOf(state);
           group.classList.toggle("selected", chosen === state);
-          const tasks = snapshot.tasks.filter((task) => task.state === state);
-          const running = tasks.reduce((sum, task) => sum + Object.values(task.workers)
+          const stateTasks = tasks.filter((task) => task.state === state);
+          const running = stateTasks.reduce((sum, task) => sum + Object.values(task.workers)
             .filter((worker) => worker?.status === "running").length, 0);
-          const live = state === "blocked" ? tasks.length > 0 : running > 0;
+          const live = state === "blocked" ? stateTasks.length > 0 : running > 0;
           group.classList.toggle("active", live);
           const idle = { initial: "queued", blocked: "needs a decision", resolved: "done" }[state] ?? "waiting";
-          group.querySelector(".sub").textContent = tasks.length ? idle : "";
+          group.querySelector(".sub").textContent = stateTasks.length ? idle : "";
           group.setAttribute("aria-label",
-            `${places[state].title}: ${tasks.length} ${tasks.length === 1 ? "task" : "tasks"}`);
+            `${places[state].title}: ${stateTasks.length} ${stateTasks.length === 1 ? "task" : "tasks"}`);
         }
         for (const group of flow.querySelectorAll(".outcome")) {
           const outcome = group.dataset.outcome;
-          const count = snapshot.tasks.filter((task) => task.resolution?.outcome === outcome).length;
+          const count = tasks.filter((task) => task.resolution?.outcome === outcome).length;
           const selected = openOutcome() === outcome;
           group.querySelector(".outcome-count").textContent = String(count);
           group.classList.toggle("selected", selected);
@@ -484,7 +494,7 @@
           group.setAttribute("aria-label",
             `Resolved: ${outcomeTitles[outcome]}, ${count} ${count === 1 ? "task" : "tasks"}`);
         }
-        const counts = countByState(snapshot.tasks);
+        const counts = countByState(tasks);
         Object.assign(targets, counts);
         const enabled = snapshot.rules.filter((rule) => rule.enabled && isFinder(rule));
         for (const edge of flow.querySelectorAll(".edge")) {
@@ -496,7 +506,7 @@
         }
         drawSource(enabled);
         tween();
-        renderDetail(chosen);
+        renderDetail(chosen, tasks);
         renderProducers(producersOpen());
       }
 
@@ -657,6 +667,26 @@
           }
           return allFields.includes(term.replace(/^"|"$/g, "").toLowerCase());
         });
+      }
+
+      function filteredTasks() {
+        const query = document.getElementById("global-filter").value.trim();
+        return snapshot.tasks.filter((task) => matchesTask(task, query));
+      }
+
+      function renderFilterStatus(matchingCount) {
+        const status = document.getElementById("global-filter-count");
+        const clear = document.getElementById("clear-filter");
+        const query = document.getElementById("global-filter").value.trim();
+        if (!snapshot || !query) {
+          status.textContent = "";
+          status.hidden = true;
+          clear.hidden = true;
+          return;
+        }
+        status.textContent = `${matchingCount} of ${snapshot.tasks.length} tasks match.`;
+        status.hidden = false;
+        clear.hidden = false;
       }
 
       function openMove(task) {
@@ -887,7 +917,7 @@
         return node;
       }
 
-      function renderDetail(state) {
+      function renderDetail(state, matchingTasks) {
         const list = document.getElementById("task-list");
         if (!state) {
           moveDialog.close();
@@ -900,18 +930,19 @@
         }
         const outcome = state === "resolved" ? openOutcome() : null;
         const sameList = dialog.dataset.state === state && dialog.dataset.outcome === (outcome ?? "");
-        const filter = document.getElementById("task-filter").value.trim();
+        const filter = document.getElementById("global-filter").value.trim();
         const sameFilter = list.dataset.filter === filter;
         const expanded = new Set([...list.querySelectorAll("details[open]")].map((node) => node.dataset.taskId));
         const allTasks = snapshot.tasks.filter((task) => task.state === state &&
           (!outcome || task.resolution.outcome === outcome));
-        const tasks = allTasks.filter((task) => matchesTask(task, filter))
+        const tasks = matchingTasks.filter((task) => task.state === state &&
+          (!outcome || task.resolution.outcome === outcome))
           .sort((a, b) => Date.parse(entered(a)) - Date.parse(entered(b)));
         const title = document.getElementById("detail-title");
         title.textContent = outcome ? `Resolved: ${outcomeTitles[outcome]}` : places[state].title;
         title.append(element("span", String(tasks.length), "counter"));
-        document.getElementById("task-filter-count").textContent = filter
-          ? `${tasks.length} of ${allTasks.length} tasks match.`
+        document.getElementById("detail-filter-count").textContent = filter
+          ? `${tasks.length} of ${allTasks.length} tasks match the global filter.`
           : `${allTasks.length} ${allTasks.length === 1 ? "task" : "tasks"}.`;
         const signature = JSON.stringify([selection, state, outcome, filter, tasks]);
         if (list.dataset.signature !== signature) {
@@ -1140,7 +1171,7 @@
 
       document.getElementById("factory").addEventListener("change", () => {
         selection = document.getElementById("factory").value;
-        document.getElementById("task-filter").value = "";
+        document.getElementById("global-filter").value = "";
         const url = new URL(location.href);
         if (selection) url.searchParams.set("file", selection);
         else url.searchParams.delete("file");
@@ -1148,10 +1179,15 @@
         history.replaceState(null, "", url);
         renderDetail(null);
         snapshot = lastSource = null;
+        renderFilterStatus(0);
         return refresh();
       });
       document.getElementById("refresh").addEventListener("click", refresh);
-      document.getElementById("task-filter").addEventListener("input", () => renderDetail(openState()));
+      document.getElementById("global-filter").addEventListener("input", draw);
+      document.getElementById("clear-filter").addEventListener("click", () => {
+        document.getElementById("global-filter").value = "";
+        draw();
+      });
       window.addEventListener("hashchange", draw);
       document.getElementById("close-detail").addEventListener("click", () => choose(null));
       dialog.addEventListener("cancel", (event) => {
