@@ -182,8 +182,8 @@ focused test can cover it.
 - `simplifier`: assess simpler alternatives without editing files.
 - `writing-tests`: review regression coverage, test isolation, and determinism.
 - `gh-cli`: GitHub operations and waiting for new pushes.
-- `infographic`: explain findings visually when that makes them clearer; follow
-  its publishing boundaries.
+- `infographic`: required when a PR changes production behavior. See "Infographic" under "Posting a
+  review"; the review request authorizes the one image in the review body.
 - `change-impact-auditor`: configuration, policy, protocol, or shared models.
 - `runtime-process-debugging`: process, shell, pipe, lifecycle, or race behavior.
 - `issue-validator`: a claimed issue fix or stale report.
@@ -224,6 +224,8 @@ comments, so post through the reviews API, for example
   cross-cutting scope, missing tests, and disclosed verification gaps.
 - Anchor to a line the diff touches. When a finding concerns unchanged code,
   anchor to the changed line that reaches it and say why in the comment.
+- When the PR changes production behavior, include one infographic in the
+  review body. See "Infographic" below.
 - Make each comment stand alone: trigger, impact, smallest fix, needed test.
   Reference sibling findings by file and line rather than repeating them.
 - After posting, read the comments back and confirm every anchor resolved to the
@@ -231,12 +233,42 @@ comments, so post through the reviews API, for example
 - When a later review replaces an earlier one, dismiss the earlier one if GitHub
   permits it; otherwise name the superseded review in the new review body.
 
+### Infographic
+
+If the PR changes any behavior in production code, the review carries an
+infographic. Otherwise (docs, tests, comments, formatting, version bumps) skip
+it and say that you skipped it.
+
+1. Invoke the `infographic` skill before posting. Show what the change does
+   and the verdict: flow or before/after, findings with their severity, or the
+   reason there are none. Keep it to one image.
+2. The review request is the user's explicit request to upload and post it, as
+   the `infographic` skill requires. This covers only the image in this
+   review's body. Do not create a companion comment, edit the PR description,
+   or publish a gist.
+3. Export a PNG. Upload it with the "Fallback: manual upload" steps of the
+   `github-pr-media` skill (a `curl` POST that returns a URL). Do not use
+   `--attach` on `gh pr comment`; that posts an extra comment. Embed
+   `![alt text](url)` near the top of the review body.
+4. After posting, read the review back and confirm the image URL is present. If
+   the upload fails, post the review without the image and state the exact
+   error in the body. A failed upload never delays or downgrades the verdict.
+
 ### Approval
 
 Read the PR discussion before choosing the review event:
 
-- For an incomplete review, post `COMMENT`, disclose the verification gaps,
-  and do not approve.
+- A review is incomplete only when you could not read the full diff at the
+  current head, or an unresolved finding or open question remains. Then post
+  `COMMENT`, disclose the gaps, and do not approve.
+- Not building or running tests, an unavailable independent check, and an
+  unverified platform claim are disclosed gaps, not incompleteness. They never
+  block approval of a PR with no findings. Say "no high-confidence findings"
+  and approve; a clean review that only comments forces the human to approve
+  again.
+- Approve by default. Use `COMMENT` only when a rule below or a real open
+  finding says so. When this review follows an earlier `COMMENT` review and
+  every earlier finding is fixed at the new head, approve.
 - For a PR authored by `caarlos0`, post `COMMENT`: GitHub does not permit
   approving or requesting changes on your own PR.
 - Do not approve if `caarlos0` made a negative comment, especially about the
