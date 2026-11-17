@@ -201,6 +201,26 @@ the default branch, verify the ancestry and merge commit, then resolve it as
 and blocked until its task can be identified. A refused write stops the sweep
 until the file is reread and the drift is resolved.
 
+Start every sweep with the bundled read-only check, beside this skill:
+
+```sh
+node reconcile.mjs /abs/state/owner.repo-factory.json [--default-branch main]
+```
+
+It prints `{findings, errors}` as JSON. Run it at startup, on every wake, on
+every user message, and before every report. A missed waiter wake must never
+leave work behind. Treat each finding as unfinished work:
+
+- `unprocessed-result`: a `complete` result is newer than its task. Mirror and
+  verify it now, then advance the task.
+- `branch-ahead`: an open task's branch has commits not in the default branch.
+  Expected while an implementation or review worker still runs; otherwise
+  verify and land or block it.
+- `open-window`: a resolved task still has an open Rex window. Release it as in
+  "Release panes".
+
+Do not report a sweep as clean while `findings` or `errors` is not empty.
+
 ### Handle dashboard direction before worker results
 
 The operator can move a task to an earlier open state, unblock it to an open
@@ -309,8 +329,9 @@ The factory does not stop or wait after a single pass. On startup, recovery,
 every waiter wake, and each user update, finish one complete work sweep before
 ending the turn:
 
-1. Reconcile dashboard feedback first. Then inspect every changed result,
-   worker pane, PR, and worktree. Do not leave a result or worktree unreconciled.
+1. Reconcile dashboard feedback first. Run `reconcile.mjs`. Then inspect every
+   changed result, worker pane, PR, and worktree. Do not leave a result or
+   worktree unreconciled.
 2. Fill available worker slots with runnable queued tasks, including every
    `initial` task. Continue until no queued task can use a free slot or the
    applicable worker, spend, or authority limit is reached.
@@ -681,6 +702,12 @@ node wait.mjs --cursor /abs/state/owner.repo-factory-cursor.json \
   /abs/state/task-1-role-result.json /abs/state/task-2-role-result.json
 ```
 
+The waiter must always list the factory file and every active result file: add
+each result when its worker launches. After any wake or user message, re-arm it
+before you end the turn. When a waiter exits, read its output at once. A
+waiter that exited, or a missed notification, is why every turn also runs
+`reconcile.mjs`.
+
 Use the tool's completion notification to resume. The command exits with one
 JSON object. Its `changed` array lists changed paths. Read the factory and
 reconcile dashboard direction first, then read each result and verify its
@@ -781,6 +808,11 @@ the merge with `git merge-base --is-ancestor HEAD_SHA DEFAULT_BRANCH`, store the
 merge commit SHA in `details.merge_commit`, then resolve it as `merged`.
 
 ## Release panes
+
+Closing a task's worker panes is part of the same step that records `resolved`.
+Do not end the turn after writing `resolved` until each pane's release is
+written and the panes are closed, or the reason they stay is recorded. The
+`open-window` finding from `reconcile.mjs` flags any that remain.
 
 - **Investigation:** After you verify the saved result and see the worker is
   idle, with no running tool or watcher, close its pane.
