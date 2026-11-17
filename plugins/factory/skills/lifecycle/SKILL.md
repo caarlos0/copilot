@@ -1084,7 +1084,7 @@ run, worker and its result), the user-links source, and the skipped list. A
 separate Self-improve section lists `improve` rules the same way; they are not
 counted in the node or its next due time.
 Click a state to open
-a task list docked on the left of the flowchart, which shrinks or scrolls
+a task list docked on the right edge, beside the flowchart, which shrinks or scrolls
 while it is open, with links (opened in a new tab), time in state, blocker or
 resolution, the full history, and expandable worker, head, cycle, merge, and
 syntax-highlighted evidence details. A task's **Move** button opens a second

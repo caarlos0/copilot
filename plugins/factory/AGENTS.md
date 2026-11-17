@@ -83,7 +83,7 @@ branches merged into the default branch, Rex panes, PRs, and worker results.
 Repair drift through `factory.mjs`, including local issue-less merges with
 `resolution: merged` and the full merge SHA in `details.merge_commit`.
 
-The dashboard opens task lists in a panel docked left of the flowchart (the
+The dashboard opens task lists in a panel docked on the right edge, beside the flowchart (the
 flowchart shrinks while it is open) and can move a task back or directly
 to `resolved` with an operator comment. Manual resolution requires a non-merge
 outcome; it does not merge or close GitHub items. Resolved tasks with pending
