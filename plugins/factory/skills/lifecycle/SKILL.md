@@ -637,13 +637,18 @@ node broker.mjs emit /abs/state/owner.repo-factory.json worker.result --task iss
   --data '{"role":"implementation","outcome":"complete","head":"FULL SHA","result":"owner.repo-issue-42-implementation-result.json","feedback_id":null,"summary":"one line"}'
 node broker.mjs emit /abs/state/owner.repo-factory.json worker.blocked --task issue-42 \
   --data '{"role":"implementation","reason":"needs a product decision"}'
+node broker.mjs emit /abs/state/owner.repo-factory.json pr.merged --task issue-42 \
+  --data '{"role":"implementation","pr":"URL","merge_commit":"FULL SHA","head":"FULL SHA"}'
 ```
 
-Put the absolute path of `broker.mjs` (beside this skill) in the brief. `worker.result`
+The `pr.merged` command goes in the brief of every implementation worker on a
+task with a PR. Put the absolute path of `broker.mjs` (beside this skill) in the brief. `worker.result`
 needs `data.role` and `data.outcome` (`working`, `waiting`, `complete`, or `blocked`);
 add `head`, `result`, `feedback_id`, and a short `summary` when known. Keep long
 evidence in the result file; an event is at most 64 KiB. Emit `worker.blocked`
 (`role`, `reason`) as well as a `blocked` result so a blocker wakes the factory first.
+`pr.merged` needs `data.pr` and `data.merge_commit`; add `role` and `head`. It is
+a hint, not proof: the factory verifies the merge on GitHub.
 
 A result file is cumulative and replaced atomically at each milestone:
 
@@ -706,6 +711,12 @@ Tell every worker:
   `summary` names the rate limit and the reset time, and emit `worker.result`.
   Until the reset, make at most one REST check (`gh api`) every 5 minutes or
   more; then resume `gh wait`.
+- Implementation worker only, on a task with a PR: when your watcher
+  (`gh wait --merge`) or your own merge reports the merge, save the final
+  result (`merged: true`, full `merge_commit` and `head`), emit `worker.result`,
+  then emit `pr.merged` with the PR URL and the full merge commit SHA. Then stop
+  every watcher you started and return idle. Do not close your pane or remove
+  your worktree; the factory does that.
 
 ### Investigation worker
 
@@ -756,7 +767,9 @@ checks.
 
 The implementation worker is the sole landing writer. It stays alive until
 the PR merges, closes, or needs a user decision, saving a result when the PR
-opens, on each new head, on a blocker, and when merged. At L2 it hands off;
+opens, on each new head, on a blocker, and when merged. Right after its watcher
+or its own merge reports the merge, and after it saves the final result
+(`merged: true`), it emits `pr.merged`, stops its watchers, and idles. At L2 it hands off;
 at L3 with a matching grant or L4 it lands when `may_merge` allows it.
 Waiting never grants authority. If the task is already fixed, it says so with
 evidence and stops.
@@ -861,6 +874,7 @@ the cursor. Each event has `id`, `at`, `type`, `task`, `source`, and `data`:
 | `feedback.pending` | `factory.mjs` on a dashboard move | `feedback_id` |
 | `worker.result` | a worker after each result write | `role`, `outcome`, `head`, `result`, `feedback_id`, `summary` |
 | `worker.blocked` | a worker that cannot continue | `role`, `reason` |
+| `pr.merged` | the implementation worker after its final `merged: true` result | `role`, `pr`, `merge_commit`, `head` |
 | `rule.due` | `wait --due` itself, never stored | `rules`: due rule IDs |
 
 Rules:
@@ -891,7 +905,9 @@ Rules:
    direction first, then handle each event in order. For a `worker.result`,
    read the result file named in `data.result`, verify its feedback ID and
    evidence, mirror it with `factory.mjs`, then write the state change.
-   The event is a hint; the result file and Git are the evidence.
+   The event is a hint; the result file and Git are the evidence. For a
+   `pr.merged`, follow "Merge" and "Release panes": verify, resolve, release,
+   and re-arm at once.
 5. `--due` also returns `rule.due` when an enabled rule with `every` is due
    while the factory is `active`. It rereads the factory on every write to it
    (`--run-status`, `--rules`, `--rule --ran`) and moves its timer, even for
@@ -961,6 +977,23 @@ Keep current-head decisions only there, not in `details.lever`.
 After the attempt, the factory mirrors the verified outcome and any merge
 commit into its file before another action.
 
+On a `pr.merged` event, the factory never trusts the event alone. It does these
+steps in order, in the same turn:
+
+1. Verify on GitHub: `gh pr view URL --json state,mergeCommit`. The state must
+   be `MERGED`, and `mergeCommit.oid` must equal `data.merge_commit`. If not,
+   ignore the event, record the mismatch, and re-arm; `reconcile.mjs` stays
+   the backstop.
+2. Mirror the worker's final result (`merged: true`) with `factory.mjs`.
+3. Write `resolved` with outcome `merged` and `details.merge_commit`.
+4. Close the worker and review panes (see "Release panes").
+5. Plan and remove an eligible worktree with `wt NAME --delete`, under the
+   rules in "Release panes".
+6. Re-arm the waiter.
+
+A missed or lost `pr.merged` costs only time: the reconcile sweep finds the
+merged PR, the complete result, and the merged worktree on the next wake.
+
 A head change clears `merge`; recheck the new head without discarding a
 standing grant or asking for it again. Clear `merge` with `--merge null` when
 a grant is revoked, expires, or no longer passes the gate. Legacy `comment`
@@ -995,7 +1028,9 @@ written and the panes are closed, or the reason they stay is recorded. The
 - **Implementation and review:** Keep them until the task is `resolved`.
   An idle prompt, a passed review, a created PR, passing CI, or enabled
   auto-merge is not a release condition. Close both when GitHub confirms the
-  merge and the final result is verified.
+  merge and the final result is verified. A `pr.merged` event starts this
+  release at once, after the GitHub check in "Merge"; without the event, the
+  reconcile sweep starts it.
 - **Resolved without a merge** (`already-fixed`, `duplicate`, `invalid`,
   `cancelled`, `completed`): Close the panes after you verify each is idle and nothing is
   unpushed.

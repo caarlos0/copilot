@@ -143,6 +143,40 @@ test("emit rejects unknown types and missing data", async (t) => {
   assert.equal(f.run("wait", f.factory, "--since", "99", "--timeout", "1").status, 1);
 });
 
+test("pr.merged needs a task, pr, and merge_commit", async (t) => {
+  const f = await fixture(t);
+  const merged = { role: "implementation", pr: "https://github.com/owner/repo/pull/1", merge_commit: "a".repeat(40), head: "b".repeat(40) };
+  assert.equal(f.run("emit", f.factory, "pr.merged", "--data", JSON.stringify(merged)).status, 2);
+  assert.equal(f.run("emit", f.factory, "pr.merged", "--task", "t1", "--data", JSON.stringify({ ...merged, pr: undefined })).status, 2);
+  const missing = f.run("emit", f.factory, "pr.merged", "--task", "t1", "--data", JSON.stringify({ ...merged, merge_commit: undefined }));
+  assert.equal(missing.status, 2);
+  assert.match(missing.stderr, /needs "merge_commit"/);
+  assert.equal(f.run("cursor", f.factory).stdout.trim(), JSON.stringify({ cursor: "0" }));
+  assert.equal(f.emit("pr.merged", { data: JSON.stringify(merged) }).data.merge_commit, merged.merge_commit);
+});
+
+test("wait returns pr.merged like any other event", async (t) => {
+  const f = await fixture(t);
+  const data = { role: "implementation", pr: "https://github.com/owner/repo/pull/1", merge_commit: "a".repeat(40), head: "b".repeat(40) };
+  const done = await f.wait("--exclude-source", "coordinator");
+  const event = f.emit("pr.merged", { data: JSON.stringify(data) });
+  const out = await done();
+  assert.deepEqual(out.events, [event]);
+  assert.equal(event.type, "pr.merged");
+  assert.equal(event.task, "t1");
+  assert.equal(event.source, "worker");
+  assert.deepEqual(event.data, data);
+  assert.equal(out.cursor, String((await stat(f.log)).size));
+});
+
+test("the lifecycle skill documents pr.merged for workers and the factory", async () => {
+  const text = await readFile(join(__dirname, "SKILL.md"), "utf8");
+  assert.match(text, /broker\.mjs emit \S+ pr\.merged --task/);
+  assert.match(text, /\| `pr\.merged` \|/);
+  assert.match(text, /gh pr view URL --json state,mergeCommit/);
+  assert.match(text, /A missed or lost `pr\.merged`/);
+});
+
 test("factory.mjs writes emit task.moved, task.updated, and dashboard feedback events", async (t) => {
   const f = await fixture(t);
   const factory = (...args) => {

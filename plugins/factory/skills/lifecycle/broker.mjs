@@ -16,6 +16,7 @@ const eventTypes = {
   "task.updated": { task: true, data: ["revision"] },
   "worker.result": { task: true, data: ["role", "outcome"] },
   "worker.blocked": { task: true, data: ["role", "reason"] },
+  "pr.merged": { task: true, data: ["pr", "merge_commit"] },
   "feedback.pending": { task: true, data: ["feedback_id"] },
 };
 
@@ -281,6 +282,8 @@ wait    Blocks until an event exists after the cursor, prints {"events":[...],"c
 emit    Appends one event and prints it. Types: ${Object.keys(eventTypes).join(", ")}.
         Needed data keys: ${Object.entries(eventTypes).map(([type, { data }]) => `${type}: ${data.join(", ")}`).join("; ")}.
         worker.result outcome: ${workerOutcomes.join(", ")}. --source defaults to worker.
+        pr.merged is a hint from the implementation worker (role, pr, merge_commit, head); the
+        factory verifies the merge on GitHub before it resolves the task.
         factory.mjs emits task.moved, task.updated, and feedback.pending after every write.
 cursor  Prints {"cursor":"N"} for the current end of the log.
 armed   Read-only. Prints {"armed":true,"pid":N} and exits 0 when a waiter for this factory is
