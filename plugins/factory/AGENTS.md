@@ -58,7 +58,8 @@ and does not edit. Every brief tells the worker to read
 `plugins/factory/AGENTS.md` before its first edit.
 
 State is one `<owner.repo>-factory.json` (`factory/v1`) per project under
-`~/.local/state/copilot-coordinator/`, with one agent owner guarded by
+`~/.local/state/copilot-factory/` (or the legacy `~/.local/state/copilot-coordinator/`
+when only that exists), with one agent owner guarded by
 `<project>-factory.lock`. Agent and dashboard writes share `factory.mjs` and
 its short-lived `<file>.write.lock`. It validates the
 state flow (`initial`, `investigation`, `implementation`, `review`, `blocked`,
@@ -69,7 +70,10 @@ local `git merge` resolves it as `merged` with the merge commit SHA in
 `details`. Tasks with an issue keep the PR flow. `factory-data.mjs` holds the
 schema and is shared by the writer,
 `migrate.mjs`, `serve.mjs` (port 8766, lists only `*-factory.json`), and
-`dashboard.html`. `migrate.mjs` moves the implementer and coordinator handoffs
+`dashboard.html`. `state-dir.mjs` resolves the default state directory for
+`serve.mjs` and `migrate.mjs`: the new directory if it exists, else the legacy
+one if it exists, else the new one. Nothing moves files out of the legacy
+directory. `migrate.mjs` moves the implementer and coordinator handoffs
 into the factory file. It refuses to run against a live legacy lock.
 
 The factory file is the only task tracker. Create every task there before

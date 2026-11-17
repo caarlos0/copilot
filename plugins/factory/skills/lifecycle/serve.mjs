@@ -1,11 +1,11 @@
 import { createServer } from "node:http";
 import { readFile, readdir, realpath, stat } from "node:fs/promises";
-import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { countByState, isObject, validate } from "./factory-data.mjs";
 import { ConflictError, update } from "./factory.mjs";
+import { stateDirectory } from "./state-dir.mjs";
 
 const factoryFile = /-factory\.json$/i;
 const maxBody = 16384;
@@ -23,7 +23,7 @@ async function main() {
     options = parseArgs({
       options: {
         help: { type: "boolean", short: "h" },
-        directory: { type: "string", default: join(homedir(), ".local/state/copilot-coordinator") },
+        directory: { type: "string" },
         port: { type: "string", default: "8766" },
       },
     }).values;
@@ -41,7 +41,8 @@ async function main() {
 Usage: node serve.mjs [--directory PATH] [--port PORT]
        bun serve.mjs [--directory PATH] [--port PORT]
 
-  --directory PATH  State directory (default: ~/.local/state/copilot-coordinator)
+  --directory PATH  State directory (default: ~/.local/state/copilot-factory, or the
+                    legacy ~/.local/state/copilot-coordinator when only that exists)
   --port PORT       Listening port (default: 8766; 0 chooses an available port)
   -h, --help        Show help
 
@@ -50,7 +51,7 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
     return;
   }
 
-  const configuredDirectory = resolve(options.directory);
+  const configuredDirectory = resolve(options.directory ?? stateDirectory());
   const directory = await realpath(configuredDirectory);
   await readdir(directory);
   const assets = dirname(fileURLToPath(import.meta.url));
