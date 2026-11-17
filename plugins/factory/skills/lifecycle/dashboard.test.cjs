@@ -278,7 +278,7 @@ test("the page script parses, never renders data as HTML, and finds its elements
 });
 
 // Model only the DOM operations used by the task list; HTTP and the page script are real.
-async function dashboard(t, { reducedMotion = true, confirm = () => true } = {}) {
+async function dashboard(t, { reducedMotion = true, confirm = () => true, now = Date.now() } = {}) {
   const { url, directory } = await server(t);
   const elements = new Map();
   const document = {
@@ -359,9 +359,13 @@ async function dashboard(t, { reducedMotion = true, confirm = () => true } = {})
     .map((id) => elements.get(id)));
   elements.get("move-dialog").append(...["move-title", "close-move", "move-body"].map((id) => elements.get(id)));
   const location = new URL(`?file=${factoryFile}`, url);
+  class ClockDate extends Date {
+    constructor(...args) { super(...(args.length ? args : [now])); }
+    static now() { return now; }
+  }
   const context = vm.createContext({
     ...await import("./factory-data.mjs"),
-    document, location, URL, URLSearchParams,
+    document, location, URL, URLSearchParams, Date: ClockDate,
     history: { replaceState: (_, __, value) => { location.href = new URL(value, location).href; } },
     window: { addEventListener() {}, confirm },
     matchMedia: () => ({ matches: reducedMotion }),
@@ -380,8 +384,41 @@ async function dashboard(t, { reducedMotion = true, confirm = () => true } = {})
   vm.runInContext("animate = () => {}; buildFlow();", context);
   const run = (source) => vm.runInContext(source, context);
   await run("refresh()");
-  return { run, document, directory, get: (id) => elements.get(id) };
+  return { run, document, directory, get: (id) => elements.get(id), setNow: (value) => { now = value; } };
 }
+
+test("unchanged refresh updates elapsed labels without replacing expanded rows or move drafts", async (t) => {
+  const ui = await dashboard(t, { now: Date.parse("2026-05-01T12:05:00Z") });
+  const data = structuredClone(example);
+  const review = data.tasks.find((task) => task.id === "issue-7");
+  review.merge = structuredClone(data.tasks.find((task) => task.id === "issue-3").merge);
+  review.merge.head = review.head;
+  review.details = { verdict: "implement" };
+  await writeFile(join(ui.directory, factoryFile), JSON.stringify(data));
+  await ui.run("refresh()");
+  ui.run("choose('review')");
+  const row = ui.get("task-list").children[0];
+  assert.equal(row.querySelector(".state").textContent, "review for 15m");
+  assert.match(row.textContent, /20h 35m ago/);
+  const details = row.querySelectorAll("details");
+  details.forEach((detail) => { detail.open = true; });
+
+  ui.setNow(Date.parse("2026-05-01T12:10:00Z"));
+  await ui.run("refresh()");
+  assert.equal(ui.get("task-list").children[0], row);
+  assert.deepEqual(details.map((detail) => detail.open), [true, true]);
+  assert.equal(row.querySelector(".state").textContent, "review for 20m");
+  assert.match(row.textContent, /20h 40m ago/);
+
+  await ui.get("close-detail").fire("click");
+  ui.run("choose('initial')");
+  await ui.get("task-list").querySelector(".move").fire("click");
+  const comment = ui.get("move-body").querySelector("textarea");
+  comment.value = "Keep this draft";
+  await ui.run("refresh()");
+  assert.equal(ui.get("move-dialog").open, true);
+  assert.equal(ui.get("move-body").querySelector("textarea").value, "Keep this draft");
+});
 
 test("state selection opens a modal list that can close and reopen", async (t) => {
   const ui = await dashboard(t, { reducedMotion: false });
