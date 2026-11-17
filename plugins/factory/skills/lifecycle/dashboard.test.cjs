@@ -931,6 +931,8 @@ test("the delegate-always rule is present in the agent, skill, and plugin rules"
     const text = readFileSync(file, "utf8");
     assert.match(text, /never do(es)? (actual )?work or investigation/i, file);
     assert.match(text, /git merge main/, file);
+    assert.match(text, /never\s+waits?\s+on\s+another\s+task/i, file);
+    assert.match(text, /only\s+for\s+a\s+user\s+decision/i, file);
   }
 });
 

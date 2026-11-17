@@ -13,6 +13,13 @@ conflicting merge goes back to a worker to run `git merge main`. Keep this rule
 in `agents/general.agent.md` and the lifecycle skill's "Delegate every task to
 workers" section in sync.
 
+`blocked` is only for a user decision or an outside action. A worker never waits
+on another task or an unmerged branch: for a conflict, a missing dependency, or
+a broken default branch it merges the default branch (never rebase) and makes
+the small fix, or the coordinator creates a new task. The coordinator sends a
+follow-up (or relaunches) at once for a blocked task with a worker-fixable
+cause, and verifies receipt by pane identity, then a new result or event.
+
 `factory:general` is a thin agent over
 `plugins/factory/skills/lifecycle/SKILL.md`. It preloads `lifecycle`, which
 disables model/user invocation. It also preloads `autonomy-dial` and

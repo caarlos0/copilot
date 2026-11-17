@@ -368,7 +368,8 @@ ending the turn:
 
 1. Reconcile dashboard feedback first. Run `reconcile.mjs`. Then inspect every
    changed result, worker pane, PR, and worktree. Do not leave a result or
-   worktree unreconciled.
+   worktree unreconciled. Send a follow-up to every `blocked` task or waiting
+   worker that has a worker-fixable cause ("Never park a worker-fixable task").
 2. Fill available worker slots with runnable queued tasks, including every
    `initial` task. Continue until no queued task can use a free slot or the
    applicable worker, spend, or authority limit is reached.
@@ -511,7 +512,7 @@ work". It changes nothing without the user's answer. Its worker follows
 | `investigation` | One worker adds context to the issue, or to its result when there is no issue, then quits. | one-shot |
 | `implementation` | One worker fixes it in a new worktree until a PR is open or the task is done by other means. It then handles review findings, CI, conflicts, and mergeability. | continuous |
 | `review` | The PR, or the local branch `head` of a task without an issue, is being checked for landing. A review worker runs when required by the task, repo, or spend policy. | continuous, if enabled |
-| `blocked` | A user decision or an outside action is needed. `blocker.from` records where. | none new |
+| `blocked` | A user decision or an outside action is needed. `blocker.from` records where. Never a worker-fixable cause: see "Never park a worker-fixable task". | none new |
 | `resolved` | Done, with an outcome: `merged`, `already-fixed`, `duplicate`, `invalid`, `cancelled`, or `completed`. | none |
 
 Allowed moves: `initial` to `investigation`, `investigation` to
@@ -540,7 +541,29 @@ missing feedback ID after the task has received dashboard feedback.
 | PR merged on GitHub | `resolved` (`merged`) |
 | Task without an issue merged locally into the default branch | `resolved` (`merged`), with the merge commit SHA in `details.merge_commit` |
 | PR closed without a merge | `blocked`; keep the panes |
-| Worker blocked | `blocked` with its reason |
+| Worker blocked on a user decision or outside action | `blocked` with its reason |
+| Worker blocked on a worker-fixable cause | stay in the state; send a follow-up now |
+
+### Never park a worker-fixable task
+
+`blocked` is only for a user decision or an outside action. These causes are
+worker-fixable, so they never justify `blocked`, a wait, or a schedule:
+
+- a conflict with the default branch;
+- an unmerged dependency branch or PR;
+- a missing dependency;
+- a broken default branch.
+
+A worker never waits on another task or an unmerged branch. It merges the
+default branch into its branch (never rebase) and makes the small fix. If the
+fix is not small, or does not belong to the task, the coordinator creates a new
+task for it. Conflicts go back to the owning worker, as above.
+
+When a worker result or event reports one of these causes, or a `blocked` task
+has such a cause, send the worker a follow-up with `rex send` at once, or
+relaunch it. Do not wait for a user. Then verify the worker received it: check
+the pane identity first, then wait for a new result or event. Without a new
+result or event, send it again or relaunch.
 
 Reject a stale result. A review result applies only if its `head` equals the
 PR's current head. Check it with `gh pr view URL --json headRefOid`, or with
@@ -701,6 +724,10 @@ and opens the PR when authorized. For iterative performance or quality work,
 use `find-the-loop` first. Once the PR exists, use `pr-shepherd` to own CI,
 review threads, conflicts, and landing at the inherited autonomy level.
 Follow the repository's merge-not-rebase rule when updating from the base.
+It never waits on another task or an unmerged branch. If the default branch is
+broken or a dependency is missing, it merges the default branch (never rebase)
+and makes the small fix, or reports it so the coordinator creates a new task.
+It writes `blocked` only for a user decision or an outside action.
 
 Use the coding plugin's `gh-cli` native watchers for local wakeups: required
 checks with fail-fast watching, `gh wait` for PR changes, and `gh wait --merge`
