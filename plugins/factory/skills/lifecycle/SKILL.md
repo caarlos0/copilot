@@ -578,7 +578,8 @@ a modal task list, with links (opened in a new tab), time in state, blocker or
 resolution, the full history, and expandable worker, head, cycle, merge, and
 syntax-highlighted evidence details. A task's **Move** button opens a second
 popup that saves an allowed return state or a direct move to `resolved`,
-with a required operator comment. Resolving also requires a non-merge outcome.
+with a required operator comment. Cmd+Enter or Ctrl+Enter saves it.
+Resolving also requires a non-merge outcome.
 The task list stays on the state it showed. It shows acknowledgement status
 without claiming that a worker stopped or restarted. Close a popup with its
 button, Escape, or a click outside it. The move popup retains its draft and

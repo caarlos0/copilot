@@ -306,6 +306,7 @@ async function dashboard(t) {
     async fire(name, event = {}) { await this.listeners.get(name)?.({ target: this, preventDefault() {}, ...event }); }
     getBoundingClientRect() { return { left: 100, right: 900, top: 100, bottom: 700 }; }
     focus() { document.activeElement = this; }
+    requestSubmit() { this.submitted = this.fire("submit"); }
     showModal() { this.open = true; }
     close() { this.open = false; }
     querySelector(selector) { return this.querySelectorAll(selector)[0] ?? null; }
@@ -487,7 +488,10 @@ test("the popup can resolve an initial task with an outcome and comment", async 
   comment.value = "No longer needed. Stop work on this task.";
   await ui.run("refresh()");
   assert.equal(form.querySelectorAll("select").find((select) => select.name === "resolution").value, "cancelled");
-  await form.fire("submit");
+  await form.fire("keydown", { key: "Enter" });
+  assert.equal(form.submitted, undefined, "Plain Enter must not save the move.");
+  await form.fire("keydown", { key: "Enter", metaKey: true });
+  await form.submitted;
   const saved = JSON.parse(await readFile(join(ui.directory, factoryFile), "utf8"))
     .tasks.find((task) => task.id === "issue-12");
   assert.equal(saved.state, "resolved");

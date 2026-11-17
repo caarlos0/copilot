@@ -580,6 +580,7 @@
         error.hidden = true;
         const save = element("button", "Save move", "action-primary");
         save.type = "submit";
+        save.title = "Save move (⌘/Ctrl+Enter)";
         const reload = element("button", "Reload task");
         reload.type = "button";
         reload.hidden = true;
@@ -613,6 +614,11 @@
           } finally {
             fields.disabled = false;
           }
+        });
+        form.addEventListener("keydown", (event) => {
+          if (event.key !== "Enter" || !(event.metaKey || event.ctrlKey)) return;
+          event.preventDefault();
+          if (!save.disabled) form.requestSubmit();
         });
         form.addEventListener("submit", async (event) => {
           event.preventDefault();
