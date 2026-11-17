@@ -494,6 +494,23 @@ test("global task filters search any field, combine terms, and survive refresh a
   assert.equal(rows().length, example.tasks.filter((task) => task.state === "implementation").length);
 });
 
+test("flow edges and token routes use only straight horizontal and vertical segments", async (t) => {
+  const ui = await dashboard(t);
+  const paths = ui.get("flow").querySelectorAll(".edge").map((edge) => edge.d);
+  for (const hop of [{ from: null, to: "initial" }, { from: "blocked", to: "review" }, { from: "initial", to: "review" }]) {
+    paths.push(ui.run(`routeFor(${JSON.stringify(hop)})`));
+  }
+  assert.equal(paths.length, 14);
+  for (const path of paths) {
+    assert.match(path, /^M[\d.,-]+( L[\d.,-]+)+$/, `Only M and L commands: ${path}`);
+    const points = path.slice(1).split(" L").map((point) => point.split(",").map(Number));
+    points.slice(1).forEach(([x, y], index) => {
+      const [px, py] = points[index];
+      assert.ok(x === px || y === py, `Diagonal segment in ${path}`);
+    });
+  }
+});
+
 test("global filters update state totals, resolution outcomes, and every opened list", async (t) => {
   const ui = await dashboard(t);
   const filter = ui.get("global-filter");

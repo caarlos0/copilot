@@ -88,7 +88,7 @@
         border-radius: 6px; background: color-mix(in srgb, var(--danger) 10%, var(--bg)); }
 
       #flow { width: 100%; height: auto; max-height: 70vh; display: block; }
-      .edge { fill: none; stroke: var(--border-emphasis); stroke-width: 2; stroke-dasharray: 8 6;
+      .edge { fill: none; stroke: var(--border-emphasis); stroke-width: 2; stroke-dasharray: 8 6; stroke-linejoin: miter;
         animation: flow 1s linear infinite; transition: opacity .4s; }
       .edge.idle { opacity: .35; }
       .edge.dashed { stroke: var(--blocked); opacity: .6; }
@@ -103,12 +103,13 @@
         stroke-width: 1; transition: stroke-width .2s, fill .2s; }
       .node:hover .box { fill: color-mix(in srgb, var(--c) 14%, var(--bg)); }
       .node.selected .box { stroke: var(--c); stroke-width: 2; fill: color-mix(in srgb, var(--c) 14%, var(--bg)); }
+      .node .bar { fill: var(--c); pointer-events: none; }
       .node .name { fill: var(--c); font-size: 14px; font-weight: 600; text-anchor: middle; }
       .node .count { fill: var(--fg); font-size: 40px; font-weight: 600; text-anchor: middle; }
       .node .sub { fill: var(--fg-muted); font-size: 12px; text-anchor: middle; }
       .node.source .box { stroke-dasharray: 4 3; }
       .outcome { cursor: pointer; }
-      .outcome rect { fill: transparent; }
+      .outcome rect { fill: transparent; stroke: color-mix(in srgb, var(--resolved) 45%, var(--border)); stroke-width: 1; }
       .outcome:hover rect, .outcome.selected rect { fill: color-mix(in srgb, var(--resolved) 14%, var(--bg)); }
       .outcome text { fill: var(--fg-muted); font-size: 12px; }
       .outcome.selected text { fill: var(--resolved); }
@@ -271,31 +272,47 @@
       const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
       const outcomeTitles = Object.fromEntries(outcomes.map((outcome) =>
         [outcome, outcome[0].toUpperCase() + outcome.slice(1).replaceAll("-", " ")]));
+      // Nodes sit on a grid: columns 240 apart, an 80 gap between boxes.
       const places = {
-        initial: { x: 20, y: 170, title: "Initial" },
-        investigation: { x: 230, y: 170, title: "Investigation" },
-        implementation: { x: 440, y: 170, title: "Implementation" },
-        review: { x: 690, y: 170, title: "Review" },
-        resolved: { x: 980, y: 170, title: "Resolved" },
-        blocked: { x: 565, y: 410, title: "Blocked" },
+        initial: { x: 20, y: 210, title: "Initial" },
+        investigation: { x: 260, y: 210, title: "Investigation" },
+        implementation: { x: 500, y: 210, title: "Implementation" },
+        review: { x: 740, y: 210, title: "Review" },
+        resolved: { x: 980, y: 210, title: "Resolved" },
+        blocked: { x: 500, y: 430, title: "Blocked" },
       };
       const centre = (state) => ({ x: places[state].x + NODE.w / 2, y: places[state].y + NODE.h / 2 });
-      const SOURCE = { x: 20, y: 20, w: 160, h: 90 };
-      const SHORTCUT = "M310,170 C310,40 1060,40 1060,170";
-      const blockedSlots = { initial: 595, investigation: 625, implementation: 665, review: 695 };
+      const SOURCE = { x: 20, y: 20, w: NODE.w, h: NODE.h };
+      // Routes are lists of points joined by straight segments, so every corner is square.
+      const pathOf = (points) => `M${points.map(([x, y]) => `${x},${y}`).join(" L")}`;
+      const row = centre("initial").y;
+      const rowTop = places.initial.y;
+      const bottom = rowTop + NODE.h;
+      const across = (from, to, y = row) => [[places[from].x + NODE.w, y], [places[to].x, y]];
+      const SHORTCUT = [
+        [centre("investigation").x, rowTop], [centre("investigation").x, rowTop - 40],
+        [centre("resolved").x, rowTop - 40], [centre("resolved").x, rowTop],
+      ];
+      const SOURCE_ROUTE = [[centre("initial").x, SOURCE.y + SOURCE.h], [centre("initial").x, rowTop]];
       const flowRoutes = {
-        "initial>investigation": "M180,225 L230,225",
-        "investigation>implementation": "M390,225 L440,225",
-        "implementation>review": "M600,200 L690,200",
-        "review>implementation": "M690,250 L600,250",
-        "review>resolved": "M850,225 L980,225",
+        "initial>investigation": across("initial", "investigation"),
+        "investigation>implementation": across("investigation", "implementation"),
+        "implementation>review": across("implementation", "review", row - 20),
+        "review>implementation": across("implementation", "review", row + 20).reverse(),
+        "review>resolved": across("review", "resolved"),
       };
-      const blockedRoute = (state) => {
-        const from = centre(state);
-        return `M${from.x},280 C${from.x},350 ${blockedSlots[state]},340 ${blockedSlots[state]},410`;
+      // Each state drops to its own bus level and slot on Blocked, nested so no line crosses another.
+      const blockedLanes = {
+        initial: { bus: bottom + 75, slot: 520 },
+        investigation: { bus: bottom + 45, slot: 550 },
+        implementation: { slot: 580 },
+        review: { bus: bottom + 45, slot: 610 },
       };
-      for (const state of Object.keys(blockedSlots)) {
-        flowRoutes[`${state}>blocked`] = blockedRoute(state);
+      for (const [state, { bus, slot }] of Object.entries(blockedLanes)) {
+        const x = centre(state).x;
+        flowRoutes[`${state}>blocked`] = bus === undefined
+          ? [[x, bottom], [x, places.blocked.y]]
+          : [[x, bottom], [x, bus], [slot, bus], [slot, places.blocked.y]];
       }
 
       let selection = new URLSearchParams(location.search).get("file") ?? "";
@@ -372,8 +389,8 @@
         defs.append(marker);
 
         const edges = svg("g", { id: "edges" });
-        const edge = (key, path, className = "") => {
-          const node = svg("path", { d: path, class: `edge ${className}`, "marker-end": "url(#arrow)" });
+        const edge = (key, route, className = "") => {
+          const node = svg("path", { d: pathOf(route), class: `edge ${className}`, "marker-end": "url(#arrow)" });
           node.dataset.edge = key;
           edges.append(node);
           return node;
@@ -384,8 +401,8 @@
         edge("review>implementation", flowRoutes["review>implementation"]);
         edge("review>resolved", flowRoutes["review>resolved"]);
         edge("shortcut", SHORTCUT, "shortcut");
-        edge("source>initial", `M${SOURCE.x + SOURCE.w / 2},${SOURCE.y + SOURCE.h} L${SOURCE.x + SOURCE.w / 2},${places.initial.y - 2}`);
-        for (const state of Object.keys(blockedSlots)) {
+        edge("source>initial", SOURCE_ROUTE);
+        for (const state of Object.keys(blockedLanes)) {
           const node = edge(`${state}>blocked`, flowRoutes[`${state}>blocked`], "dashed");
           node.setAttribute("marker-start", "url(#arrow)");
         }
@@ -395,10 +412,11 @@
         });
         source.dataset.source = "producers";
         source.append(
-          svg("rect", { class: "box", x: SOURCE.x, y: SOURCE.y, width: SOURCE.w, height: SOURCE.h, rx: 6 }),
-          svg("text", { class: "name", x: SOURCE.x + SOURCE.w / 2, y: SOURCE.y + 26 }, "Find work"),
-          svg("text", { class: "count", x: SOURCE.x + SOURCE.w / 2, y: SOURCE.y + 64 }, "0"),
-          svg("text", { class: "sub", x: SOURCE.x + SOURCE.w / 2, y: SOURCE.y + 82 }, ""),
+          svg("rect", { class: "box", x: SOURCE.x, y: SOURCE.y, width: SOURCE.w, height: SOURCE.h }),
+          svg("rect", { class: "bar", x: SOURCE.x, y: SOURCE.y, width: SOURCE.w, height: 4 }),
+          svg("text", { class: "name", x: SOURCE.x + SOURCE.w / 2, y: SOURCE.y + 28 }, "Find work"),
+          svg("text", { class: "count", x: SOURCE.x + SOURCE.w / 2, y: SOURCE.y + 76 }, "0"),
+          svg("text", { class: "sub", x: SOURCE.x + SOURCE.w / 2, y: SOURCE.y + 98 }, ""),
         );
         source.addEventListener("click", chooseProducers);
         source.addEventListener("keydown", (event) => {
@@ -415,8 +433,9 @@
           });
           group.dataset.state = state;
           group.append(
-            svg("rect", { class: "ring", x: place.x, y: place.y, width: NODE.w, height: NODE.h, rx: 6 }),
-            svg("rect", { class: "box", x: place.x, y: place.y, width: NODE.w, height: NODE.h, rx: 6 }),
+            svg("rect", { class: "ring", x: place.x, y: place.y, width: NODE.w, height: NODE.h }),
+            svg("rect", { class: "box", x: place.x, y: place.y, width: NODE.w, height: NODE.h }),
+            svg("rect", { class: "bar", x: place.x, y: place.y, width: NODE.w, height: 4 }),
             svg("text", { class: "name", x: place.x + NODE.w / 2, y: place.y + 28 }, place.title),
             svg("text", { class: "count", x: place.x + NODE.w / 2, y: place.y + 76 }, "0"),
             svg("text", { class: "sub", x: place.x + NODE.w / 2, y: place.y + 98 }, ""),
@@ -434,11 +453,11 @@
         const resolutions = svg("g", { role: "group", "aria-label": "Resolved tasks by outcome" });
         outcomes.forEach((outcome, index) => {
           const x = places.resolved.x;
-          const y = places.resolved.y + NODE.h + 16 + index * 32;
+          const y = places.resolved.y + NODE.h + index * 28;
           const group = svg("g", { class: "outcome", tabindex: 0, role: "button" });
           group.dataset.outcome = outcome;
           group.append(
-            svg("rect", { x, y, width: NODE.w, height: 28, rx: 4 }),
+            svg("rect", { x, y, width: NODE.w, height: 28 }),
             svg("text", { x: x + 12, y: y + 19 }, outcomeTitles[outcome]),
             svg("text", { class: "outcome-count", x: x + NODE.w - 12, y: y + 19 }, "0"),
           );
@@ -531,17 +550,17 @@
       }
 
       function routeFor(hop) {
-        if (hop.from === null) return `M-40,${centre(hop.to).y} L${places[hop.to].x},${centre(hop.to).y}`;
+        if (hop.from === null) return pathOf([[-40, centre(hop.to).y], [places[hop.to].x, centre(hop.to).y]]);
         const key = `${hop.from}>${hop.to}`;
-        if (flowRoutes[key]) return flowRoutes[key];
-        if (hop.to === "resolved") return SHORTCUT;
+        if (flowRoutes[key]) return pathOf(flowRoutes[key]);
+        if (hop.to === "resolved") return pathOf(SHORTCUT);
         if (hop.from === "blocked") {
           const reverse = flowRoutes[`${hop.to}>blocked`];
-          if (reverse) return reverse;
+          if (reverse) return pathOf([...reverse].reverse());
         }
         const a = centre(hop.from);
         const b = centre(hop.to);
-        return `M${a.x},${a.y} L${b.x},${b.y}`;
+        return pathOf([[a.x, a.y], [b.x, a.y], [b.x, b.y]]);
       }
 
       function bump(state) {
