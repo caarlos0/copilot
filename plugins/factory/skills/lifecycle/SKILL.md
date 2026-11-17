@@ -131,7 +131,13 @@ are the controls.
 
 ## Keep the factory file
 
-Use `~/.local/state/copilot-coordinator/` for durable state. Keep files
+Use `~/.local/state/copilot-factory/` for durable state. If only the legacy
+`~/.local/state/copilot-coordinator/` exists, use it in place: `serve.mjs` and
+`migrate.mjs` pick it automatically, and the new directory wins once it exists.
+Never move files out of a legacy directory while a factory runs. To switch, stop
+the factories, then run `mv ~/.local/state/copilot-coordinator
+~/.local/state/copilot-factory` (optionally `ln -s copilot-factory
+~/.local/state/copilot-coordinator`). Keep files
 private and free of credentials. Keep one file per project:
 `<owner.repo>-factory.json`. For a non-GitHub project, choose one stable,
 filename-safe key. Do not add dates, run IDs, or session IDs to the name.
@@ -153,7 +159,7 @@ On a busy lock, reread and reconcile; never retry a stale decision blindly.
 Remove a stale write lock only after verifying no writer is active.
 
 ```sh
-FILE=~/.local/state/copilot-coordinator/owner.repo-factory.json
+FILE=~/.local/state/copilot-factory/owner.repo-factory.json
 node factory.mjs "$FILE" --project owner/repo --run-goal "Run the factory for owner/repo" \
   --rex-session "$REX_SESSION" --session SESSION_UUID
 node factory.mjs "$FILE" --task issue-42 --title "Fix login redirect" \
@@ -1112,7 +1118,8 @@ node serve.mjs
 
 Bun can run it too. No package install is needed. It binds to `127.0.0.1`,
 uses port 8766 (`--port PORT` to change it), and prints its URL. The state
-directory defaults to `~/.local/state/copilot-coordinator/`
+directory defaults to `~/.local/state/copilot-factory/`, or the legacy
+`~/.local/state/copilot-coordinator/` when only that exists
 (`--directory PATH`). Do not stop another process to take a port. Share the
 printed HTTP URL, not a `file://` link. Do not open the browser for the user.
 

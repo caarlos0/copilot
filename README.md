@@ -93,7 +93,8 @@ grant or L4, the implementation worker can land after `may_merge` passes on
 the exact head, without another per-head approval. PR comments never grant
 authority. Existing comment-based records are historical evidence only.
 State lives in `<owner.repo>-factory.json` (`factory/v1`) in
-`~/.local/state/copilot-coordinator/`. Run `node serve.mjs` from the
+`~/.local/state/copilot-factory/` (or the legacy `~/.local/state/copilot-coordinator/`
+when only that exists). Run `node serve.mjs` from the
 `lifecycle` skill directory in the factory plugin for an animated flowchart
 dashboard. Click a state for a popup task list. Use a task's **Move** button to return a
 task to an earlier state, unblock it, or move it directly to **Resolved**, with

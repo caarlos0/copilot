@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import { access, link, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { countByState, defaultLimits, format, githubResourceURL, githubURL, prURL, validate } from "./factory-data.mjs";
+import { stateDirectory } from "./state-dir.mjs";
 
 const sources = ["implementer", "coordinator"];
 
@@ -232,7 +232,7 @@ async function main() {
       options: {
         help: { type: "boolean", short: "h" },
         project: { type: "string" },
-        directory: { type: "string", default: join(homedir(), ".local/state/copilot-coordinator") },
+        directory: { type: "string" },
         "dry-run": { type: "boolean" },
         archive: { type: "boolean" },
         "ignore-locks": { type: "boolean" },
@@ -246,7 +246,8 @@ Usage: node migrate.mjs --project owner/repo [--directory PATH] [--dry-run] [--a
        bun migrate.mjs --project owner/repo [options]
 
 Reads <owner.repo>-implementer.json and <owner.repo>-coordinator.json and writes
-<owner.repo>-factory.json in the state directory (default ~/.local/state/copilot-coordinator).
+<owner.repo>-factory.json in the state directory (default ~/.local/state/copilot-factory, or the
+legacy ~/.local/state/copilot-coordinator when only that exists).
 A <owner.repo>-reviewer.json is read only to attach reviews to migrated tasks with the same
 PR; its other tasks (other authors' PRs) are not imported and stay with coordination:review.
 
@@ -274,7 +275,7 @@ It refuses to overwrite an existing factory.json, and stops when a legacy owner 
 
   const project = options.project;
   const key = project.replace("/", ".");
-  const directory = resolve(options.directory);
+  const directory = resolve(options.directory ?? stateDirectory());
   const target = join(directory, `${key}-factory.json`);
   const warnings = [];
 
