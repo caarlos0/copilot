@@ -131,10 +131,15 @@ are the controls.
 
 ## Keep the factory file
 
-Use `~/.local/state/copilot-factory/` for durable state. If only the legacy
-`~/.local/state/copilot-coordinator/` exists, use it in place: `serve.mjs` and
-`migrate.mjs` pick it automatically, and the new directory wins once it exists.
-Never move files out of a legacy directory while a factory runs. To switch, stop
+Use `~/.local/state/copilot-factory/` for durable state. Check the legacy
+`~/.local/state/copilot-coordinator/` too, per file: look for
+`<owner.repo>-factory.json` in the new directory first, then in the legacy one,
+and use the first that exists in place, even when both directories exist. Create
+a new factory only in the new directory. The lock, events log, waiter PID,
+archive, and sessions file stay beside the factory file, in the same directory.
+`serve.mjs` lists and serves the factories of both directories (the new one wins
+on a name clash), and `migrate.mjs` reads each handoff the same way. Never move
+files out of a legacy directory while a factory runs. To switch, stop
 the factories, then run `mv ~/.local/state/copilot-coordinator
 ~/.local/state/copilot-factory` (optionally `ln -s copilot-factory
 ~/.local/state/copilot-coordinator`). Keep files
@@ -1117,10 +1122,11 @@ node serve.mjs
 ```
 
 Bun can run it too. No package install is needed. It binds to `127.0.0.1`,
-uses port 8766 (`--port PORT` to change it), and prints its URL. The state
-directory defaults to `~/.local/state/copilot-factory/`, or the legacy
-`~/.local/state/copilot-coordinator/` when only that exists
-(`--directory PATH`). Do not stop another process to take a port. Share the
+uses port 8766 (`--port PORT` to change it), and prints its URL. It lists the
+factories of both `~/.local/state/copilot-factory/` and the legacy
+`~/.local/state/copilot-coordinator/`, whichever exist (the new one wins on a
+name clash); `--directory PATH` uses only that directory. Do not stop another
+process to take a port. Share the
 printed HTTP URL, not a `file://` link. Do not open the browser for the user.
 
 The page draws the flow as a flowchart with a task count per state. Below
