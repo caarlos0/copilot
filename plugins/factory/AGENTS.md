@@ -37,6 +37,17 @@ schema and is shared by the writer,
 `dashboard.html`. `migrate.mjs` moves the implementer and coordinator handoffs
 into the factory file. It refuses to run against a live legacy lock.
 
+The factory file is the only task tracker. Create every task there before
+launching its worker. Before each launch, result disposition, head change,
+merge, or release, write the planned action with `factory.mjs`; write the
+observed result in the same turn before the next action. A refused write stops
+the work until the file is reread and drift is reconciled. Never track task
+state only in chat, session SQL, another board, or another file. At startup,
+every wake, and before reporting, compare the file with `git worktree list`,
+branches merged into the default branch, Rex panes, PRs, and worker results.
+Repair drift through `factory.mjs`, including local issue-less merges with
+`resolution: merged` and the full merge SHA in `details.merge_commit`.
+
 The dashboard opens task lists in a modal and can move a task back or directly
 to `resolved` with an operator comment. Manual resolution requires a non-merge
 outcome; it does not merge or close GitHub items. Resolved tasks with pending
