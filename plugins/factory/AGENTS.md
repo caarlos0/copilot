@@ -71,6 +71,13 @@ head-specific decision in `merge` with `source: "lever"`. New heads clear the
 decision, not the standing grant. Legacy `comment` and `factory-session`
 records remain readable but are not authority on recovery.
 
+When task file lists overlap, record each task's validated default-branch SHA
+in `details.validated_base_sha`. After one lands, the remaining worker merges
+the new base (never rebases), reruns affected checks on the combined code, and
+refreshes head-specific evidence before landing. Prefer an existing repository
+merge queue. For local-only tasks, use the current local default branch, not
+`origin`; independent tasks stay parallel.
+
 Review workers use `cross-model-review`, not the local `review` wrapper.
 Review depth follows the shared spend budget. A clean precision result is not
 a GitHub approval, and `review` state can have no optional model reviewer.
