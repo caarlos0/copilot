@@ -120,7 +120,10 @@ into the factory file. It refuses to run against a live legacy lock.
 The dashboard opens task lists in a modal and can move a task back or directly
 to `resolved` with an operator comment. Manual resolution requires a non-merge
 outcome; it does not merge or close GitHub items. Resolved tasks with pending
-feedback are not pruned. Task `revision` protects stale reads; old files start at zero.
+feedback are not archived. Archived tasks go to
+`<owner.repo>-factory-archive/YYYY-MM-DD.json`, are never deleted, and come
+back only through `factory.mjs --restore` after the user agrees. Task
+`revision` protects stale reads; old files start at zero.
 Comments remain in source-tagged history; `feedback` tracks the latest ID and
 acknowledgement. Reconcile all pending comments before worker results, include
 the current feedback ID in worker briefs/results, and acknowledge only after

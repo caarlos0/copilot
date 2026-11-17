@@ -123,9 +123,12 @@ The helper:
   `--blocker`. A move to `resolved` needs `--resolution`.
 - clears the head-specific `merge` decision when `--head` changes; standing
   grants in `details.lever` remain subject to fresh policy and gate checks.
-- removes `resolved` tasks last updated more than seven days ago when you add a
-  new task, except those with pending dashboard feedback. Artifact files stay
-  on disk.
+- moves `resolved` tasks last updated more than seven days ago into
+  `<owner.repo>-factory-archive/YYYY-MM-DD.json` (by last update day) when you
+  add or restore a task, except those with pending dashboard feedback. Nothing
+  is deleted. Artifact files stay on disk.
+- refuses a new task whose `id`, `issue`, or `pr` matches an archived task, and
+  prints the match. See "Archived work".
 - exits 0 on success (silent), 1 on invalid data or I/O errors, 2 on usage
   errors. Run `--help` for all flags. On a conflict, reread and reconcile.
 
@@ -216,6 +219,21 @@ or a separate Lever run just to use its skills.
 
 Skip an issue or PR that another task already holds. Task IDs are
 `issue-<number>`. For another repository, use `issue-<owner.repo>-<number>`.
+
+### Archived work
+
+When the helper refuses a new task because it matches archived work, do not
+create a duplicate and do not retry. Use `ask_user` once: restore it, or skip
+it. Name the archived task, its outcome, and the day it was archived.
+
+- **Restore:** run the `--restore` command the helper printed, with the user's
+  reason in `--note`. The task returns to `initial` with its history. Brief it
+  like any new task, and read the restore note first.
+- **Skip:** drop the hit. Report that the archived task already covers it.
+- **Merged:** the helper cannot reopen a merged task. Ask whether to file a new
+  issue and task instead.
+
+The archive is only a record. The dashboard does not show it.
 
 **Rules** find new work. Each rule has an `id`, a `description`, an optional
 `query` (a `gh search issues` query), `enabled`, and `last_run_at`.

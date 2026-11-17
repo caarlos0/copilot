@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const { readFileSync } = require("node:fs");
-const { mkdtemp, readFile, readdir, rm, stat, writeFile } = require("node:fs/promises");
+const { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } = require("node:fs/promises");
 const { spawnSync } = require("node:child_process");
 const { join } = require("node:path");
 const { tmpdir } = require("node:os");
@@ -243,13 +243,100 @@ test("one issue or PR belongs to one task", async (t) => {
   f.fails(/Duplicate issue URL/, "--task", "issue-2", "--title", "x", "--next-action", "y", "--issue", issue(1));
 });
 
-test("adding a task removes resolved tasks older than seven days", async (t) => {
+const archiveFile = (f, day) => join(f.directory, "owner.repo-factory-archive", `${day}.json`);
+
+async function withArchived(t) {
+  const f = await started(t);
+  const old = "2020-01-01T00:00:00Z";
+  f.ok("--task", "old", "--title", "Old", "--issue", issue(7), "--pr", pull(70), "--next-action", "none", "--task-updated-at", old);
+  f.ok("--task", "old", "--state", "resolved", "--resolution", "completed", "--task-updated-at", old);
+  f.ok("--task", "issue-3", "--title", "New", "--issue", issue(3), "--next-action", "go");
+  return f;
+}
+
+test("adding a task archives resolved tasks older than seven days by day", async (t) => {
+  const f = await withArchived(t);
+  assert.deepEqual((await f.read()).tasks.map((task) => task.id), ["issue-1", "issue-3"]);
+  const day = JSON.parse(await readFile(archiveFile(f, "2020-01-01"), "utf8"));
+  assert.deepEqual([day.format, day.project, day.day], ["factory-archive/v1", "owner/repo", "2020-01-01"]);
+  assert.deepEqual(day.tasks.map((task) => task.id), ["old"]);
+  assert.equal((await stat(archiveFile(f, "2020-01-01"))).mode & 0o777, 0o600);
+});
+
+test("saving an archived task twice keeps one copy", async (t) => {
+  const f = await withArchived(t);
+  const { archiveDirectory, readArchive, saveArchive } = await import("./archive.mjs");
+  const directory = archiveDirectory(f.file);
+  const [{ tasks }] = await readArchive(directory, "owner/repo");
+  await saveArchive(directory, "owner/repo", tasks);
+  const days = await readArchive(directory, "owner/repo");
+  assert.deepEqual(days.map((day) => day.tasks.map((task) => task.id)), [["old"]]);
+});
+
+test("a new task that matches archived work is refused until the user decides", async (t) => {
+  const f = await withArchived(t);
+  const before = await readFile(f.file, "utf8");
+  const archived = /matches archived work[\s\S]*old "Old" \(completed, archived 2020-01-01, revision \d+\)[\s\S]*--restore/;
+  f.fails(archived, "--task", "old", "--title", "Again", "--issue", issue(90), "--next-action", "x");
+  f.fails(archived, "--task", "other", "--title", "Same issue", "--issue", issue(7), "--next-action", "x");
+  f.fails(archived, "--task", "other", "--title", "Same PR", "--issue", issue(91), "--pr", pull(70), "--next-action", "x");
+  assert.equal(await readFile(f.file, "utf8"), before);
+  f.ok("--task", "linked", "--title", "Only linked", "--issue", issue(92), "--next-action", "x", "--links", JSON.stringify([issue(7)]));
+});
+
+test("restore brings an archived task back to initial and removes its archive copy", async (t) => {
+  const f = await withArchived(t);
+  f.fails(/needs --task ID, --state initial, and --note WHY/, "--task", "old", "--restore", "--state", "initial");
+  f.fails(/not in the archive/, "--task", "nope", "--restore", "--state", "initial", "--note", "x");
+  f.fails(/is live/, "--task", "issue-1", "--restore", "--state", "initial", "--note", "x");
+  const archived = JSON.parse(await readFile(archiveFile(f, "2020-01-01"), "utf8")).tasks[0];
+  f.fails(/changed since it was read/, "--task", "old", "--restore", "--state", "initial", "--note", "x",
+    "--expected-revision", String(archived.revision + 1));
+  f.ok("--task", "old", "--restore", "--state", "initial", "--note", "User wants it again",
+    "--expected-revision", String(archived.revision));
+  const task = (await f.read()).tasks.find((item) => item.id === "old");
+  assert.equal(task.state, "initial");
+  assert.equal(task.resolution, null);
+  assert.equal(task.revision, archived.revision + 1);
+  assert.equal(task.history.at(-1).note, "User wants it again");
+  await assert.rejects(stat(archiveFile(f, "2020-01-01")), { code: "ENOENT" });
+});
+
+test("a merged archived task is not restored", async (t) => {
+  const f = await fixture(t, {
+    ...example,
+    tasks: example.tasks.map((task) => task.id === "issue-3" ? { ...task, updated_at: "2020-01-01T00:00:00Z" } : task),
+  });
+  f.ok("--task", "issue-20", "--title", "Next", "--issue", issue(20), "--next-action", "go");
+  f.fails(/cannot be reopened/, "--task", "again", "--title", "Again", "--issue", issue(3), "--next-action", "x");
+  f.fails(/was merged/, "--task", "issue-3", "--restore", "--state", "initial", "--note", "x");
+  assert.equal(JSON.parse(await readFile(archiveFile(f, "2020-01-01"), "utf8")).tasks[0].id, "issue-3");
+  assert.equal((await f.read()).tasks.some((task) => task.id === "issue-3"), false);
+});
+
+test("archive write failures never lose a task or half-apply a restore", async (t) => {
+  if (process.getuid?.() === 0) return t.skip("File permissions do not block root.");
   const f = await started(t);
   const old = "2020-01-01T00:00:00Z";
   f.ok("--task", "old", "--title", "Old", "--issue", issue(7), "--next-action", "none", "--task-updated-at", old);
   f.ok("--task", "old", "--state", "resolved", "--resolution", "completed", "--task-updated-at", old);
-  f.ok("--task", "issue-3", "--title", "New", "--issue", issue(3), "--next-action", "go");
-  assert.deepEqual((await f.read()).tasks.map((task) => task.id), ["issue-1", "issue-3"]);
+  const directory = join(f.directory, "owner.repo-factory-archive");
+  await mkdir(directory, { mode: 0o700 });
+  try {
+    await chmod(directory, 0o500);
+    const before = await readFile(f.file, "utf8");
+    f.fails(/EACCES/, "--task", "issue-3", "--title", "New", "--issue", issue(3), "--next-action", "go");
+    assert.equal(await readFile(f.file, "utf8"), before);
+    assert.deepEqual((await readdir(f.directory)).sort(), ["owner.repo-factory-archive", "owner.repo-factory.json"]);
+
+    await chmod(directory, 0o700);
+    f.ok("--task", "issue-3", "--title", "New", "--issue", issue(3), "--next-action", "go");
+    await chmod(directory, 0o500);
+    f.fails(/restored, but its archive copy was not removed/, "--task", "old", "--restore", "--state", "initial", "--note", "again");
+    assert.equal((await f.read()).tasks.find((task) => task.id === "old").state, "initial");
+  } finally {
+    await chmod(directory, 0o700);
+  }
 });
 
 test("pending dashboard resolution comments survive pruning until acknowledged", async (t) => {

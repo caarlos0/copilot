@@ -3,6 +3,7 @@ import { open, readFile, realpath, rename, rm } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
+import { archiveDirectory, findArchived, readArchive, removeArchived, saveArchive } from "./archive.mjs";
 import { checkTransition, format, operatorOutcomes, outcomes, validate } from "./factory-data.mjs";
 
 const defaultLimits = { investigation: 3, implementation: 3 };
@@ -39,6 +40,28 @@ function json(value, option, check) {
 }
 
 const nullable = (value) => (value === "null" ? null : value);
+
+function normalizedURL(value) {
+  if (value == null || value === "null") return null;
+  try {
+    return new URL(value).href;
+  } catch {
+    return value;
+  }
+}
+
+function archivedMessage(id, matches) {
+  const lines = matches.map(({ task, day }) => {
+    const outcome = task.resolution ? `${task.resolution.outcome}, ` : "";
+    const revision = task.revision ?? 0;
+    const fence = task.feedback ? ` --feedback-id ${task.feedback.id}` : "";
+    const action = task.resolution?.outcome === "merged"
+      ? "Merged, so it cannot be reopened: skip it, or file a new issue and task."
+      : `Restore with: --task ${task.id} --restore --state initial --note WHY --expected-revision ${revision}${fence}`;
+    return `- ${task.id} "${task.title}" (${outcome}archived ${day}, revision ${revision}). ${action}`;
+  });
+  return `Task ${id} matches archived work. Ask the user whether to restore it or skip it; do not add a duplicate.\n${lines.join("\n")}`;
+}
 
 function newTask(values, now) {
   for (const option of ["title", "next-action", "issue"]) {
@@ -159,10 +182,34 @@ async function writeFactory(file, values, operator) {
   if (values.limits !== undefined) rootPatch.limits = json(values.limits, "limits", isObject);
 
   let tasks = Array.isArray(current.tasks) ? current.tasks : [];
-  const addingTask = values.task !== undefined && !tasks.some((task) => task.id === values.task);
+  const directory = archiveDirectory(file);
+  const restoring = values.restore === true;
+  const live = values.task !== undefined && tasks.some((task) => task.id === values.task);
+  if (restoring) {
+    if (values.task === undefined || values.state !== "initial" ||
+        typeof values.note !== "string" || !values.note.trim()) {
+      throw new Error("--restore needs --task ID, --state initial, and --note WHY.");
+    }
+    if (live) throw new Error(`Task ${values.task} is live. Restore applies only to archived tasks.`);
+  }
+  const addingTask = values.task !== undefined && !live && !restoring;
+  const inserting = addingTask || restoring;
+  let archived = null;
   if (values.task !== undefined) {
+    if (inserting) {
+      const matches = findArchived(await readArchive(directory, current.project), restoring
+        ? { id: values.task }
+        : { id: values.task, issue: normalizedURL(values.issue), pr: normalizedURL(values.pr) });
+      if (restoring) {
+        archived = matches[0];
+        if (!archived) throw new Error(`Task ${values.task} is not in the archive.`);
+      } else if (matches.length) {
+        throw new Error(archivedMessage(values.task, matches));
+      }
+    }
     const at = values["task-updated-at"] ?? now;
-    const before = addingTask ? newTask(values, at) : tasks.find((task) => task.id === values.task);
+    const before = restoring ? archived.task
+      : addingTask ? newTask(values, at) : tasks.find((task) => task.id === values.task);
     const revision = before.revision ?? 0;
     if (values["expected-revision"] !== undefined) {
       if (!/^\d+$/.test(values["expected-revision"]) ||
@@ -220,16 +267,18 @@ async function writeFactory(file, values, operator) {
     } else if (values["ack-feedback"] !== undefined) {
       task.feedback.acknowledged_id = values["ack-feedback"];
     }
-    tasks = addingTask ? [...tasks, task] : tasks.map((item) => (item.id === task.id ? task : item));
+    tasks = inserting ? [...tasks, task] : tasks.map((item) => (item.id === task.id ? task : item));
   }
   current = merge(current, rootPatch);
   current.tasks = tasks;
   validate(current);
-  if (addingTask) {
+  let stale = [];
+  if (inserting) {
     const cutoff = Date.parse(now) - 7 * 24 * 60 * 60 * 1000;
-    current.tasks = current.tasks.filter((task) =>
-      task.id === values.task || task.state !== "resolved" || Date.parse(task.updated_at) >= cutoff ||
-      (task.feedback && task.feedback.acknowledged_id !== task.feedback.id));
+    stale = current.tasks.filter((task) =>
+      task.id !== values.task && task.state === "resolved" && Date.parse(task.updated_at) < cutoff &&
+      !(task.feedback && task.feedback.acknowledged_id !== task.feedback.id));
+    current.tasks = current.tasks.filter((task) => !stale.includes(task));
   }
 
   const temporary = `${file}.${randomUUID()}.tmp`;
@@ -243,9 +292,18 @@ async function writeFactory(file, values, operator) {
     if (await readOptional(file) !== original) {
       throw new ConflictError("Factory changed during update. Reread it and reconcile before retrying.");
     }
+    // Archive first: a retry upserts by ID, so a failure never loses a task.
+    if (stale.length) await saveArchive(directory, current.project, stale);
     await rename(temporary, file);
   } finally {
     await rm(temporary, { force: true });
+  }
+  if (archived) {
+    try {
+      await removeArchived(directory, current.project, values.task);
+    } catch (error) {
+      throw new Error(`Task ${values.task} is restored, but its archive copy was not removed: ${error.message}. The live task wins; do not retry the restore.`);
+    }
   }
   return current;
 }
@@ -298,6 +356,7 @@ async function main() {
         limits: { type: "string" },
         "updated-at": { type: "string" },
         task: { type: "string" },
+        restore: { type: "boolean" },
         ...Object.fromEntries(taskOptions.map((option) => [option, { type: "string" }])),
       },
       allowPositionals: true,
@@ -320,6 +379,11 @@ Move a task (the state change and its history entry are one write):
   node factory.mjs FILE --task issue-42 --state investigation --note "Worker started"
   node factory.mjs FILE --task issue-42 --state blocked --blocker "Needs a product decision"
   node factory.mjs FILE --task issue-42 --state resolved --resolution merged
+
+Bring back archived work (ask the user first; the add command prints this when a new task
+matches an archived id, issue, or PR):
+  node factory.mjs FILE --task issue-42 --restore --state initial --note "User wants it again" \\
+    --expected-revision N
 
 Run options:
   --project VALUE       Project (owner/repo); stored once
@@ -361,8 +425,11 @@ Task options:
 Allowed moves: initial to investigation, investigation to implementation, implementation to
 review, review to implementation, any open state to blocked or resolved, blocked to any open
 state, and resolved to initial (reopen, not after a merge). The issue is required from
-investigation on, and a PR is required in review. Adding a new task removes resolved tasks last
-updated more than seven days ago, except those with pending dashboard feedback.
+investigation on, and a PR is required in review. Adding or restoring a task moves resolved tasks
+last updated more than seven days ago, except those with pending dashboard feedback, into
+<owner.repo>-factory-archive/YYYY-MM-DD.json (by last update day). Archived tasks are never deleted.
+Adding a new task that matches an archived id, issue, or PR fails; ask the user whether to restore
+or skip it.
 The helper validates the whole file before writing. Success is
 silent. Errors go to stderr. Exit: 0 success, 1 invalid data or I/O, 2 usage. Use literal null
 only for nullable fields. Keep the factory's owner lock while using this command.

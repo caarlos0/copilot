@@ -1,4 +1,5 @@
 export const format = "factory/v1";
+export const archiveFormat = "factory-archive/v1";
 export const states = ["initial", "investigation", "implementation", "review", "blocked", "resolved"];
 const transitions = {
   initial: ["investigation", "blocked", "resolved"],
@@ -68,7 +69,7 @@ function githubKind(value, kind, field) {
   return url.href;
 }
 
-const issueURL = (value, field = "issue") => githubKind(value, "issues", field);
+export const issueURL = (value, field = "issue") => githubKind(value, "issues", field);
 export const prURL = (value, field = "pr") => githubKind(value, "pull", field);
 
 function fullSHA(value, field) {
@@ -228,6 +229,16 @@ function validateTask(task, seen) {
   if (task.details != null && !isObject(task.details)) {
     throw new Error(`${at} details must be an object or null.`);
   }
+}
+
+export function validateArchive(data, project, day) {
+  if (!isObject(data)) throw new Error("Archive must be a JSON object.");
+  if (data.format !== archiveFormat) throw new Error(`format must be "${archiveFormat}".`);
+  if (data.project !== project) throw new Error(`project must be "${project}".`);
+  if (data.day !== day) throw new Error(`day must be "${day}".`);
+  if (!Array.isArray(data.tasks)) throw new Error("tasks must be an array.");
+  const ids = new Set();
+  for (const task of data.tasks) validateTask(task, { ids, issue: new Set(), pr: new Set() });
 }
 
 export function validate(data) {
