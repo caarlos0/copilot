@@ -87,6 +87,34 @@ test("maps, joins, renames, and attaches reviews from the legacy handoffs", asyn
   assert.deepEqual(summary.renamed, [{ from: "task-a", to: "coordinator-task-a", role: "coordinator" }]);
 });
 
+test("joins every matching task when a record bridges an issue and a PR", async (t) => {
+  const f = await fixture(t);
+  await writeFile(join(f.directory, "owner.repo-implementer.json"), JSON.stringify(handoff("implementer", [
+    old("issue-42", "pending"),
+    old("pr-work", "pending", { pr: pull(99), updated_at: "2026-05-01T10:01:00Z" }),
+  ])));
+  await writeFile(join(f.directory, "owner.repo-coordinator.json"), JSON.stringify(handoff("coordinator", [
+    old("linked-work", "pending", {
+      pr: pull(99),
+      updated_at: "2026-05-01T10:02:00Z",
+      links: ["https://github.com/owner/repo/issues/42"],
+    }),
+  ])));
+
+  const result = f.run();
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).tasks, 1);
+
+  const [joined] = (await f.read()).tasks;
+  assert.equal(joined.id, "linked-work");
+  assert.equal(joined.issue, "https://github.com/owner/repo/issues/42");
+  assert.equal(joined.pr, pull(99));
+  assert.deepEqual(
+    [joined.details.legacy, ...joined.details.legacy_merged].map((legacy) => legacy.task.id).sort(),
+    ["issue-42", "linked-work", "pr-work"],
+  );
+});
+
 test("dry run writes nothing; a live legacy lock stops a real run", async (t) => {
   const f = await fixture(t);
   await mkdir(join(f.directory, "owner.repo-implementer.lock"));
