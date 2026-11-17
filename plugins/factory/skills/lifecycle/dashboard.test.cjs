@@ -461,11 +461,14 @@ test("global task filters search any field, combine terms, and survive refresh a
   ui.run("choose('review')");
   const filter = ui.get("global-filter");
   const rows = () => ui.get("task-list").children;
+  assert.equal(ui.get("detail-filter-count").hidden, true);
+  assert.equal(ui.get("detail-filter-count").textContent, "");
   filter.value = 'history.note:"New head pushed." workers.review.status:running';
   await filter.fire("input");
   assert.deepEqual(rows().map((row) => row.dataset.taskId), ["issue-7"]);
   assert.equal(ui.get("global-filter-count").textContent, `1 of ${example.tasks.length} tasks match.`);
   assert.equal(ui.get("clear-filter").hidden, false);
+  assert.equal(ui.get("detail-filter-count").hidden, false);
   assert.equal(ui.get("detail-filter-count").textContent, "1 of 1 tasks match the global filter.");
 
   filter.value = "state:review 0123456";

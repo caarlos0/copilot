@@ -980,9 +980,11 @@
         const title = document.getElementById("detail-title");
         title.textContent = outcome ? `Resolved: ${outcomeTitles[outcome]}` : places[state].title;
         title.append(element("span", String(tasks.length), "counter"));
-        document.getElementById("detail-filter-count").textContent = filter
+        const filterCount = document.getElementById("detail-filter-count");
+        filterCount.hidden = !filter;
+        filterCount.textContent = filter
           ? `${tasks.length} of ${allTasks.length} tasks match the global filter.`
-          : `${allTasks.length} ${allTasks.length === 1 ? "task" : "tasks"}.`;
+          : "";
         const signature = JSON.stringify([selection, state, outcome, filter, tasks]);
         if (list.dataset.signature !== signature) {
           const rows = tasks.map((task) => taskRow(task, expanded));
