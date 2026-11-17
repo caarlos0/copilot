@@ -175,11 +175,11 @@ async function armedWait(factory, { since, timeout, exclude, due }) {
   const file = eventsFile(factory);
   let cursor = since ?? await size(file);
   const state = async () => JSON.parse(await readFile(factory, "utf8"));
-  let dueAt = null;
-  if (due) dueAt = nextDue(await state());
 
   const watchers = [];
   const timers = [];
+  let dueTimers = [];
+  let dueAt = null;
   let stopped = false;
   try {
     return await new Promise((complete, fail) => {
@@ -193,6 +193,14 @@ async function armedWait(factory, { since, timeout, exclude, due }) {
         stopped = true;
         fail(error);
       };
+      // The timer follows the factory file, so run-status and rule edits re-arm it.
+      const armDue = (next) => {
+        if (next === dueAt) return;
+        dueAt = next;
+        for (const timer of dueTimers) clearTimeout(timer);
+        dueTimers = [];
+        if (next !== null) after(Math.max(next - Date.now(), 0), () => void check(next), dueTimers);
+      };
       async function check(now = Date.now()) {
         dirty = true;
         if (checking || stopped) return;
@@ -203,10 +211,14 @@ async function armedWait(factory, { since, timeout, exclude, due }) {
             const read = await readEvents(file, cursor);
             cursor = read.cursor;
             const events = read.events.filter((event) => !exclude.includes(event.source));
-            // Due rules come from the factory file on every wake, so they are never lost.
-            const rules = due ? dueRules(await state(), now) : [];
-            if (rules.length) {
-              events.push({ id: null, at: new Date(now).toISOString(), type: "rule.due", task: null, source: "broker", data: { rules } });
+            if (due) {
+              const data = await state();
+              armDue(nextDue(data));
+              // Due rules come from the factory file on every wake, so they are never lost.
+              const rules = dueRules(data, now);
+              if (rules.length) {
+                events.push({ id: null, at: new Date(now).toISOString(), type: "rule.due", task: null, source: "broker", data: { rules } });
+              }
             }
             if (events.length) finish({ events, cursor: String(cursor) });
           }
@@ -218,8 +230,9 @@ async function armedWait(factory, { since, timeout, exclude, due }) {
       }
 
       const directory = dirname(file);
+      const watched = [basename(file), basename(factory)];
       const watcher = watch(directory, (_, name) => {
-        if (name === null || name === basename(file)) void check();
+        if (name === null || watched.includes(name)) void check();
       });
       watcher.on("error", abort);
       watcher.on("close", () => {
@@ -227,21 +240,19 @@ async function armedWait(factory, { since, timeout, exclude, due }) {
       });
       watchers.push(watcher);
 
-      const after = (ms, action) => {
+      function after(ms, action, list = timers) {
         const tick = (left) => {
-          const timer = setTimeout(() => (left > maxTimer ? tick(left - maxTimer) : action()), Math.min(left, maxTimer));
-          timers.push(timer);
+          list.push(setTimeout(() => (left > maxTimer ? tick(left - maxTimer) : action()), Math.min(left, maxTimer)));
         };
         tick(ms);
-      };
+      }
       if (timeout !== undefined) after(timeout * 1000, () => finish({ events: [], cursor: String(cursor), timeout: true }));
-      if (dueAt !== null) after(Math.max(dueAt - Date.now(), 0), () => void check(dueAt));
       console.error("Watching events.");
       void check();
     });
   } finally {
     stopped = true;
-    for (const timer of timers) clearTimeout(timer);
+    for (const timer of [...timers, ...dueTimers]) clearTimeout(timer);
     for (const watcher of watchers) watcher.close();
   }
 }
@@ -264,7 +275,8 @@ wait    Blocks until an event exists after the cursor, prints {"events":[...],"c
         own writes; skipped events still advance the cursor.
         --timeout S exits 0 with "events":[] and "timeout":true after S seconds.
         --due also returns a synthetic rule.due event (data.rules = rule IDs) when an enabled
-        rule with "every" is due. Stamp it with factory.mjs --rule ID --ran, or the next wait
+        rule with "every" is due. It follows the factory file, so run-status and rule edits made
+        while it waits move the due time. Stamp it with factory.mjs --rule ID --ran, or the next wait
         returns it again. Leave --due off while no slot is free for the rule.
 emit    Appends one event and prints it. Types: ${Object.keys(eventTypes).join(", ")}.
         Needed data keys: ${Object.entries(eventTypes).map(([type, { data }]) => `${type}: ${data.join(", ")}`).join("; ")}.

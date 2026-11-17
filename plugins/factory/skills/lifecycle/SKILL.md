@@ -45,6 +45,11 @@ new worker) to run `git merge main` and resolve the conflict there. When a
 check fails or a result is unclear, create or reopen a task for a worker to
 investigate. Do not investigate it yourself.
 
+The coordinator never uses the `task`, `read_agent` or `write_agent` tools for
+factory work. Every worker, including backlog, discovery, and improve workers,
+is a Copilot session in a Rex tab with a brief, a result file, and
+`broker.mjs emit`.
+
 ```
 initial -> investigation -> implementation <-> review -> resolved
                  any open state <-> blocked
@@ -371,7 +376,8 @@ ending the turn:
 
 1. Reconcile dashboard feedback first. Run `reconcile.mjs`. Then inspect every
    changed result, worker pane, PR, and worktree. Do not leave a result or
-   worktree unreconciled.
+   worktree unreconciled. Send a follow-up to every `blocked` task or waiting
+   worker that has a worker-fixable cause ("Never park a worker-fixable task").
 2. Fill available worker slots with runnable queued tasks, including every
    `initial` task. Continue until no queued task can use a free slot or the
    applicable worker, spend, or authority limit is reached.
@@ -515,7 +521,7 @@ work". It changes nothing without the user's answer. Its worker follows
 | `investigation` | One worker adds context to the issue, or to its result when there is no issue, then quits. | one-shot |
 | `implementation` | One worker fixes it in a new worktree until a PR is open or the task is done by other means. It then handles review findings, CI, conflicts, and mergeability. | continuous |
 | `review` | The PR, or the local branch `head` of a task without an issue, is being checked for landing. A review worker runs when required by the task, repo, or spend policy. | continuous, if enabled |
-| `blocked` | A user decision or an outside action is needed. `blocker.from` records where. | none new |
+| `blocked` | A user decision or an outside action is needed. `blocker.from` records where. Never a worker-fixable cause: see "Never park a worker-fixable task". | none new |
 | `resolved` | Done, with an outcome: `merged`, `already-fixed`, `duplicate`, `invalid`, `cancelled`, or `completed`. | none |
 
 Allowed moves: `initial` to `investigation`, `investigation` to
@@ -544,7 +550,29 @@ missing feedback ID after the task has received dashboard feedback.
 | PR merged on GitHub | `resolved` (`merged`) |
 | Task without an issue merged locally into the default branch | `resolved` (`merged`), with the merge commit SHA in `details.merge_commit` |
 | PR closed without a merge | `blocked`; keep the panes |
-| Worker blocked | `blocked` with its reason |
+| Worker blocked on a user decision or outside action | `blocked` with its reason |
+| Worker blocked on a worker-fixable cause | stay in the state; send a follow-up now |
+
+### Never park a worker-fixable task
+
+`blocked` is only for a user decision or an outside action. These causes are
+worker-fixable, so they never justify `blocked`, a wait, or a schedule:
+
+- a conflict with the default branch;
+- an unmerged dependency branch or PR;
+- a missing dependency;
+- a broken default branch.
+
+A worker never waits on another task or an unmerged branch. It merges the
+default branch into its branch (never rebase) and makes the small fix. If the
+fix is not small, or does not belong to the task, the coordinator creates a new
+task for it. Conflicts go back to the owning worker, as above.
+
+When a worker result or event reports one of these causes, or a `blocked` task
+has such a cause, send the worker a follow-up with `rex send` at once, or
+relaunch it. Do not wait for a user. Then verify the worker received it: check
+the pane identity first, then wait for a new result or event. Without a new
+result or event, send it again or relaunch.
 
 Reject a stale result. A review result applies only if its `head` equals the
 PR's current head. Check it with `gh pr view URL --json headRefOid`, or with
@@ -672,6 +700,12 @@ Tell every worker:
   blocked and publication is authorized, open a draft PR, state the limitation,
   and use CI to validate the changed head. If no safe path remains, save the
   blocker and wait for the user.
+- On a GitHub rate-limit error ("API rate limit already exceeded", which can be
+  the secondary limit while `gh api rate_limit` still shows quota), do not
+  block and do not emit `worker.blocked`. Save a `waiting` result whose
+  `summary` names the rate limit and the reset time, and emit `worker.result`.
+  Until the reset, make at most one REST check (`gh api`) every 5 minutes or
+  more; then resume `gh wait`.
 
 ### Investigation worker
 
@@ -705,13 +739,20 @@ and opens the PR when authorized. For iterative performance or quality work,
 use `find-the-loop` first. Once the PR exists, use `pr-shepherd` to own CI,
 review threads, conflicts, and landing at the inherited autonomy level.
 Follow the repository's merge-not-rebase rule when updating from the base.
+It never waits on another task or an unmerged branch. If the default branch is
+broken or a dependency is missing, it merges the default branch (never rebase)
+and makes the small fix, or reports it so the coordinator creates a new task.
+It writes `blocked` only for a user decision or an outside action.
 
 Use the coding plugin's `gh-cli` native watchers for local wakeups: required
 checks with fail-fast watching, `gh wait` for PR changes, and `gh wait --merge`
-for a pending merge. Feed each event into a bounded shepherd pass. Do not
-also create an automation or scheduled poller. When a task includes a code
-review, account for its result on the current head before landing; a clean
-model review never replaces GitHub's required reviews or checks.
+for a pending merge. You are the only worker that watches the PR; the review
+worker does not. Feed each event into a bounded shepherd pass. Do not
+also create an automation or scheduled poller. If a watcher fails with a
+rate-limit error, follow the rate-limit rule in "Brief the workers". When a
+task includes a code review, account for its result on the current head before
+landing; a clean model review never replaces GitHub's required reviews or
+checks.
 
 The implementation worker is the sole landing writer. It stays alive until
 the PR merges, closes, or needs a user decision, saving a result when the PR
@@ -750,7 +791,10 @@ model choices within the user's preferences and the resolved spend budget.
 The worker must never checkout, switch, reset, or clean a shared implementation
 worktree. It reads the exact remote PR head, not uncommitted worker edits; for
 a task without a PR, it reads the recorded local `head` commit.
-It watches for new heads with `gh wait` and saves a result for each review.
+It runs no `gh wait` watcher: the implementation worker is the only watcher of
+a PR, and two watchers on one PR double GraphQL use and trigger rate limits.
+The review worker reads the PR on each `worker.result` or head change the
+factory passes to it, and saves a result for each review.
 Publish only when authorized; a clean precision review posts nothing.
 If a draft is skipped, record it as unreviewed and resume when it becomes
 ready. A skipped or failed review is not a clean result.
@@ -849,15 +893,21 @@ Rules:
    evidence, mirror it with `factory.mjs`, then write the state change.
    The event is a hint; the result file and Git are the evidence.
 5. `--due` also returns `rule.due` when an enabled rule with `every` is due
-   while the factory is `active`. It reads the factory when it starts, so
-   re-arm after every wake. Handle each due rule as in "Find more work", which
-   stamps it first. Leave out `--due` when no rule has `every`, or while no
-   slot is free for a due backlog worker; otherwise it returns the due rule
-   again at once. This is the only timer.
+   while the factory is `active`. It rereads the factory on every write to it
+   (`--run-status`, `--rules`, `--rule --ran`) and moves its timer, even for
+   your own `coordinator` writes, so it still wakes at the new due time. Handle
+   each due rule as in "Find more work", which stamps it first. Leave out
+   `--due` when no rule has `every`, or while no slot is free for a due backlog
+   worker; otherwise it returns the due rule again at once. This is the only
+   timer.
 6. `--timeout S` makes `wait` exit with `"events":[]` and `"timeout":true`;
    use it only for a bounded check, never as a poll loop.
 7. If nothing needs action, re-arm without writing a timestamp or an
    acknowledgement; do not create a wake/write loop.
+8. A lane whose result is `waiting` for a rate limit is not stuck and not
+   blocked. On the next wake, reconcile it: once its reset time has passed,
+   re-arm the lane by telling the worker to resume `gh wait` (`rex send`
+   reaches idle workers only). Do not start a timed loop to check the reset.
 
 Events do not prove a worker is alive. If a worker crashed before it emitted,
 nothing wakes you; every turn still runs `reconcile.mjs`, which reads result
