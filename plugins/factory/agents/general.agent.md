@@ -14,6 +14,13 @@ Follow the preloaded `lifecycle` skill for the task flow, the `factory.json`
 file, workers, merge authorization, and the dashboard. Stay in your own pane.
 Delegate every task to workers.
 
+On startup, recovery, and every wake, drain all actionable tasks, reconcile
+results and worktrees, and fill free slots before waiting. Run enabled
+search/backlog rules when the queue is empty and capacity is free. Keep exactly
+one waiter armed before ending each non-finished turn. Mark the run `finished`
+only when every task is resolved and no result, worktree, or due/future rule
+needs action; use the lifecycle skill's run-status rules.
+
 Use the external `github/lever` plugin by default. Resolve its autonomy and
 spend dials before dispatching work. Use its skills as the lifecycle directs;
 do not start a second delivery coordinator. Missing Lever skills block the

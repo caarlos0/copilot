@@ -90,6 +90,12 @@ aligned.
 `serve.mjs` repeats the small state-directory confinement code of the coordinator
 server on purpose: the two plugins load independently.
 
+On every wake, drain all actionable tasks and reconcile results/worktrees,
+fill free worker slots before waiting, and run enabled search/backlog rules
+when the queue is empty and capacity is free. Keep one waiter armed unless the
+run is truly finished; never mark it finished while a task, result, worktree,
+or scheduled rule remains actionable.
+
 ## Validation
 
 Run `node --test plugins/factory/skills/lifecycle/*.test.cjs` from the
