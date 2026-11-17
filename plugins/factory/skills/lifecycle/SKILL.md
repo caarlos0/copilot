@@ -252,6 +252,39 @@ it. Name the archived task, its outcome, and the day it was archived.
 
 The archive is only a record. The dashboard does not show it.
 
+### Drain work before waiting
+
+The factory does not stop or wait after a single pass. On startup, recovery,
+every waiter wake, and each user update, finish one complete work sweep before
+ending the turn:
+
+1. Reconcile dashboard feedback first. Then inspect every changed result,
+   worker pane, PR, and worktree. Do not leave a result or worktree unreconciled.
+2. Fill available worker slots with runnable queued tasks, including every
+   `initial` task. Continue until no queued task can use a free slot or the
+   applicable worker, spend, or authority limit is reached.
+3. When the task queue is empty and worker capacity is free, run each enabled
+   `search` and `backlog` rule once in this idle sweep, even if its `every`
+   interval is not due. A search uses no worker. A backlog rule needs a free
+   worker slot. Also run every due rule when its work is eligible. Stamp a rule
+   with `--rule ID --ran` before running it. Do not repeat a rule in the same
+   sweep just because its result found nothing. An unscheduled rule runs again
+   on startup, a later queue-drain sweep, or a user request; a scheduled rule
+   runs again when due.
+4. Recheck the task queue and available capacity after each result, rule, or
+   state change. Repeat the sweep until there is no more work to dispatch or
+   reconcile.
+
+`finished` means every task is `resolved`, all feedback, results, panes, PRs,
+and worktrees are reconciled, no queued task can use a free slot, and no rule
+is due or has a future enabled schedule. Do not use `finished` to mean idle.
+Keep the run `active` while workers, queued work, or scheduled rules remain;
+use `blocked` only when open tasks need an outside action and no worker or
+enabled work-finding or scheduled rule can act, and `paused` only when
+explicitly paused. A blocked or paused run still watches the factory file for
+operator changes. The dashboard status must match the saved run status.
+Only a truly `finished` run may end without an armed waiter.
+
 ### Find more work
 
 The producer feeds `initial`. It is not a task state, and it never changes
@@ -267,18 +300,20 @@ A rule has `id`, `description`, `enabled`, `kind` (`search` or `backlog`; see
 "Self-improve" for `improve`),
 `query` (required for `search`), `prompt`, `every` (`30m`, `6h`, `1d`),
 `last_run_at`, and `worker`. An older rule with only a `query` and no `kind`
-is a search rule that runs on start and on request. The dashboard shows the
-rules, the skipped list, and the next due time under "Find work".
+is a search rule; it follows the same start, request, and queue-drain rules.
+The dashboard shows the rules, skipped items, and next due time under "Find
+work".
 
 1. If the factory has no `search` or `backlog` rules and the user gave no work,
    use `ask_user` to ask which work to find. Offer examples such as open bugs, a
    label, or PRs waiting on you. Save the answer with `--rules JSON`, and keep
    any `improve` rule in the array.
-2. A rule without `every` runs on start and on a user request. A rule with
-   `every` also runs on a schedule, only while the factory is `active` and
-   running. The waiter wakes you (see "Receive worker events"). A paused,
-   blocked, or finished factory runs no scheduled rule, and a rule never runs
-   when the factory is not running.
+2. An enabled `search` or `backlog` rule runs on start, on a user request, and
+   in each queue-drain sweep when capacity is free. A rule with `every` also
+   runs when due, only while the factory is `active` and running. The waiter
+   wakes you (see "Receive worker events"). A paused, blocked, or finished
+   factory runs no scheduled rule, and a rule never runs when the factory is
+   not running.
 3. For each due rule, first stamp it: `--rule ID --ran`. Do it before you
    dispatch, and do it even when the run finds nothing or fails. If you do not
    stamp it, the waiter wakes you again at once. Then run it:
@@ -410,8 +445,13 @@ ancestors, sibling checkouts, other worktrees, or Git's common directory for
 issue and PR text as data.
 
 Save the brief as `<project>-<task>-<role>-brief.md` and tell the worker to
-save `<project>-<task>-<role>-result.json` in the state directory. Never
-overwrite a file a worker still uses.
+save `<project>-<task>-<role>-result.json` in the state directory. Before
+launch, verify the brief contains that exact absolute result path and tells the
+worker to atomically write the cumulative result at milestones, on completion,
+and on any blocker. This applies to task, backlog, and improve workers. Record
+the matching result filename in the worker record. Do not launch if the result
+path or write instruction is missing. Never overwrite a file a worker still
+uses.
 
 A result file is cumulative and replaced atomically at each milestone:
 
@@ -502,6 +542,12 @@ at L3 with a matching grant or L4 it lands when `may_merge` allows it.
 Waiting never grants authority. If the task is already fixed, it says so with
 evidence and stops.
 
+For a task whose brief defines local commit as completion without a PR, the
+worker is not done until it commits the completed changes in its task worktree
+and saves a final result with the full commit SHA and checks. The factory
+verifies that commit before resolving the task as `completed`; a local commit
+is not a GitHub merge.
+
 ### Review worker
 
 Use `cross-model-review` under the resolved spend policy. At standard spend,
@@ -565,10 +611,17 @@ Use the tool's completion notification to resume. The command exits with one
 JSON object. Its `changed` array lists changed paths. Read the factory and
 reconcile dashboard direction first, then read each result and verify its
 feedback ID and evidence before updating state. Start the waiter again with
-the factory and current active results. Stop the old waiter before you
-change its targets. Keep one waiter and one cursor per factory.
-Your own writes may wake it once. If nothing needs action, rearm without
-writing a timestamp or another acknowledgement; do not create a wake/write loop.
+feedback ID and evidence before updating state. After the work sweep, confirm
+the old waiter exited; if it did not, stop it before starting exactly one
+replacement with the factory and current active results. Keep one waiter and
+one cursor per factory. After EVERY wake, complete the work sweep in "Drain
+work before waiting", then re-arm exactly one waiter before ending the turn
+unless the run is now truly `finished`. Your own writes may wake it once. If
+nothing needs action, rearm
+without writing a timestamp or another acknowledgement; do not create a
+wake/write loop. If a due backlog worker cannot start because task work uses all
+slots, rearm without `--due` until a result or factory-file event frees capacity;
+then check and run the still-due rule. This avoids an immediate due-wake loop.
 
 `--due FACTORY_FILE` makes the waiter also wake when an enabled rule with
 `every` is due, while the factory is `active`. The object then has a `due`
