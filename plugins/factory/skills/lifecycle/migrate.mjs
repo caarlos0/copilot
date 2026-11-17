@@ -309,6 +309,13 @@ It refuses to overwrite an existing factory.json, and stops when a legacy owner 
         throw new Error(`${source.file} changed during migration. Stop its writer and retry.`);
       }
     }
+    const archive = join(directory, "archive", `${new Date().toISOString().slice(0, 10)}-factory-migration`);
+    const moves = options.archive
+      ? loaded.map(({ source }) => [source.file, join(archive, basename(source.file))])
+      : [];
+    for (const [, destination] of moves) {
+      if (await exists(destination)) throw new Error(`${destination} already exists; archive by hand.`);
+    }
     const temporary = `${target}.${randomUUID()}.tmp`;
     await writeFile(temporary, `${JSON.stringify(data, null, 2)}\n`, { mode: 0o600, flag: "wx" });
     try {
@@ -317,16 +324,9 @@ It refuses to overwrite an existing factory.json, and stops when a legacy owner 
       await rm(temporary, { force: true });
     }
     if (options.archive) {
-      const day = new Date().toISOString().slice(0, 10);
-      const archive = join(directory, "archive", `${day}-factory-migration`);
       await mkdir(archive, { recursive: true });
-      summary.archived = [];
-      for (const { source } of loaded) {
-        const destination = join(archive, basename(source.file));
-        if (await exists(destination)) throw new Error(`${destination} already exists; archive by hand.`);
-        await rename(source.file, destination);
-        summary.archived.push(destination);
-      }
+      for (const [from, to] of moves) await rename(from, to);
+      summary.archived = moves.map(([, to]) => to);
     }
   }
   console.log(JSON.stringify(summary, null, 2));

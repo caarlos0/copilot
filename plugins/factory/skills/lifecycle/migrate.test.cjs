@@ -126,6 +126,21 @@ test("--archive moves only the implementer and coordinator sources", async (t) =
   assert.deepEqual(archived.sort(), ["owner.repo-coordinator.json", "owner.repo-implementer.json"]);
 });
 
+test("--archive checks every destination before writing anything", async (t) => {
+  const f = await fixture(t);
+  const archive = join(f.directory, "archive", `${new Date().toISOString().slice(0, 10)}-factory-migration`);
+  await mkdir(archive, { recursive: true });
+  await writeFile(join(archive, "owner.repo-coordinator.json"), "{}");
+  const result = f.run("--archive");
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /already exists; archive by hand/);
+  const files = await readdir(f.directory);
+  assert.ok(!files.includes("owner.repo-factory.json"));
+  assert.ok(files.includes("owner.repo-implementer.json"));
+  assert.ok(files.includes("owner.repo-coordinator.json"));
+  assert.deepEqual(await readdir(archive), ["owner.repo-coordinator.json"]);
+});
+
 test("fails on a missing project argument and on a project without legacy handoffs", async (t) => {
   const f = await fixture(t);
   const usage = spawnSync(process.execPath, [script, "--directory", f.directory], { encoding: "utf8" });
