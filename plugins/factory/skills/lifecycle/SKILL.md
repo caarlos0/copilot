@@ -606,6 +606,14 @@ at L3 with a matching grant or L4 it lands when `may_merge` allows it.
 Waiting never grants authority. If the task is already fixed, it says so with
 evidence and stops.
 
+When concurrent tasks' changed-file lists overlap, record each task's validated
+default-branch SHA in `details.validated_base_sha`. After an overlapping task
+lands, the remaining worker merges the new default-branch tip into its branch
+(never rebase), reruns checks affected by the combined code, and refreshes the
+base SHA and head-specific check/review evidence before landing. For local-only
+tasks, use the current local default branch, not `origin`. Keep independent
+tasks parallel.
+
 For a task whose brief defines local commit as completion without a PR, the
 worker is not done until it commits the completed changes in its task worktree
 and saves a final result with the full commit SHA and checks. The factory
@@ -730,8 +738,10 @@ recheck current policy even when the head has not changed.
 
 Before a landing attempt, the factory records the exact head, verified
 `may_merge` decision, and planned attempt with `factory.mjs`. The worker uses
-Lever's expected-head merge guard or the repository's queue and reports the
-decision and attempt in its cumulative result:
+the repository's existing merge queue when available; otherwise it uses Lever's
+expected-head merge guard. For overlapping tasks, do not land until the combined
+code checks pass and the task's validated base SHA and head-specific evidence
+are current. Report the decision and attempt in the cumulative result:
 
 ```sh
 node factory.mjs "$FILE" --task issue-42 \
