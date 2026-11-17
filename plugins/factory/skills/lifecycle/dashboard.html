@@ -67,8 +67,8 @@
       .brand img { display: block; width: 28px; height: 28px; }
       h1 { margin: 0; font-size: 20px; font-weight: 600; }
       .refresh { display: flex; align-items: center; gap: 12px; margin-left: auto; }
-      .layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); align-items: start; }
-      #factories { display: flex; flex-direction: column; gap: 2px; padding: 16px 12px;
+      .layout { display: grid; grid-template-columns: 240px auto minmax(0, 1fr); align-items: start; }
+      #factories { grid-column: 1; display: flex; flex-direction: column; gap: 2px; padding: 16px 12px;
         border-right: 1px solid var(--border); }
       #factories p { margin: 4px 12px; }
       .factory-item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 12px; text-align: left;
@@ -80,7 +80,10 @@
       .update-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--accent);
         animation: blink 1.2s ease-in-out infinite; }
       @keyframes blink { 50% { opacity: .2; } }
-      main { padding: 24px 32px; max-width: 1280px; }
+      main { grid-column: 3; padding: 24px 32px; max-width: 1280px; overflow-x: auto; }
+      #detail { grid-column: 2; position: sticky; top: 0; width: clamp(420px, 34vw, 520px); max-height: 100vh;
+        overflow-y: auto; border-right: 1px solid var(--border); }
+      #detail:focus { outline: none; }
       h2 { margin: 0; font-size: 20px; font-weight: 400; }
       h3 { margin: 0; font-size: 16px; font-weight: 600; }
       p { margin: 8px 0; }
@@ -105,7 +108,7 @@
       #error, #discovery-error, .blocker, .save-error { padding: 16px; border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
         border-radius: 6px; background: color-mix(in srgb, var(--danger) 10%, var(--bg)); }
 
-      #flow { width: 100%; height: auto; max-height: 70vh; display: block; }
+      #flow { width: 100%; min-width: 720px; height: auto; max-height: 70vh; display: block; }
       .edge { fill: none; stroke: var(--border-emphasis); stroke-width: 2; stroke-dasharray: 8 6;
         animation: flow 1s linear infinite; transition: opacity .4s; }
       .edge.idle { opacity: .35; }
@@ -214,6 +217,8 @@
       }
       @media (max-width: 700px) {
         .layout { grid-template-columns: 1fr; }
+        #factories, #detail, main { grid-column: 1; }
+        #detail { position: static; width: auto; max-height: none; border-right: 0; border-bottom: 1px solid var(--border); }
         #factories { flex-direction: row; flex-wrap: wrap; border-right: 0; border-bottom: 1px solid var(--border); }
         .factory-item { width: auto; }
         .refresh { margin-left: 0; }
@@ -240,6 +245,17 @@
     </header>
     <div class="layout">
     <nav id="factories" aria-label="Factories"></nav>
+    <aside id="detail" aria-labelledby="detail-title" tabindex="-1" hidden>
+      <div class="detail-head">
+        <h2 id="detail-title"></h2>
+        <button id="close-detail" class="close-button" type="button"
+          aria-label="Close task list" title="Close task list">&times;</button>
+      </div>
+      <p id="detail-status" role="status"></p>
+      <p id="detail-filter-count" class="muted" role="status"></p>
+      <ul id="task-list"></ul>
+      <p id="detail-empty" class="muted" hidden>No tasks in this state.</p>
+    </aside>
     <main>
       <h2 id="goal"></h2>
       <p id="run-state" class="muted"></p>
@@ -250,17 +266,6 @@
       </details>
       <p id="error" role="alert" hidden></p>
       <svg id="flow" viewBox="0 0 1160 560" role="group" aria-label="Factory flow: tasks per state"></svg>
-      <dialog id="detail" aria-labelledby="detail-title" tabindex="-1">
-        <div class="detail-head">
-          <h2 id="detail-title"></h2>
-          <button id="close-detail" class="close-button" type="button" tabindex="-1"
-            aria-label="Close task list" title="Close task list">&times;</button>
-        </div>
-        <p id="detail-status" role="status"></p>
-        <p id="detail-filter-count" class="muted" role="status"></p>
-        <ul id="task-list"></ul>
-        <p id="detail-empty" class="muted" hidden>No tasks in this state.</p>
-      </dialog>
       <dialog id="move-dialog" aria-labelledby="move-title">
         <div class="detail-head">
           <h2 id="move-title"></h2>
@@ -356,7 +361,7 @@
       let tweening = false;
 
       const flow = document.getElementById("flow");
-      const dialog = document.getElementById("detail");
+      const panel = document.getElementById("detail");
       const moveDialog = document.getElementById("move-dialog");
       const producers = document.getElementById("producers-dialog");
       function element(tag, value, className) {
@@ -869,7 +874,7 @@
               load(data, file);
               document.getElementById("detail-status").textContent =
                 `Moved "${task.title}" to ${places[destination].title}. Comment saved; awaiting factory acknowledgement.`;
-              if (ownsDialog) dialog.focus();
+              if (ownsDialog) panel.focus();
             }
           } catch (cause) {
             failed(new Error(`Move was not confirmed: ${cause.message} Reload the task before trying again.`));
@@ -987,15 +992,15 @@
         const list = document.getElementById("task-list");
         if (!state) {
           moveDialog.close();
-          dialog.close();
-          dialog.dataset.state = "";
-          dialog.dataset.outcome = "";
+          panel.hidden = true;
+          panel.dataset.state = "";
+          panel.dataset.outcome = "";
           list.replaceChildren();
           list.dataset.signature = "";
           return;
         }
         const outcome = openOutcome();
-        const sameList = dialog.dataset.state === state && dialog.dataset.outcome === (outcome ?? "");
+        const sameList = panel.dataset.state === state && panel.dataset.outcome === (outcome ?? "");
         const filter = filterQuery();
         const sameFilter = list.dataset.filter === filter;
         const expanded = new Set([...list.querySelectorAll("details[open]")].map((node) => node.dataset.taskId));
@@ -1039,11 +1044,11 @@
         if (filter) emptyMessage = "No tasks match this filter.";
         document.getElementById("detail-empty").textContent = emptyMessage;
         if (!sameList) document.getElementById("detail-status").textContent = "";
-        dialog.dataset.state = state;
-        dialog.dataset.outcome = outcome ?? "";
-        if (!dialog.open) {
-          dialog.showModal();
-          dialog.focus();
+        panel.dataset.state = state;
+        panel.dataset.outcome = outcome ?? "";
+        if (panel.hidden) {
+          panel.hidden = false;
+          panel.focus();
         }
       }
 
@@ -1277,7 +1282,10 @@
       });
       window.addEventListener("hashchange", draw);
       const closeChoice = () => choose(null);
-      wireDismiss(dialog, "close-detail", closeChoice);
+      document.getElementById("close-detail").addEventListener("click", closeChoice);
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && !panel.hidden && !moveDialog.open && !producers.open) closeChoice();
+      });
       wireDismiss(moveDialog, "close-move", closeMove);
       wireDismiss(producers, "close-producers", closeChoice);
 

@@ -285,6 +285,8 @@ async function dashboard(t, { reducedMotion = true, confirm = () => true, now = 
     getElementById: (id) => elements.get(id),
     createElement: (tag) => new Element(tag),
     createElementNS: (_, tag) => new Element(tag),
+    listeners: new Map(),
+    addEventListener(name, callback) { this.listeners.set(name, callback); },
   };
   class Element {
     constructor(tag) {
@@ -388,7 +390,8 @@ async function dashboard(t, { reducedMotion = true, confirm = () => true, now = 
   vm.runInContext("animate = () => {}; buildFlow();", context);
   const run = (source) => vm.runInContext(source, context);
   await run("refresh()");
-  return { run, document, directory, get: (id) => elements.get(id), setNow: (value) => { now = value; } };
+  const press = (key) => document.listeners.get("keydown")({ key });
+  return { run, document, directory, press, get: (id) => elements.get(id), setNow: (value) => { now = value; } };
 }
 
 test("unchanged refresh updates elapsed labels without replacing expanded rows or move drafts", async (t) => {
@@ -424,36 +427,54 @@ test("unchanged refresh updates elapsed labels without replacing expanded rows o
   assert.equal(ui.get("move-body").querySelector("textarea").value, "Keep this draft");
 });
 
-test("state selection opens a modal list that can close and reopen", async (t) => {
+test("state selection opens a docked list that can close and reopen", async (t) => {
   const ui = await dashboard(t, { reducedMotion: false });
+  assert.equal(ui.get("detail").hidden, true, "The panel starts closed.");
   ui.run("choose('blocked')");
-  assert.equal(ui.get("detail").tag, "dialog");
-  assert.equal(ui.get("detail").open, true);
+  assert.equal(ui.get("detail").tag, "aside");
+  assert.equal(ui.get("detail").hidden, false);
   assert.equal(ui.document.activeElement, ui.get("detail"), "Opening the list must not focus the close button.");
   assert.equal(ui.get("task-list").tag, "ul");
   assert.equal(ui.get("task-list").children.length, 1);
   assert.match(ui.get("task-list").textContent, /Docs build fails on a clean checkout/);
   assert.equal(ui.get("task-list").children[0].tag, "li");
   await ui.get("close-detail").fire("click");
-  assert.equal(ui.get("detail").open, false);
+  assert.equal(ui.get("detail").hidden, true);
   ui.run("choose('blocked')");
   assert.equal(ui.get("task-list").children.length, 1);
-  await ui.get("detail").fire("cancel");
-  assert.equal(ui.get("detail").open, false);
+  ui.press("Enter");
+  assert.equal(ui.get("detail").hidden, false, "Only Escape closes the panel.");
+  ui.press("Escape");
+  assert.equal(ui.get("detail").hidden, true);
   ui.run("choose('blocked')");
-  const outside = { clientX: 10, clientY: 10 };
-  await ui.get("detail").fire("pointerdown", { clientX: 500, clientY: 400 });
-  await ui.get("detail").fire("click", { clientX: 500, clientY: 400 });
-  assert.equal(ui.get("detail").open, true, "A click inside the popup must not close it.");
-  await ui.get("detail").fire("pointerdown", { ...outside, target: ui.get("task-list") });
-  await ui.get("detail").fire("click", outside);
-  assert.equal(ui.get("detail").open, true, "A drag that starts inside the popup must not close it.");
-  await ui.get("detail").fire("pointerdown", outside);
-  await ui.get("detail").fire("click", outside);
-  assert.equal(ui.get("detail").open, false, "A click on the backdrop must close the popup.");
+  await ui.get("detail").fire("pointerdown", { clientX: 10, clientY: 10 });
+  await ui.get("detail").fire("click", { clientX: 10, clientY: 10 });
+  assert.equal(ui.get("detail").hidden, false, "A click outside the panel must not close it.");
   ui.run("choose('investigation')");
+  assert.equal(ui.get("detail").hidden, false, "Choosing another state keeps the panel open.");
+  assert.equal(ui.get("detail").dataset.state, "investigation");
   assert.equal(ui.get("detail-empty").hidden, false);
   assert.equal(ui.get("task-list").children.length, 0);
+});
+
+test("the task list is docked between the factory list and the flow, and the flow shrinks or scrolls", () => {
+  assert.doesNotMatch(html, /<dialog id="detail"/);
+  const layout = html.match(/<div class="layout">([\s\S]*?)<noscript>/)[1];
+  assert.ok(layout.indexOf('id="factories"') < layout.indexOf('<aside id="detail"')
+    && layout.indexOf('<aside id="detail"') < layout.indexOf("<main>"));
+  assert.match(html, /\.layout \{[^}]*grid-template-columns: 240px auto minmax\(0, 1fr\)/);
+  assert.match(html, /#detail \{[^}]*position: sticky;[^}]*width: clamp\(420px, 34vw, 520px\)/);
+  assert.match(html, /main \{[^}]*overflow-x: auto/);
+  assert.match(html, /#flow \{[^}]*min-width: 720px/);
+});
+
+test("Escape leaves the task list open while a popup owns the key", async (t) => {
+  const ui = await dashboard(t);
+  ui.run("choose('blocked')");
+  await ui.get("task-list").querySelector(".move").fire("click");
+  assert.equal(ui.get("move-dialog").open, true);
+  ui.press("Escape");
+  assert.equal(ui.get("detail").hidden, false, "Escape in the move popup belongs to the popup.");
 });
 
 test("the sidebar lists every factory and blinks a dot on one that changed until it is selected", async (t) => {
@@ -658,7 +679,7 @@ test("resolved sublists count each outcome and open only matching tasks", async 
   assert.equal(ui.get("task-list").children.length, 7);
   await duplicate.fire("click");
   await ui.get("close-detail").fire("click");
-  assert.equal(ui.get("detail").open, false, "Close must close the filtered list, not clear its filter.");
+  assert.equal(ui.get("detail").hidden, true, "Close must close the filtered list, not clear its filter.");
   assert.equal(ui.run("location.hash"), "");
 });
 
@@ -671,8 +692,8 @@ test("resolution counts and sublists update when a task is resolved and reopened
   assert.equal(completed.querySelector(".outcome-count").textContent, "0");
   assert.equal(ui.get("task-list").children.length, 0);
   assert.equal(ui.get("detail-empty").hidden, false);
-  await ui.get("detail").fire("cancel");
-  assert.equal(ui.get("detail").open, false);
+  ui.press("Escape");
+  assert.equal(ui.get("detail").hidden, true);
   ui.run("choose('initial')");
   await ui.get("task-list").querySelector(".move").fire("click");
   let form = ui.get("move-body").querySelector("form");
@@ -704,7 +725,7 @@ test("Find work lists rules, user links and skipped work without changing task s
   await source.fire("click");
   assert.equal(ui.run("location.hash"), "#producers");
   assert.equal(ui.get("producers-dialog").open, true);
-  assert.equal(ui.get("detail").open, false);
+  assert.equal(ui.get("detail").hidden, true);
   const rows = ui.get("rule-list").children;
   assert.deepEqual(rows.map((row) => row.querySelector("h3").textContent), ["new-bugs", "find-more", "User links"]);
   assert.match(rows[0].textContent, /search.*enabled.*Search: repo:owner\/repo is:issue.*Every 30m, last run .* ago, due now/);
@@ -751,7 +772,7 @@ test("Move opens a separate popup whose draft survives refresh and conflict", as
   const list = ui.get("task-list");
   await list.querySelector(".move").fire("click");
   assert.equal(ui.get("move-dialog").open, true);
-  assert.equal(ui.get("detail").open, true);
+  assert.equal(ui.get("detail").hidden, false);
   const form = ui.get("move-body").querySelector("form");
   const comment = form.querySelector("textarea");
   const state = form.querySelector("select");
@@ -781,10 +802,10 @@ test("Move opens a separate popup whose draft survives refresh and conflict", as
   assert.equal(saved.history.at(-1).note, comment.value);
   assert.equal(saved.feedback.acknowledged_id, null);
   assert.equal(ui.get("move-dialog").open, false);
-  assert.equal(ui.get("detail").open, true);
+  assert.equal(ui.get("detail").hidden, false);
   assert.equal(ui.get("detail").dataset.state, "blocked", "The list must stay on the state it showed.");
   assert.equal(ui.get("task-list").children.length, 0);
-  assert.equal(ui.document.activeElement, ui.get("detail"), "After saving, focus must stay in the task popup.");
+  assert.equal(ui.document.activeElement, ui.get("detail"), "After saving, focus must stay in the task panel.");
   assert.match(ui.get("detail-status").textContent, /to Initial\. Comment saved; awaiting factory acknowledgement/);
 });
 
@@ -868,7 +889,7 @@ test("the move popup confirms before discarding a draft through Esc, close, or b
     assert.equal(ui.get("move-dialog").open, false, "An empty comment must close without confirmation.");
     assert.equal(confirmations.length, confirmationCount);
   }
-  assert.equal(ui.get("detail").open, true);
+  assert.equal(ui.get("detail").hidden, false);
   assert.equal(await readFile(file, "utf8"), original);
 });
 
