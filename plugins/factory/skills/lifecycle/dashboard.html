@@ -600,6 +600,19 @@
         return span(Math.max(0, Math.floor((Date.now() - Date.parse(time)) / 1000)));
       }
 
+      function elapsedLabel(time, suffix = "") {
+        const label = element("span", `${age(time)}${suffix}`, "elapsed-age");
+        label.dataset.time = time;
+        label.dataset.suffix = suffix;
+        return label;
+      }
+
+      function refreshElapsedLabels(root) {
+        for (const label of root.querySelectorAll(".elapsed-age")) {
+          label.textContent = `${age(label.dataset.time)}${label.dataset.suffix}`;
+        }
+      }
+
       function span(seconds) {
         if (seconds < 60) return `${seconds}s`;
         const minutes = Math.floor(seconds / 60);
@@ -852,7 +865,9 @@
         heading.append(element("h3", task.title), actions);
         node.append(heading);
         const chips = element("p", null, "chips");
-        chips.append(element("span", `${task.state} for ${age(entered(task))}`, "chip state"));
+        const stateAge = element("span", `${task.state} for `, "chip state");
+        stateAge.append(elapsedLabel(entered(task)));
+        chips.append(stateAge);
         if (cycles) chips.append(element("span", `${cycles} review ${cycles === 1 ? "cycle" : "cycles"}`, "chip"));
         for (const [label, sha] of [["head", task.head], ["reviewed", task.reviewed_head]]) {
           if (!sha) continue;
@@ -888,10 +903,15 @@
         more.open = expanded.has(more.dataset.taskId);
         more.append(element("summary", "Task details"), element("p", `${snapshot.project} / ${task.id}`, "muted"));
         if (task.pr && task.state !== "resolved") {
-          const merge = task.merge
-            ? `Merge decision recorded for ${task.merge.authorized_by} (${task.merge.source}) ${age(task.merge.authorized_at)} ago${task.merge.requested_at ? "; landing requested" : ""}`
-            : "Merge: no current-head decision recorded";
-          more.append(element("p", merge));
+          const merge = element("p");
+          if (task.merge) {
+            merge.append(`Merge decision recorded for ${task.merge.authorized_by} (${task.merge.source}) `,
+              elapsedLabel(task.merge.authorized_at, " ago"),
+              task.merge.requested_at ? "; landing requested" : "");
+          } else {
+            merge.textContent = "Merge: no current-head decision recorded";
+          }
+          more.append(merge);
         }
 
         const workers = Object.entries(task.workers).filter(([, worker]) => worker);
@@ -972,6 +992,7 @@
           list.dataset.signature = signature;
           list.dataset.filter = filter;
         }
+        refreshElapsedLabels(list);
         document.getElementById("detail-empty").hidden = list.children.length > 0;
         let emptyMessage = "No tasks in this state.";
         if (outcome) emptyMessage = "No tasks with this outcome.";
