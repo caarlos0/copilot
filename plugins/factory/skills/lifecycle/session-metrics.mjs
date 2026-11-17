@@ -1,6 +1,7 @@
-import { readFile } from "node:fs/promises";
+import { createReadStream } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { readSessions, sessionID } from "./sessions.mjs";
@@ -16,7 +17,7 @@ const commandPatterns = {
 const statusRead = /\bgh\s+(?:pr\s+(?:view|checks)|run\s+(?:view|list))\b/;
 
 // Counts only: no message, command, or file content leaves this function.
-function measure(lines) {
+async function measure(lines) {
   const tools = {};
   const calls = new Map();
   const commands = { sleep: 0, gh_wait: 0, watch: 0, status_reads: 0 };
@@ -40,7 +41,7 @@ function measure(lines) {
     waitingSince = null;
   };
 
-  for (const line of lines) {
+  for await (const line of lines) {
     if (!line) continue;
     let event;
     try {
@@ -128,15 +129,14 @@ export async function report(entries, directory) {
   const sessions = [];
   const missing = [];
   for (const entry of entries) {
-    let text;
+    const input = createReadStream(join(directory, entry.id, "events.jsonl"), "utf8");
     try {
-      text = await readFile(join(directory, entry.id, "events.jsonl"), "utf8");
+      const metrics = await measure(createInterface({ input, crlfDelay: Infinity }));
+      sessions.push({ id: entry.id, role: entry.role, task: entry.task, rule: entry.rule, ...metrics });
     } catch (error) {
       if (error.code !== "ENOENT") throw error;
       missing.push(entry.id);
-      continue;
     }
-    sessions.push({ id: entry.id, role: entry.role, task: entry.task, rule: entry.rule, ...measure(text.split("\n")) });
   }
   return { totals: sum(sessions), missing, sessions };
 }

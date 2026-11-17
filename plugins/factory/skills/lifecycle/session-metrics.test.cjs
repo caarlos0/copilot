@@ -81,6 +81,17 @@ test("measures waits, commands, tools, and usage without exposing content", asyn
   });
 });
 
+test("streams the log: blank lines, CRLF, and a last line without a newline", async (t) => {
+  const f = await fixture(t);
+  const lines = [event(0, "user.message"), "", event(1, "assistant.turn_start"), event(2, "assistant.turn_end")];
+  await writeFile(join(f.directory, first, "events.jsonl"), `${lines.slice(0, 3).join("\r\n")}\n${lines[3]}`);
+  const [session] = JSON.parse(f.run(first).stdout).sessions;
+  assert.equal(session.events, 3);
+  assert.equal(session.skipped_lines, 0);
+  assert.equal(session.turns, 1);
+  assert.equal(session.ended_at, "2026-05-01T12:00:02.000Z");
+});
+
 test("--since keeps sessions registered at or after that time; IDs work without a registry", async (t) => {
   const f = await fixture(t);
   const since = (time) => JSON.parse(f.run("--registry", f.file, "--since", time).stdout);
