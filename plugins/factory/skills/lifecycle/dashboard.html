@@ -18,7 +18,6 @@
         --btn-hover: #eff2f5;
         --btn-primary: #1f883d;
         --btn-primary-hover: #1a7f37;
-        --btn-danger-hover: #a40e26;
         --accent: #0969da;
         --success: #1a7f37;
         --attention: #9a6700;
@@ -51,7 +50,6 @@
           --btn-hover: #262c36;
           --btn-primary: #238636;
           --btn-primary-hover: #29903b;
-          --btn-danger-hover: #b62324;
           --accent: #4493f8;
           --success: #3fb950;
           --attention: #d29922;
@@ -76,8 +74,6 @@
       button:hover:not(:disabled) { background: var(--btn-hover); }
       .action-primary { color: #fff; background: var(--btn-primary); border-color: rgb(31 35 40 / .15); }
       .action-primary:hover:not(:disabled) { background: var(--btn-primary-hover); }
-      .action-danger { color: var(--danger); }
-      .action-danger:hover:not(:disabled) { color: #fff; background: var(--btn-danger-hover); }
       select { width: 480px; max-width: 100%; padding: 5px 12px; background: var(--bg); }
       textarea { width: 100%; padding: 8px 12px; background: var(--bg); resize: vertical; }
       button:disabled { opacity: .6; cursor: default; }
@@ -140,7 +136,7 @@
         border-bottom: 1px solid var(--border); }
       .detail-head h2 { flex: 1; min-width: 0; overflow-wrap: anywhere; }
       .close-button { flex: none; width: 32px; height: 32px; padding: 0; font-size: 24px;
-        line-height: 28px; background: transparent; border-color: transparent; }
+        line-height: 28px; color: var(--fg-muted); background: transparent; border-color: transparent; }
       .move-form .controls { justify-content: flex-end; }
       #detail-status, #detail-empty { margin: 16px 24px; }
       #detail-status:empty { display: none; }
@@ -209,7 +205,7 @@
       <dialog id="detail" aria-labelledby="detail-title" tabindex="-1">
         <div class="detail-head">
           <h2 id="detail-title"></h2>
-          <button id="close-detail" class="close-button action-danger" type="button" tabindex="-1"
+          <button id="close-detail" class="close-button" type="button" tabindex="-1"
             aria-label="Close task list" title="Close task list">&times;</button>
         </div>
         <p id="detail-status" role="status"></p>
@@ -219,7 +215,7 @@
       <dialog id="move-dialog" aria-labelledby="move-title">
         <div class="detail-head">
           <h2 id="move-title"></h2>
-          <button id="close-move" class="close-button action-danger" type="button" tabindex="-1"
+          <button id="close-move" class="close-button" type="button" tabindex="-1"
             aria-label="Cancel move" title="Cancel move">&times;</button>
         </div>
         <div id="move-body"></div>
