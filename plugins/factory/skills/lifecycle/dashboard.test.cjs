@@ -913,3 +913,12 @@ test("the delegate-always rule is present in the agent, skill, and plugin rules"
     assert.match(text, /git merge main/, file);
   }
 });
+
+test("the worker write boundary is present in the skill and plugin rules", () => {
+  for (const file of [join(__dirname, "SKILL.md"), join(__dirname, "..", "..", "AGENTS.md")]) {
+    const text = readFileSync(file, "utf8");
+    assert.match(text, /only\s+writable\s+root/i, file);
+    assert.match(text, /primary checkout/, file);
+    assert.match(text, /read\s+`plugins\/factory\/AGENTS\.md`\s+before\s+(its|the)\s+first\s+edit/i, file);
+  }
+});
