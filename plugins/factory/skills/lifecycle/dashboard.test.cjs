@@ -637,6 +637,30 @@ test("rows show history, open references in a new tab, and highlight evidence", 
   assert.deepEqual(tokens("literal"), ["-2500", "true", "null", "1"]);
 });
 
+test("a row puts the title and Move button on one line and the links on their own wrapping line", async (t) => {
+  const ui = await dashboard(t);
+  ui.run("choose('implementation')");
+  const row = ui.get("task-list").children[0];
+  const [head, links] = row.children;
+  assert.deepEqual(head.children.map((child) => child.tag), ["h3", "button"]);
+  assert.equal(head.children[1].className, "move");
+  assert.equal(links.className, "links");
+  assert.ok(links.children.length > 0);
+  assert.equal(head.querySelectorAll("a").length, 0);
+  assert.match(html, /\.row-head h3 \{[^}]*flex: 1;[^}]*min-width: 0/);
+  assert.match(html, /\.chips, \.links \{[^}]*flex-wrap: wrap/);
+  assert.match(html, /\.task-row \{[^}]*overflow-wrap: anywhere/);
+  assert.match(html, /\.move \{[^}]*flex: none/);
+});
+
+test("a row without references has no links line", async (t) => {
+  const ui = await dashboard(t);
+  const task = { ...example.tasks[0], issue: null, pr: null, links: [] };
+  const row = ui.run(`taskRow(${JSON.stringify(task)}, new Set())`);
+  assert.equal(row.querySelector(".links"), null);
+  assert.equal(row.children[0].className, "row-head");
+});
+
 test("resolved sublists count each outcome and open only matching tasks", async (t) => {
   const ui = await dashboard(t, { reducedMotion: false });
   const data = structuredClone(example);

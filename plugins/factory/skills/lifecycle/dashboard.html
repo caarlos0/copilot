@@ -189,8 +189,7 @@
       .chip.state { color: var(--c); border-color: var(--c); }
       .blocker { padding: 8px 16px; }
       .feedback-note { white-space: pre-wrap; border-left: 3px solid var(--accent); padding-left: 12px; }
-      .row-actions { display: flex; flex: none; align-items: center; gap: 8px 16px; }
-      .move { padding: 3px 12px; font-size: 12px; }
+      .move { flex: none; padding: 3px 12px; font-size: 12px; }
       .move-form { padding: 16px 24px; }
       .move-form fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
       .move-form label + label { margin-top: 12px; }
@@ -900,19 +899,20 @@
         node.style.setProperty("--c", `var(--${task.state})`);
         const cycles = cyclesOf(task);
         const heading = element("div", null, "row-head");
-        const links = element("span", null, "links");
-        const references = new Set([...(task.issue ? [task.issue] : []), ...(task.pr ? [task.pr] : []), ...task.links]);
-        for (const href of references) links.append(reference(href));
-        const actions = element("span", null, "row-actions");
-        actions.append(links);
+        heading.append(element("h3", task.title));
         if (operatorStates(task).length) {
           const move = element("button", "Move", "move");
           move.type = "button";
           move.addEventListener("click", () => openMove(task));
-          actions.append(move);
+          heading.append(move);
         }
-        heading.append(element("h3", task.title), actions);
         node.append(heading);
+        const references = new Set([...(task.issue ? [task.issue] : []), ...(task.pr ? [task.pr] : []), ...task.links]);
+        if (references.size) {
+          const links = element("p", null, "links");
+          for (const href of references) links.append(reference(href));
+          node.append(links);
+        }
         const chips = element("p", null, "chips");
         const stateAge = element("span", `${task.state} for `, "chip state");
         stateAge.append(elapsedLabel(entered(task)));
