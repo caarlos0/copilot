@@ -42,6 +42,12 @@ tasks:
       - task: release
         vars: {PLUGIN: home}
 
+  release:factory:
+    desc: Release the factory plugin
+    cmds:
+      - task: release
+        vars: {PLUGIN: factory}
+
   release:
     internal: true
     vars:

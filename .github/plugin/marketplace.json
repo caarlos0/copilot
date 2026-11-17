@@ -30,6 +30,11 @@
       "version": "0.5.0"
     },
     {
+      "name": "factory",
+      "source": "./plugins/factory",
+      "version": "0.1.0"
+    },
+    {
       "name": "home",
       "source": "./plugins/home",
       "version": "0.2.0"

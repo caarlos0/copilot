@@ -5,8 +5,8 @@ structure or workflows change.
 
 ## Layout
 
-- `.github/plugin/marketplace.json` exposes six plugins under `plugins/`:
-  coding, security, fitness, terminals, coordination, and home. Keep each
+- `.github/plugin/marketplace.json` exposes seven plugins under `plugins/`:
+  coding, security, fitness, terminals, coordination, factory, and home. Keep each
   marketplace version in sync with its plugin's `plugin.json`.
 - Each plugin uses the supported legacy Copilot format with default `agents/`
   and `skills/` locations. Include its own copy of `LICENSE.md`.
@@ -92,6 +92,50 @@ after verified results. Blocked retained panes stay open. Waiting does not
 grant merge authority. Worktree removal is separate and preserves reused
 worktrees and unfinished work.
 
+## Factory
+
+`factory:general` is a thin agent over
+`plugins/factory/skills/lifecycle/SKILL.md`. It preloads `lifecycle`, which
+disables model/user invocation. It also preloads `autonomy-dial` and
+`progress-contract` from the external `lever@lever` plugin (`github/lever`).
+Do not vendor Lever skills or templates. Factory owns panes and state; Lever
+owns autonomy, spend, brief templates, PR shepherding, and review procedures.
+The coordination plugin stays unchanged, and the reviewer handoff stays with
+`coordination:review`.
+The factory runs every worker in the Rex session it started in (`$REX_SESSION`).
+It never creates or renames a Rex session; it records the session in the
+root `rex_session` field.
+
+State is one `<owner.repo>-factory.json` (`factory/v1`) per project under
+`~/.local/state/copilot-coordinator/`, with one writer guarded by
+`<project>-factory.lock`. Write it only with `factory.mjs`. It validates the
+state flow (`initial`, `investigation`, `implementation`, `review`, `blocked`,
+`resolved`), keeps history, and replaces the file atomically. Every task has a
+GitHub issue. `factory-data.mjs` holds the schema and is shared by the writer,
+`migrate.mjs`, `serve.mjs` (port 8766, lists only `*-factory.json`), and
+`dashboard.html`. `migrate.mjs` moves the implementer and coordinator handoffs
+into the factory file. It refuses to run against a live legacy lock.
+
+Implementation workers use `pr-shepherd` and are the sole landing writers.
+They run `autonomy-dial`'s `may_merge` before every landing attempt. There is no
+extra per-head approval when a resolved grant covers it; PR comments never
+raise authority. Store grant provenance and spend in `details.lever`, and the
+head-specific decision in `merge` with `source: "lever"`. New heads clear the
+decision, not the standing grant. Legacy `comment` and `factory-session`
+records remain readable but are not authority on recovery.
+
+Review workers use `cross-model-review`, not the local `review` wrapper.
+Review depth follows the shared spend budget. A clean precision result is not
+a GitHub approval, and `review` state can have no optional model reviewer.
+Do not start a second Lever delivery coordinator, cloud runner, schedule,
+backlog refill, or autopilot merely because factory is running.
+
+The skill bundles its own copy of the coordinator's `wait.mjs` and tests for
+result notifications; it must not depend on files in the coordination plugin.
+Keep the waiter copies behaviorally aligned.
+`serve.mjs` repeats the small state-directory confinement code of the coordinator
+server on purpose: the two plugins load independently.
+
 ## Validation
 
 Load local changes with `copilot --plugin-dir /path/to/copilot/plugins/coding`
@@ -100,7 +144,10 @@ in a new session. Avoid also loading an installed copy.
 Run `node --test plugins/coordination/skills/coordinator/board.test.cjs`
 for board changes,
 `node --test plugins/coordination/skills/coordinator/handoff.test.cjs`
-for handoff writes, and
+for handoff writes,
 `node --test plugins/coordination/skills/coordinator/wait.test.cjs`
-for result notification changes. Check discovery with
+for result notification changes, and
+`node --test plugins/factory/skills/lifecycle/*.test.cjs`
+for factory data, writer, migration, server, dashboard, and result notification
+changes. Check discovery with
 `copilot --plugin-dir /path/to/copilot/plugins/coding skill list --json`.

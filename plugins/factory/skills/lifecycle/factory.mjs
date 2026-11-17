@@ -1,0 +1,309 @@
+import { randomUUID } from "node:crypto";
+import { open, readFile, rename, rm } from "node:fs/promises";
+import { basename, extname, resolve } from "node:path";
+import { parseArgs } from "node:util";
+import { checkTransition, format, outcomes, validate } from "./factory-data.mjs";
+
+const defaultLimits = { investigation: 3, implementation: 3 };
+
+function isObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function merge(current, patch) {
+  if (!isObject(current) || !isObject(patch)) return patch;
+  return Object.fromEntries([
+    ...Object.entries(current),
+    ...Object.entries(patch).map(([key, value]) => [
+      key, merge(Object.hasOwn(current, key) ? current[key] : undefined, value),
+    ]),
+  ]);
+}
+
+async function readOptional(file) {
+  try {
+    return await readFile(file, "utf8");
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+function json(value, option, check) {
+  const parsed = JSON.parse(value);
+  if (check && !check(parsed)) throw new Error(`--${option} has the wrong JSON type.`);
+  return parsed;
+}
+
+const nullable = (value) => (value === "null" ? null : value);
+
+function newTask(values, now) {
+  for (const option of ["title", "next-action", "issue"]) {
+    if (values[option] === undefined) {
+      throw new Error(`A new task needs --${option}. Use --issue null only when issue creation failed or was not authorized.`);
+    }
+  }
+  if (values.state !== undefined && values.state !== "initial") {
+    throw new Error("A new task starts in the initial state.");
+  }
+  return {
+    id: values.task,
+    title: values.title,
+    state: "initial",
+    updated_at: now,
+    next_action: values["next-action"],
+    issue: null,
+    pr: null,
+    head: null,
+    reviewed_head: null,
+    links: [],
+    blocker: null,
+    resolution: null,
+    merge: null,
+    workers: {},
+    worktree: null,
+    history: [{ state: "initial", at: now, note: values.note ?? null }],
+    details: {},
+  };
+}
+
+function changeState(task, values, now) {
+  const to = values.state;
+  checkTransition(task, to);
+  const from = task.state;
+  if (values.resolution !== undefined && to !== "resolved") {
+    throw new Error("--resolution is allowed only when moving to resolved.");
+  }
+  if (to === "blocked") {
+    if (!values.blocker) throw new Error("Moving to blocked needs --blocker REASON.");
+    task.blocker = { from, reason: values.blocker, since: now };
+  } else if (values.blocker !== undefined) {
+    throw new Error("--blocker is allowed only when moving to or staying in blocked.");
+  }
+  if (from === "blocked") task.blocker = null;
+  if (to === "resolved") {
+    if (!outcomes.includes(values.resolution)) {
+      throw new Error(`Moving to resolved needs --resolution ${outcomes.join("|")}.`);
+    }
+    task.resolution = { outcome: values.resolution, note: values.note ?? null, at: now };
+  }
+  if (from === "resolved") {
+    task.resolution = null;
+    task.merge = null;
+  }
+  task.state = to;
+  task.history = [...task.history, { state: to, at: now, note: values.note ?? null }];
+}
+
+function taskPatch(task, values) {
+  const patch = {};
+  for (const [option, field] of [
+    ["title", "title"], ["issue", "issue"], ["pr", "pr"], ["head", "head"],
+    ["reviewed-head", "reviewed_head"], ["next-action", "next_action"],
+  ]) {
+    if (values[option] === undefined) continue;
+    patch[field] = ["issue", "pr", "head", "reviewed-head"].includes(option)
+      ? nullable(values[option]) : values[option];
+  }
+  if (values.links !== undefined) patch.links = json(values.links, "links", Array.isArray);
+  for (const option of ["workers", "details"]) {
+    if (values[option] !== undefined) patch[option] = json(values[option], option, isObject);
+  }
+  for (const option of ["worktree", "merge"]) {
+    if (values[option] !== undefined) {
+      patch[option] = values[option] === "null" ? null : json(values[option], option, isObject);
+    }
+  }
+  if (patch.head !== undefined && patch.head !== task.head && values.merge === undefined) {
+    patch.merge = null;
+  }
+  return patch;
+}
+
+async function update(file, values) {
+  const original = await readOptional(file);
+  const isNew = original === null;
+  const now = new Date().toISOString();
+  if (isNew && (!values.project || !values["run-goal"])) {
+    throw new Error("New factories require --project and --run-goal.");
+  }
+  let current = isNew
+    ? {
+      format,
+      id: basename(file, extname(file)),
+      project: values.project,
+      goal: values["run-goal"],
+      status: values["run-status"] ?? "active",
+      updated_at: now,
+      rex_session: null,
+      rules: [],
+      limits: defaultLimits,
+      tasks: [],
+    }
+    : JSON.parse(original);
+  if (!isObject(current)) throw new Error("Factory must be a JSON object.");
+
+  const rootPatch = { updated_at: values["updated-at"] ?? now };
+  for (const [option, field] of [
+    ["project", "project"], ["run-goal", "goal"], ["run-status", "status"],
+  ]) {
+    if (values[option] !== undefined) rootPatch[field] = values[option];
+  }
+  if (values["rex-session"] !== undefined) rootPatch.rex_session = nullable(values["rex-session"]);
+  if (values.rules !== undefined) rootPatch.rules = json(values.rules, "rules", Array.isArray);
+  if (values.limits !== undefined) rootPatch.limits = json(values.limits, "limits", isObject);
+
+  let tasks = Array.isArray(current.tasks) ? current.tasks : [];
+  const addingTask = values.task !== undefined && !tasks.some((task) => task.id === values.task);
+  if (values.task !== undefined) {
+    const at = values["task-updated-at"] ?? now;
+    const before = addingTask ? newTask(values, at) : tasks.find((task) => task.id === values.task);
+    let task = structuredClone(before);
+    if (values.state !== undefined && values.state !== task.state) {
+      changeState(task, values, at);
+    } else {
+      if (values.blocker !== undefined) {
+        if (task.state !== "blocked") throw new Error("--blocker needs --state blocked or a blocked task.");
+        task.blocker = { ...task.blocker, reason: values.blocker };
+      }
+      if (values.resolution !== undefined) {
+        throw new Error("--resolution is allowed only when moving to resolved.");
+      }
+    }
+    task = merge(task, { ...taskPatch(task, values), updated_at: at });
+    tasks = addingTask ? [...tasks, task] : tasks.map((item) => (item.id === task.id ? task : item));
+  }
+  current = merge(current, rootPatch);
+  current.tasks = tasks;
+  validate(current);
+  if (addingTask) {
+    const cutoff = Date.parse(now) - 7 * 24 * 60 * 60 * 1000;
+    current.tasks = current.tasks.filter((task) =>
+      task.id === values.task || task.state !== "resolved" || Date.parse(task.updated_at) >= cutoff);
+  }
+
+  const temporary = `${file}.${randomUUID()}.tmp`;
+  const handle = await open(temporary, "wx", 0o600);
+  try {
+    try {
+      await handle.writeFile(`${JSON.stringify(current, null, 2)}\n`);
+    } finally {
+      await handle.close();
+    }
+    if (await readOptional(file) !== original) {
+      throw new Error("Factory changed during update. Reread it and reconcile before retrying.");
+    }
+    await rename(temporary, file);
+  } finally {
+    await rm(temporary, { force: true });
+  }
+}
+
+const taskOptions = [
+  "title", "issue", "pr", "head", "reviewed-head", "state", "note", "next-action", "blocker",
+  "resolution", "links", "workers", "worktree", "merge", "details", "task-updated-at",
+];
+
+async function main() {
+  let file;
+  let values;
+  let positionals;
+  try {
+    ({ values, positionals } = parseArgs({
+      options: {
+        help: { type: "boolean", short: "h" },
+        project: { type: "string" },
+        "run-goal": { type: "string" },
+        "run-status": { type: "string" },
+        "rex-session": { type: "string" },
+        rules: { type: "string" },
+        limits: { type: "string" },
+        "updated-at": { type: "string" },
+        task: { type: "string" },
+        ...Object.fromEntries(taskOptions.map((option) => [option, { type: "string" }])),
+      },
+      allowPositionals: true,
+    }));
+    if (values.help) {
+      console.log(`Create or update a factory.json with validated flags.
+
+Usage: node factory.mjs FILE [RUN OPTIONS] [TASK OPTIONS]
+       bun factory.mjs FILE [RUN OPTIONS] [TASK OPTIONS]
+
+Create a factory (FILE is <owner.repo>-factory.json):
+  node factory.mjs FILE --project owner/repo --run-goal "Run the factory for owner/repo" \\
+    --rex-session "$REX_SESSION"
+
+Add a task (every task has a GitHub issue):
+  node factory.mjs FILE --task issue-42 --title "Fix login" \\
+    --issue https://github.com/owner/repo/issues/42 --next-action "Start investigation"
+
+Move a task (the state change and its history entry are one write):
+  node factory.mjs FILE --task issue-42 --state investigation --note "Worker started"
+  node factory.mjs FILE --task issue-42 --state blocked --blocker "Needs a product decision"
+  node factory.mjs FILE --task issue-42 --state resolved --resolution merged
+
+Run options:
+  --project VALUE       Project (owner/repo); stored once
+  --run-goal VALUE      Factory goal
+  --run-status VALUE    active, paused, blocked, or finished (default active on create)
+  --rex-session VALUE   Rex session the factory started in, or null
+  --rules JSON          Replace the discovery rules array
+  --limits JSON         Merge worker caps, e.g. '{"investigation":2}' (default 3 each)
+  --updated-at VALUE    Explicit run timestamp (ISO 8601 with timezone)
+
+Task options:
+  --task ID             Task ID; required when changing a task
+  --title VALUE         Task title (new task)
+  --issue VALUE         GitHub issue URL (new task); null if creation failed or was not authorized
+  --pr VALUE            GitHub PR URL, or null
+  --head VALUE          Full PR head SHA, or null; a new head clears the merge decision
+  --reviewed-head VALUE Full SHA of the last reviewed head, or null
+  --state VALUE         initial, investigation, implementation, review, blocked, resolved
+  --note VALUE          History note for the state change
+  --next-action VALUE   Next action (new task)
+  --blocker VALUE       Reason; with --state blocked, or to edit a blocked task
+  --resolution VALUE    ${outcomes.join(", ")}; with --state resolved
+  --links JSON          Replace the GitHub issue/PR URL array
+  --workers JSON        Merge worker records by role, e.g.
+                        '{"implementation":{"status":"running","pane":"block:id"}}'; a null role clears it
+  --worktree JSON       {"path":"...","created_by_run":true}, or null
+  --merge JSON          Merge the head-specific decision ({authorized_by,source,evidence,
+                        authorized_at,head,requested_at}), or null to clear it
+                        Source: lever; legacy comment/factory-session records remain readable
+                        Audit evidence only; recheck Lever's may_merge before landing
+  --details JSON        Merge a JSON object into task details
+  --task-updated-at VALUE  Explicit task and transition timestamp (ISO 8601 with timezone)
+
+Allowed moves: initial to investigation, investigation to implementation, implementation to
+review, review to implementation, any open state to blocked or resolved, blocked to any open
+state, and resolved to initial (reopen, not after a merge). The issue is required from
+investigation on, and a PR is required in review. Adding a new task removes resolved tasks last
+updated more than seven days ago. The helper validates the whole file before writing. Success is
+silent. Errors go to stderr. Exit: 0 success, 1 invalid data or I/O, 2 usage. Use literal null
+only for nullable fields. Keep the factory's owner lock while using this command.`);
+      return;
+    }
+    if (positionals.length !== 1 || !positionals[0]) throw new Error("Exactly one factory FILE is required.");
+    [file] = positionals;
+    if (values.task === undefined && taskOptions.some((option) => values[option] !== undefined)) {
+      throw new Error("Task options require --task ID.");
+    }
+    if (values.task === undefined && Object.keys(values).length === 0) {
+      throw new Error("Specify run options or --task ID.");
+    }
+    file = resolve(file);
+  } catch (error) {
+    console.error(`${error.message}\nRun with --help for usage.`);
+    process.exitCode = 2;
+    return;
+  }
+  try {
+    await update(file, values);
+  } catch (error) {
+    console.error(`${file}: ${error.message}`);
+    process.exitCode = 1;
+  }
+}
+
+await main();

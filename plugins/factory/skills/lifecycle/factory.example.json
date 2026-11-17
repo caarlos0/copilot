@@ -1,0 +1,181 @@
+{
+  "format": "factory/v1",
+  "id": "example-factory",
+  "project": "owner/repo",
+  "goal": "Keep the bug backlog moving until every task is resolved.",
+  "status": "active",
+  "updated_at": "2026-05-01T12:00:00Z",
+  "rex_session": "work",
+  "rules": [
+    {
+      "id": "new-bugs",
+      "description": "Open bugs without an assignee.",
+      "query": "repo:owner/repo is:issue is:open label:bug no:assignee",
+      "enabled": true,
+      "last_run_at": "2026-05-01T11:30:00Z"
+    }
+  ],
+  "limits": { "investigation": 3, "implementation": 3 },
+  "tasks": [
+    {
+      "id": "issue-12",
+      "title": "Crash when the config file is empty",
+      "state": "initial",
+      "updated_at": "2026-05-01T11:40:00Z",
+      "next_action": "Start the investigation worker.",
+      "issue": "https://github.com/owner/repo/issues/12",
+      "pr": null,
+      "head": null,
+      "reviewed_head": null,
+      "links": [],
+      "blocker": null,
+      "resolution": null,
+      "merge": null,
+      "workers": {},
+      "worktree": null,
+      "history": [{ "state": "initial", "at": "2026-05-01T11:40:00Z", "note": "Found by rule new-bugs." }],
+      "details": null
+    },
+    {
+      "id": "issue-9",
+      "title": "Retry loop never stops on 401",
+      "state": "implementation",
+      "updated_at": "2026-05-01T11:55:00Z",
+      "next_action": "Wait for the implementation worker to open a PR.",
+      "issue": "https://github.com/owner/repo/issues/9",
+      "pr": null,
+      "head": null,
+      "reviewed_head": null,
+      "links": [],
+      "blocker": null,
+      "resolution": null,
+      "merge": null,
+      "workers": {
+        "investigation": {
+          "status": "closed",
+          "mode": "one-shot",
+          "session": "11111111-1111-4111-8111-111111111111",
+          "pane": "pane-1",
+          "window": "win-1",
+          "name": "Retry loop never stops on 401",
+          "brief": "owner.repo-issue-9-investigation-brief.md",
+          "result": "owner.repo-issue-9-investigation-result.json"
+        },
+        "implementation": {
+          "status": "running",
+          "mode": "continuous",
+          "session": "22222222-2222-4222-8222-222222222222",
+          "pane": "pane-2",
+          "window": "win-2",
+          "name": "Retry loop never stops on 401",
+          "brief": "owner.repo-issue-9-implementation-brief.md",
+          "result": "owner.repo-issue-9-implementation-result.json"
+        }
+      },
+      "worktree": { "path": "/Users/me/src/repo.worktrees/issue-9", "created_by_run": true },
+      "history": [
+        { "state": "initial", "at": "2026-05-01T10:00:00Z", "note": "Fed by the user." },
+        { "state": "investigation", "at": "2026-05-01T10:05:00Z", "note": null },
+        { "state": "implementation", "at": "2026-05-01T11:55:00Z", "note": "Verdict: implement." }
+      ],
+      "details": { "verdict": "implement" }
+    },
+    {
+      "id": "issue-7",
+      "title": "Wrong exit code on invalid flag",
+      "state": "review",
+      "updated_at": "2026-05-01T11:50:00Z",
+      "next_action": "Wait for the review result, then run Lever's landing checks.",
+      "issue": "https://github.com/owner/repo/issues/7",
+      "pr": "https://github.com/owner/repo/pull/21",
+      "head": "0123456789abcdef0123456789abcdef01234567",
+      "reviewed_head": "0123456789abcdef0123456789abcdef01234567",
+      "links": [],
+      "blocker": null,
+      "resolution": null,
+      "merge": null,
+      "workers": {
+        "implementation": { "status": "running", "mode": "continuous", "pane": "pane-3", "name": "Wrong exit code on invalid flag" },
+        "review": { "status": "running", "mode": "continuous", "pane": "pane-4", "name": "Review PR 21" }
+      },
+      "worktree": { "path": "/Users/me/src/repo.worktrees/issue-7", "created_by_run": true },
+      "history": [
+        { "state": "initial", "at": "2026-04-30T09:00:00Z", "note": null },
+        { "state": "investigation", "at": "2026-04-30T09:05:00Z", "note": null },
+        { "state": "implementation", "at": "2026-04-30T09:40:00Z", "note": null },
+        { "state": "review", "at": "2026-04-30T12:00:00Z", "note": "PR opened." },
+        { "state": "implementation", "at": "2026-04-30T14:00:00Z", "note": "Review found a bug." },
+        { "state": "review", "at": "2026-05-01T11:50:00Z", "note": "New head pushed." }
+      ],
+      "details": null
+    },
+    {
+      "id": "issue-5",
+      "title": "Docs build fails on a clean checkout",
+      "state": "blocked",
+      "updated_at": "2026-05-01T09:00:00Z",
+      "next_action": "Ask the user for the docs token.",
+      "issue": "https://github.com/owner/repo/issues/5",
+      "pr": null,
+      "head": null,
+      "reviewed_head": null,
+      "links": [],
+      "blocker": { "from": "investigation", "reason": "The docs build needs a token that the worker cannot read.", "since": "2026-05-01T09:00:00Z" },
+      "resolution": null,
+      "merge": null,
+      "workers": {},
+      "worktree": null,
+      "history": [
+        { "state": "initial", "at": "2026-05-01T08:00:00Z", "note": null },
+        { "state": "investigation", "at": "2026-05-01T08:10:00Z", "note": null },
+        { "state": "blocked", "at": "2026-05-01T09:00:00Z", "note": "Needs a token." }
+      ],
+      "details": null
+    },
+    {
+      "id": "issue-3",
+      "title": "Typo in the install guide",
+      "state": "resolved",
+      "updated_at": "2026-04-30T16:00:00Z",
+      "next_action": "None. The PR is merged.",
+      "issue": "https://github.com/owner/repo/issues/3",
+      "pr": "https://github.com/owner/repo/pull/18",
+      "head": "89abcdef0123456789abcdef0123456789abcdef",
+      "reviewed_head": "89abcdef0123456789abcdef0123456789abcdef",
+      "links": [],
+      "blocker": null,
+      "resolution": { "outcome": "merged", "note": "Landed by pr-shepherd after Lever's gate passed.", "at": "2026-04-30T16:00:00Z" },
+      "merge": {
+        "authorized_by": "owner",
+        "source": "lever",
+        "evidence": "details.lever.grants[0]; may_merge allowed at L4 on the recorded head",
+        "authorized_at": "2026-04-30T15:30:00Z",
+        "requested_at": "2026-04-30T15:31:00Z",
+        "head": "89abcdef0123456789abcdef0123456789abcdef"
+      },
+      "workers": {},
+      "worktree": null,
+      "history": [
+        { "state": "initial", "at": "2026-04-30T10:00:00Z", "note": null },
+        { "state": "investigation", "at": "2026-04-30T10:05:00Z", "note": null },
+        { "state": "implementation", "at": "2026-04-30T10:20:00Z", "note": null },
+        { "state": "review", "at": "2026-04-30T11:00:00Z", "note": null },
+        { "state": "resolved", "at": "2026-04-30T16:00:00Z", "note": "Merged." }
+      ],
+      "details": {
+        "lever": {
+          "effective_level": "L4",
+          "grants": [{
+            "grant": "Merge this project's PRs when green.",
+            "who": "owner",
+            "source": "operator",
+            "scope": "owner/repo",
+            "level": "L4",
+            "granted_at": "2026-04-30T09:00:00Z",
+            "expires": "end of run"
+          }]
+        }
+      }
+    }
+  ]
+}

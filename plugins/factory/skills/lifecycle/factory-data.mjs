@@ -1,0 +1,240 @@
+export const format = "factory/v1";
+export const states = ["initial", "investigation", "implementation", "review", "blocked", "resolved"];
+const transitions = {
+  initial: ["investigation", "blocked", "resolved"],
+  investigation: ["implementation", "blocked", "resolved"],
+  implementation: ["review", "blocked", "resolved"],
+  review: ["implementation", "blocked", "resolved"],
+  blocked: ["initial", "investigation", "implementation", "review", "resolved"],
+  resolved: ["initial"],
+};
+const runStatuses = ["active", "paused", "blocked", "finished"];
+export const outcomes = ["merged", "already-fixed", "duplicate", "invalid", "cancelled", "completed"];
+const mergeSources = ["lever", "comment", "factory-session"];
+const workerRoles = ["investigation", "implementation", "review"];
+const workerModes = ["one-shot", "continuous"];
+const workerStatuses = ["running", "idle", "closed", "unknown"];
+const issueStates = ["investigation", "implementation", "review"];
+
+function isObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function text(value, field) {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error(`${field} must be a non-empty string.`);
+  }
+  return value;
+}
+
+function nullableText(value, field) {
+  if (value != null) text(value, field);
+}
+
+function oneOf(value, values, field) {
+  if (!values.includes(value)) throw new Error(`${field} must be one of: ${values.join(", ")}.`);
+}
+
+export function timestamp(value, field) {
+  text(value, field);
+  if (!/(Z|[+-]\d{2}:\d{2})$/.test(value) || !Number.isFinite(Date.parse(value))) {
+    throw new Error(`${field} must be a timestamp with a timezone.`);
+  }
+}
+
+export function artifactName(value, field = "artifact") {
+  text(value, field);
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(value)) {
+    throw new Error(`${field} must be a filename in the state directory.`);
+  }
+  return value;
+}
+
+export function githubURL(value, field = "link") {
+  const url = new URL(text(value, field));
+  if (url.origin !== "https://github.com" || url.username || url.password ||
+      !/^\/[^/]+\/[^/]+\/(issues|pull)\/\d+$/.test(url.pathname)) {
+    throw new Error(`${field} must be an HTTPS GitHub issue or pull request URL.`);
+  }
+  return url;
+}
+
+function githubKind(value, kind, field) {
+  const url = githubURL(value, field);
+  if (url.pathname.split("/")[3] !== kind) {
+    throw new Error(`${field} must be an HTTPS GitHub ${kind === "pull" ? "pull request" : "issue"} URL.`);
+  }
+  return url.href;
+}
+
+const issueURL = (value, field = "issue") => githubKind(value, "issues", field);
+export const prURL = (value, field = "pr") => githubKind(value, "pull", field);
+
+function fullSHA(value, field) {
+  if (value != null && !/^[a-f0-9]{40}$/.test(value)) {
+    throw new Error(`${field} must be a full 40-character lowercase commit SHA or null.`);
+  }
+}
+
+export function entered(task) {
+  return task.history.at(-1).at;
+}
+
+export function cyclesOf(task) {
+  return task.history.filter((item, index) =>
+    item.state === "implementation" && task.history[index - 1]?.state === "review").length;
+}
+
+export function checkTransition(task, to) {
+  if (task.state === to) return;
+  if (!transitions[task.state].includes(to)) {
+    throw new Error(`Task ${task.id} cannot move from ${task.state} to ${to}. Allowed: ${transitions[task.state].join(", ") || "none"}.`);
+  }
+  if (task.state === "resolved" && task.resolution?.outcome === "merged") {
+    throw new Error(`Task ${task.id} was merged. Create a new task and issue instead of reopening it.`);
+  }
+}
+
+function validateWorker(role, worker, at) {
+  const field = `${at} workers.${role}`;
+  if (!isObject(worker)) throw new Error(`${field} must be an object or null.`);
+  oneOf(worker.status, workerStatuses, `${field}.status`);
+  if (worker.mode != null) oneOf(worker.mode, workerModes, `${field}.mode`);
+  for (const key of ["session", "pane", "window", "name"]) nullableText(worker[key], `${field}.${key}`);
+  for (const key of ["brief", "result"]) {
+    if (worker[key] != null) artifactName(worker[key], `${field}.${key}`);
+  }
+}
+
+function validateTask(task, seen) {
+  if (!isObject(task)) throw new Error("Each task must be a JSON object.");
+  for (const field of ["id", "title", "next_action"]) text(task[field], `task.${field}`);
+  const at = `Task ${task.id}`;
+  if (seen.ids.has(task.id)) throw new Error(`Duplicate task ID: ${task.id}`);
+  seen.ids.add(task.id);
+  oneOf(task.state, states, `${at} state`);
+  timestamp(task.updated_at, `${at} updated_at`);
+
+  for (const [field, check] of [["issue", issueURL], ["pr", prURL]]) {
+    if (task[field] == null) continue;
+    const href = check(task[field], `${at} ${field}`);
+    if (seen[field].has(href)) throw new Error(`Duplicate ${field} URL across tasks: ${href}`);
+    seen[field].add(href);
+  }
+  if (task.issue == null && issueStates.includes(task.state)) {
+    throw new Error(`${at}: a task in ${task.state} needs a GitHub issue. Create or link one first.`);
+  }
+  fullSHA(task.head, `${at} head`);
+  fullSHA(task.reviewed_head, `${at} reviewed_head`);
+  if (!Array.isArray(task.links)) throw new Error(`${at} links must be an array.`);
+  for (const value of task.links) githubURL(value, `${at} links[]`);
+
+  if (!Array.isArray(task.history) || !task.history.length) {
+    throw new Error(`${at} history must be a non-empty array.`);
+  }
+  for (const item of task.history) {
+    if (!isObject(item)) throw new Error(`${at} history entries must be objects.`);
+    oneOf(item.state, states, `${at} history state`);
+    timestamp(item.at, `${at} history at`);
+    nullableText(item.note, `${at} history note`);
+  }
+  if (task.history.at(-1).state !== task.state) {
+    throw new Error(`${at}: the last history entry must match state ${task.state}.`);
+  }
+
+  if (task.state === "blocked") {
+    if (!isObject(task.blocker)) throw new Error(`${at}: a blocked task needs a blocker object.`);
+    oneOf(task.blocker.from, states.filter((state) => state !== "blocked" && state !== "resolved"),
+      `${at} blocker.from`);
+    text(task.blocker.reason, `${at} blocker.reason`);
+    timestamp(task.blocker.since, `${at} blocker.since`);
+  } else if (task.blocker != null) {
+    throw new Error(`${at}: blocker is allowed only in the blocked state.`);
+  }
+  if (task.state === "resolved") {
+    if (!isObject(task.resolution)) throw new Error(`${at}: a resolved task needs a resolution object.`);
+    oneOf(task.resolution.outcome, outcomes, `${at} resolution.outcome`);
+    timestamp(task.resolution.at, `${at} resolution.at`);
+    nullableText(task.resolution.note, `${at} resolution.note`);
+  } else if (task.resolution != null) {
+    throw new Error(`${at}: resolution is allowed only in the resolved state.`);
+  }
+  if (task.state === "review" && task.pr == null) {
+    throw new Error(`${at}: a task in review needs a pr.`);
+  }
+
+  if (task.merge != null) {
+    if (!isObject(task.merge)) throw new Error(`${at} merge must be an object or null.`);
+    if (task.pr == null) throw new Error(`${at}: merge decision needs a pr.`);
+    text(task.merge.authorized_by, `${at} merge.authorized_by`);
+    oneOf(task.merge.source, mergeSources, `${at} merge.source`);
+    text(task.merge.evidence, `${at} merge.evidence`);
+    timestamp(task.merge.authorized_at, `${at} merge.authorized_at`);
+    if (task.merge.requested_at != null) timestamp(task.merge.requested_at, `${at} merge.requested_at`);
+    if (task.merge.head == null) throw new Error(`${at} merge.head is required.`);
+    fullSHA(task.merge.head, `${at} merge.head`);
+    if (task.state !== "resolved" && task.head !== task.merge.head) {
+      throw new Error(`${at}: merge decision is for head ${task.merge.head}, not the current head. Clear it with --merge null.`);
+    }
+  }
+
+  if (!isObject(task.workers)) throw new Error(`${at} workers must be an object.`);
+  for (const [role, worker] of Object.entries(task.workers)) {
+    oneOf(role, workerRoles, `${at} worker role`);
+    if (worker != null) validateWorker(role, worker, at);
+  }
+  if (task.worktree != null) {
+    if (!isObject(task.worktree)) throw new Error(`${at} worktree must be an object or null.`);
+    text(task.worktree.path, `${at} worktree.path`);
+    if (typeof task.worktree.created_by_run !== "boolean") {
+      throw new Error(`${at} worktree.created_by_run must be a boolean.`);
+    }
+  }
+  if (task.details != null && !isObject(task.details)) {
+    throw new Error(`${at} details must be an object or null.`);
+  }
+}
+
+export function validate(data) {
+  if (!isObject(data)) throw new Error("Factory must be a JSON object.");
+  if (data.format !== format) throw new Error(`format must be "${format}".`);
+  for (const field of ["id", "project", "goal"]) text(data[field], field);
+  oneOf(data.status, runStatuses, "status");
+  timestamp(data.updated_at, "updated_at");
+  nullableText(data.rex_session, "rex_session");
+  if (!Array.isArray(data.rules)) throw new Error("rules must be an array.");
+  const ruleIds = new Set();
+  for (const rule of data.rules) {
+    if (!isObject(rule)) throw new Error("Each rule must be a JSON object.");
+    text(rule.id, "rule.id");
+    if (ruleIds.has(rule.id)) throw new Error(`Duplicate rule ID: ${rule.id}`);
+    ruleIds.add(rule.id);
+    text(rule.description, `Rule ${rule.id} description`);
+    nullableText(rule.query, `Rule ${rule.id} query`);
+    if (typeof rule.enabled !== "boolean") throw new Error(`Rule ${rule.id} enabled must be a boolean.`);
+    if (rule.last_run_at != null) timestamp(rule.last_run_at, `Rule ${rule.id} last_run_at`);
+  }
+  if (!isObject(data.limits)) throw new Error("limits must be an object.");
+  for (const [role, limit] of Object.entries(data.limits)) {
+    oneOf(role, ["investigation", "implementation"], "limits key");
+    if (!Number.isInteger(limit) || limit < 1) throw new Error(`limits.${role} must be a positive integer.`);
+  }
+  if (!Array.isArray(data.tasks)) throw new Error("tasks must be an array.");
+  const seen = { ids: new Set(), issue: new Set(), pr: new Set() };
+  for (const task of data.tasks) validateTask(task, seen);
+}
+
+export function countByState(tasks) {
+  const counts = Object.fromEntries(states.map((state) => [state, 0]));
+  for (const task of tasks) counts[task.state] += 1;
+  return counts;
+}
+
+export function hopsSince(tasks, since) {
+  const cutoff = Date.parse(since);
+  return tasks.flatMap((task) => task.history.flatMap((item, index) =>
+    Date.parse(item.at) > cutoff
+      ? [{ id: task.id, from: task.history[index - 1]?.state ?? null, to: item.state, at: item.at }]
+      : []))
+    .sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+}
