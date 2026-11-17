@@ -269,6 +269,8 @@ test("the page script parses, never renders data as HTML, and finds its elements
   new vm.Script(script);
   assert.doesNotMatch(script, /innerHTML|insertAdjacentHTML|outerHTML/);
   assert.doesNotMatch(html, /Merge OK\?|class="gate"/);
+  assert.equal([...html.matchAll(/<input id="global-filter"/g)].length, 1);
+  assert.doesNotMatch(html, /id="task-filter"/);
   const ids = new Set([...html.matchAll(/id="([^"]+)"/g)].map((match) => match[1]));
   for (const [, id] of script.matchAll(/getElementById\("([^"]+)"\)/g)) {
     assert.ok(ids.has(id), `Missing element #${id}`);
@@ -409,15 +411,17 @@ test("state selection opens a modal list that can close and reopen", async (t) =
   assert.equal(ui.get("task-list").children.length, 0);
 });
 
-test("task filters search any field, combine terms, and survive refresh and move dialogs", async (t) => {
+test("global task filters search any field, combine terms, and survive refresh and move dialogs", async (t) => {
   const ui = await dashboard(t);
   ui.run("choose('review')");
-  const filter = ui.get("task-filter");
+  const filter = ui.get("global-filter");
   const rows = () => ui.get("task-list").children;
   filter.value = 'history.note:"New head pushed." workers.review.status:running';
   await filter.fire("input");
   assert.deepEqual(rows().map((row) => row.dataset.taskId), ["issue-7"]);
-  assert.equal(ui.get("task-filter-count").textContent, "1 of 1 tasks match.");
+  assert.equal(ui.get("global-filter-count").textContent, `1 of ${example.tasks.length} tasks match.`);
+  assert.equal(ui.get("clear-filter").hidden, false);
+  assert.equal(ui.get("detail-filter-count").textContent, "1 of 1 tasks match the global filter.");
 
   filter.value = "state:review 0123456";
   await filter.fire("input");
@@ -434,8 +438,49 @@ test("task filters search any field, combine terms, and survive refresh and move
   await rows()[0].querySelector(".move").fire("click");
   await ui.run("refresh()");
   assert.equal(filter.value, "details.verdict:implement title:Retry");
+  assert.equal(ui.get("global-filter-count").textContent, `1 of ${example.tasks.length} tasks match.`);
   assert.deepEqual(rows().map((row) => row.dataset.taskId), ["issue-9"]);
   assert.equal(ui.get("move-dialog").open, true);
+
+  await ui.get("clear-filter").fire("click");
+  assert.equal(filter.value, "");
+  assert.equal(ui.get("global-filter-count").hidden, true);
+  assert.equal(ui.get("clear-filter").hidden, true);
+  assert.equal(rows().length, example.tasks.filter((task) => task.state === "implementation").length);
+});
+
+test("global filters update state totals, resolution outcomes, and every opened list", async (t) => {
+  const ui = await dashboard(t);
+  const filter = ui.get("global-filter");
+  const nodeCount = (state) => Number(ui.run(`nodeOf('${state}')`).querySelector(".count").textContent);
+  const outcomeCount = (outcome) => Number(ui.get("flow").querySelectorAll(".outcome")
+    .find((node) => node.dataset.outcome === outcome).querySelector(".outcome-count").textContent);
+
+  filter.value = "id:issue-7";
+  await filter.fire("input");
+  assert.equal(nodeCount("review"), 1);
+  assert.equal(nodeCount("resolved"), 0);
+  assert.equal(outcomeCount("merged"), 0);
+  assert.equal(ui.get("global-filter-count").textContent, `1 of ${example.tasks.length} tasks match.`);
+  ui.run("choose('initial')");
+  assert.equal(ui.get("task-list").children.length, 0);
+  ui.run("choose('review')");
+  assert.deepEqual(ui.get("task-list").children.map((row) => row.dataset.taskId), ["issue-7"]);
+
+  filter.value = "id:issue-3";
+  await filter.fire("input");
+  assert.equal(nodeCount("review"), 0);
+  assert.equal(nodeCount("resolved"), 1);
+  assert.equal(outcomeCount("merged"), 1);
+  const merged = ui.get("flow").querySelectorAll(".outcome").find((node) => node.dataset.outcome === "merged");
+  await merged.fire("click");
+  assert.deepEqual(ui.get("task-list").children.map((row) => row.dataset.taskId), ["issue-3"]);
+
+  await ui.get("clear-filter").fire("click");
+  assert.equal(nodeCount("review"), 1);
+  assert.equal(nodeCount("resolved"), 1);
+  assert.equal(outcomeCount("merged"), 1);
+  assert.deepEqual(ui.get("task-list").children.map((row) => row.dataset.taskId), ["issue-3"]);
 });
 
 test("rows show history, open references in a new tab, and highlight evidence", async (t) => {
