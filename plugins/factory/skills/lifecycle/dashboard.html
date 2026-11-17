@@ -70,17 +70,18 @@
       a:hover { text-decoration: underline; }
       label { display: block; margin-bottom: 4px; font-weight: 600; }
       code, pre { font-family: var(--mono); font-size: 12px; }
-      button, select, textarea { font: inherit; line-height: 20px; color: var(--fg); border: 1px solid var(--border); border-radius: 6px; }
+      button, select, textarea, input { font: inherit; line-height: 20px; color: var(--fg); border: 1px solid var(--border); border-radius: 6px; }
       button { padding: 5px 16px; font-weight: 500; background: var(--btn-bg); cursor: pointer; }
       button:hover:not(:disabled) { background: var(--btn-hover); }
       .action-primary { color: #fff; background: var(--btn-primary); border-color: rgb(31 35 40 / .15); }
       .action-primary:hover:not(:disabled) { background: var(--btn-primary-hover); }
       select { width: 480px; max-width: 100%; padding: 5px 12px; background: var(--bg); }
       textarea { width: 100%; padding: 8px 12px; background: var(--bg); resize: vertical; }
+      input[type="search"] { width: 100%; padding: 5px 12px; background: var(--bg); }
       button:disabled { opacity: .6; cursor: default; }
       .controls { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
       .muted { color: var(--fg-muted); }
-      a:focus-visible, button:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible,
+      a:focus-visible, button:focus-visible, select:focus-visible, textarea:focus-visible, input:focus-visible, summary:focus-visible,
       .node:focus-visible, .outcome:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
       .node:focus-visible, .outcome:focus-visible { outline-offset: 4px; }
       #error, #discovery-error, .blocker, .save-error { padding: 16px; border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
@@ -149,6 +150,9 @@
       .move-form .controls { justify-content: flex-end; }
       #detail-status, #detail-empty { margin: 16px 24px; }
       #detail-status:empty { display: none; }
+      .task-filter { margin: 16px 24px 8px; }
+      .task-filter p { margin: 4px 0 0; }
+      #task-filter-count { margin: 8px 24px; }
       .counter { display: inline-block; min-width: 20px; margin-left: 8px; padding: 0 6px; border-radius: 2em;
         background: color-mix(in srgb, var(--neutral) 20%, transparent); font-size: 12px; font-weight: 500;
         line-height: 18px; text-align: center; vertical-align: middle; }
@@ -218,6 +222,13 @@
             aria-label="Close task list" title="Close task list">&times;</button>
         </div>
         <p id="detail-status" role="status"></p>
+        <div class="task-filter">
+          <label for="task-filter">Filter tasks</label>
+          <input id="task-filter" type="search" autocomplete="off" placeholder="state:review workers.review.status:running"
+            aria-describedby="task-filter-help">
+          <p id="task-filter-help" class="muted">Search all fields. Separate terms with spaces to match all of them; use field:value for a field, or field.path:value for nested fields.</p>
+        </div>
+        <p id="task-filter-count" class="muted" role="status"></p>
         <ul id="task-list"></ul>
         <p id="detail-empty" class="muted" hidden>No tasks in this state.</p>
       </dialog>
@@ -627,6 +638,28 @@
         });
       }
 
+      function valuesAtPath(value, path) {
+        if (!path.length) return [value];
+        if (Array.isArray(value)) return value.flatMap((item) => valuesAtPath(item, path));
+        if (!value || typeof value !== "object") return [];
+        const key = Object.keys(value).find((name) => name.toLowerCase() === path[0].toLowerCase());
+        return key ? valuesAtPath(value[key], path.slice(1)) : [];
+      }
+
+      function matchesTask(task, query) {
+        const allFields = JSON.stringify(task).toLowerCase();
+        const terms = query.match(/(?:[^\s"]+|"[^"]*")+/g) ?? [];
+        return terms.every((term) => {
+          const field = /^([\w.-]+):(.+)$/u.exec(term);
+          if (field && Object.keys(task).some((key) => key.toLowerCase() === field[1].split(".")[0].toLowerCase())) {
+            const value = field[2].replace(/^"|"$/g, "").toLowerCase();
+            return valuesAtPath(task, field[1].split(".")).some((item) =>
+              JSON.stringify(item).toLowerCase().includes(value));
+          }
+          return allFields.includes(term.replace(/^"|"$/g, "").toLowerCase());
+        });
+      }
+
       function openMove(task) {
         const title = document.getElementById("move-title");
         title.textContent = `Move: ${task.title}`;
@@ -868,17 +901,23 @@
         }
         const outcome = state === "resolved" ? openOutcome() : null;
         const sameList = dialog.dataset.state === state && dialog.dataset.outcome === (outcome ?? "");
+        const filter = document.getElementById("task-filter").value.trim();
+        const sameFilter = list.dataset.filter === filter;
         const expanded = new Set([...list.querySelectorAll("details[open]")].map((node) => node.dataset.taskId));
-        const tasks = snapshot.tasks.filter((task) => task.state === state &&
-          (!outcome || task.resolution.outcome === outcome))
+        const allTasks = snapshot.tasks.filter((task) => task.state === state &&
+          (!outcome || task.resolution.outcome === outcome));
+        const tasks = allTasks.filter((task) => matchesTask(task, filter))
           .sort((a, b) => Date.parse(entered(a)) - Date.parse(entered(b)));
         const title = document.getElementById("detail-title");
         title.textContent = outcome ? `Resolved: ${outcomeTitles[outcome]}` : places[state].title;
         title.append(element("span", String(tasks.length), "counter"));
-        const signature = JSON.stringify([selection, state, outcome, tasks]);
+        document.getElementById("task-filter-count").textContent = filter
+          ? `${tasks.length} of ${allTasks.length} tasks match.`
+          : `${allTasks.length} ${allTasks.length === 1 ? "task" : "tasks"}.`;
+        const signature = JSON.stringify([selection, state, outcome, filter, tasks]);
         if (list.dataset.signature !== signature) {
           const rows = tasks.map((task) => taskRow(task, expanded));
-          if (!reduced && sameList) {
+          if (!reduced && sameList && sameFilter) {
             [...list.children].forEach((row, index) => {
               if (tasks.some((task) => task.id === row.dataset.taskId)) return;
               rows.splice(index, 0, row);
@@ -894,10 +933,13 @@
           }
           list.replaceChildren(...rows);
           list.dataset.signature = signature;
+          list.dataset.filter = filter;
         }
         document.getElementById("detail-empty").hidden = list.children.length > 0;
-        document.getElementById("detail-empty").textContent = outcome
-          ? "No tasks with this outcome." : "No tasks in this state.";
+        let emptyMessage = "No tasks in this state.";
+        if (outcome) emptyMessage = "No tasks with this outcome.";
+        if (filter) emptyMessage = "No tasks match this filter.";
+        document.getElementById("detail-empty").textContent = emptyMessage;
         if (!sameList) document.getElementById("detail-status").textContent = "";
         dialog.dataset.state = state;
         dialog.dataset.outcome = outcome ?? "";
@@ -1099,6 +1141,7 @@
 
       document.getElementById("factory").addEventListener("change", () => {
         selection = document.getElementById("factory").value;
+        document.getElementById("task-filter").value = "";
         const url = new URL(location.href);
         if (selection) url.searchParams.set("file", selection);
         else url.searchParams.delete("file");
@@ -1109,6 +1152,7 @@
         return refresh();
       });
       document.getElementById("refresh").addEventListener("click", refresh);
+      document.getElementById("task-filter").addEventListener("input", () => renderDetail(openState()));
       window.addEventListener("hashchange", draw);
       document.getElementById("close-detail").addEventListener("click", () => choose(null));
       dialog.addEventListener("cancel", (event) => {

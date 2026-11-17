@@ -409,6 +409,35 @@ test("state selection opens a modal list that can close and reopen", async (t) =
   assert.equal(ui.get("task-list").children.length, 0);
 });
 
+test("task filters search any field, combine terms, and survive refresh and move dialogs", async (t) => {
+  const ui = await dashboard(t);
+  ui.run("choose('review')");
+  const filter = ui.get("task-filter");
+  const rows = () => ui.get("task-list").children;
+  filter.value = 'history.note:"New head pushed." workers.review.status:running';
+  await filter.fire("input");
+  assert.deepEqual(rows().map((row) => row.dataset.taskId), ["issue-7"]);
+  assert.equal(ui.get("task-filter-count").textContent, "1 of 1 tasks match.");
+
+  filter.value = "state:review 0123456";
+  await filter.fire("input");
+  assert.deepEqual(rows().map((row) => row.dataset.taskId), ["issue-7"]);
+  filter.value = "id:issue-9";
+  await filter.fire("input");
+  assert.equal(rows().length, 0);
+  assert.equal(ui.get("detail-empty").textContent, "No tasks match this filter.");
+
+  ui.run("choose('implementation')");
+  filter.value = "details.verdict:implement title:Retry";
+  await filter.fire("input");
+  assert.deepEqual(rows().map((row) => row.dataset.taskId), ["issue-9"]);
+  await rows()[0].querySelector(".move").fire("click");
+  await ui.run("refresh()");
+  assert.equal(filter.value, "details.verdict:implement title:Retry");
+  assert.deepEqual(rows().map((row) => row.dataset.taskId), ["issue-9"]);
+  assert.equal(ui.get("move-dialog").open, true);
+});
+
 test("rows show history, open references in a new tab, and highlight evidence", async (t) => {
   const ui = await dashboard(t);
   ui.run("choose('implementation')");
