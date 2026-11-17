@@ -255,7 +255,8 @@ async function writeFactory(file, values, operator, source) {
           !Number.isSafeInteger(Number(values["expected-revision"]))) {
         throw new Error("--expected-revision must be a non-negative safe integer.");
       }
-      if (addingTask || Number(values["expected-revision"]) !== revision) {
+      if (addingTask) throw new Error("--expected-revision applies only to existing tasks.");
+      if (Number(values["expected-revision"]) !== revision) {
         throw new ConflictError("Task changed since it was read. Reload it and reconcile before saving.");
       }
     } else if (operator || before.feedback) {

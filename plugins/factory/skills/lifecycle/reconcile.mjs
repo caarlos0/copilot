@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { parseArgs } from "node:util";
@@ -18,6 +19,16 @@ const git = (cwd, ...args) => execFileSync("git", ["-C", cwd, ...args], {
   encoding: "utf8",
   stdio: ["ignore", "pipe", "ignore"],
 }).trim();
+
+function isAncestor(cwd, branch) {
+  try {
+    git(cwd, "merge-base", "--is-ancestor", "HEAD", branch);
+    return true;
+  } catch (error) {
+    if (error.status === 1) return false;
+    throw error;
+  }
+}
 
 function liveWindows(session) {
   const out = execFileSync("rex", ["window", "ls", "-s", session, "--json"], {
@@ -54,7 +65,8 @@ async function reconcile(file, defaultBranch = "main") {
       }
     }
 
-    if (!task.worktree?.path) continue;
+    // Tasks with an issue or PR land on GitHub; only local-merge tasks can be left behind.
+    if (!task.worktree?.path || task.issue || task.pr) continue;
     try {
       const ahead = Number(git(task.worktree.path, "rev-list", "--count", `${defaultBranch}..HEAD`));
       if (ahead > 0) {
@@ -72,6 +84,22 @@ async function reconcile(file, defaultBranch = "main") {
   }
 
   const resolved = factory.tasks.filter((task) => task.state === "resolved");
+  for (const task of resolved) {
+    const worktree = task.worktree;
+    if (task.resolution?.outcome !== "merged" || !worktree?.path || !existsSync(worktree.path)) continue;
+    try {
+      if (git(worktree.path, "status", "--porcelain") !== "" || !isAncestor(worktree.path, defaultBranch)) continue;
+      findings.push({
+        kind: "merged-worktree",
+        task: task.id,
+        path: worktree.path,
+        created_by_run: worktree.created_by_run,
+      });
+    } catch (error) {
+      errors.push(`${task.id}: cannot read worktree ${worktree.path}.`);
+    }
+  }
+
   if (factory.rex_session && resolved.some((task) => Object.values(task.workers ?? {}).some((w) => w?.window))) {
     try {
       const windows = liveWindows(factory.rex_session);

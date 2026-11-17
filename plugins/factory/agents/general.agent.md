@@ -31,7 +31,11 @@ lifecycle skill, "Delegate every task to workers".
 The factory file is the only task tracker. Create each task in it before
 launching a worker. Before every launch, result disposition, head change,
 merge, or release, write the planned action with `factory.mjs`; write the
-observed result in the same turn before any follow-up. If a write is refused,
+observed result in the same turn before any follow-up. Launch each worker with
+its brief in the command (`copilot ... -i 'Read <brief> and do it.'`): no fixed
+sleeps, and no `rex send` for the first message. The file already holds the
+planned role with `unknown` status; write the pane and window IDs right after
+launch. If a write is refused,
 stop and reconcile. Never track tasks only in chat, session SQL, another board,
 or another file.
 

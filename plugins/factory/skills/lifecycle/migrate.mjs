@@ -3,7 +3,7 @@ import { access, link, mkdir, readFile, rename, rm, writeFile } from "node:fs/pr
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { format, githubURL, prURL, validate } from "./factory-data.mjs";
+import { format, githubResourceURL, githubURL, prURL, validate } from "./factory-data.mjs";
 
 const sources = ["implementer", "coordinator"];
 const defaultLimits = { investigation: 3, implementation: 3 };
@@ -144,8 +144,9 @@ function build(project, key, loaded, reviewers) {
   for (const { role, source } of loaded) {
     for (const old of source.data.tasks) {
       let task = mapTask(role, source.file, old, project);
+      const same = (a, b) => a && b && githubResourceURL(a) === githubResourceURL(b);
       const twins = tasks.flatMap((other, index) =>
-        (task.pr && other.pr === task.pr) || (task.issue && other.issue === task.issue)
+        same(task.pr, other.pr) || same(task.issue, other.issue)
           ? [{ index, task: other }]
           : []);
       if (twins.length) {

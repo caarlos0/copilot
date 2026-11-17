@@ -80,6 +80,43 @@ test("reports a complete result newer than its task, a branch ahead, and a windo
   ]);
 });
 
+test("flags a branch ahead only for tasks that land by local merge", async (t) => {
+  const f = await fixture(t, fakeRex);
+  const worktree = { path: f.repo, created_by_run: true };
+  const { findings, errors } = await f.run([
+    task("with-pr", "review", { issue: { number: 1 }, pr: { number: 2 }, worktree }),
+    task("local", "review", { worktree }),
+  ]);
+  assert.deepEqual(errors, []);
+  assert.deepEqual(findings, [
+    { kind: "branch-ahead", task: "local", state: "review", branch: "work", ahead: 1 },
+  ]);
+});
+
+test("flags a clean worktree of a merged task whose HEAD is in the default branch", async (t) => {
+  const f = await fixture(t, fakeRex);
+  const clean = join(f.directory, "clean");
+  const dirty = join(f.directory, "dirty");
+  git(f.repo, "worktree", "add", "-q", "-b", "clean", clean, "main");
+  git(f.repo, "worktree", "add", "-q", "-b", "dirty", dirty, "main");
+  await writeFile(join(dirty, "scratch.txt"), "x");
+  const at = (path) => ({ path, created_by_run: true });
+  const { findings, errors } = await f.run([
+    task("clean", "resolved", { worktree: at(clean) }),
+    task("dirty", "resolved", { worktree: at(dirty) }),
+    task("unmerged", "resolved", { worktree: at(f.repo) }),
+    task("gone", "resolved", { worktree: at(join(f.directory, "gone")) }),
+    task("closed", "resolved", {
+      resolution: { outcome: "cancelled", at: "2026-05-01T12:00:00Z", note: null },
+      worktree: at(clean),
+    }),
+  ]);
+  assert.deepEqual(errors, []);
+  assert.deepEqual(findings, [
+    { kind: "merged-worktree", task: "clean", path: clean, created_by_run: true },
+  ]);
+});
+
 test("is quiet when everything is reconciled", async (t) => {
   const f = await fixture(t, fakeRex);
   const { findings, errors } = await f.run([
