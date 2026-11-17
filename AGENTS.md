@@ -59,3 +59,8 @@ Load local changes with `copilot --plugin-dir /path/to/copilot/plugins/coding`
 in a new session. Avoid also loading an installed copy. Check discovery with
 `copilot --plugin-dir /path/to/copilot/plugins/coding skill list --json`.
 Each plugin's `AGENTS.md` lists its own tests.
+
+`.github/workflows/test.yml` runs `node --test` on Ubuntu and macOS for every
+pull request and every push to `main`. Node finds every `*.test.cjs` file, so a
+new test needs no workflow change. Name test files `*.test.cjs`, and pin action
+versions by commit SHA with a version comment.
