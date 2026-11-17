@@ -815,12 +815,13 @@
               }),
             });
             validate(data);
-            moveDialog.close();
+            const ownsDialog = moveDialog.querySelector("form") === form;
+            if (ownsDialog) moveDialog.close();
             if (selection === file) {
               load(data, file);
               document.getElementById("detail-status").textContent =
                 `Moved "${task.title}" to ${places[destination].title}. Comment saved; awaiting factory acknowledgement.`;
-              dialog.focus();
+              if (ownsDialog) dialog.focus();
             }
           } catch (cause) {
             failed(new Error(`Move was not confirmed: ${cause.message} Reload the task before trying again.`));

@@ -278,7 +278,7 @@ test("the page script parses, never renders data as HTML, and finds its elements
 });
 
 // Model only the DOM operations used by the task list; HTTP and the page script are real.
-async function dashboard(t, { reducedMotion = true, confirm = () => true } = {}) {
+async function dashboard(t, { reducedMotion = true, confirm = () => true, fetchRequest } = {}) {
   const { url, directory } = await server(t);
   const elements = new Map();
   const document = {
@@ -368,10 +368,14 @@ async function dashboard(t, { reducedMotion = true, confirm = () => true } = {})
     performance: { now: () => 0 },
     requestAnimationFrame: (callback) => callback(2000),
     setTimeout() {}, clearTimeout() {},
-    fetch: (path, options = {}) => get(url, path, {
-      ...options,
-      headers: { ...options.headers, ...(options.method === "POST" ? { Origin: new URL(url).origin } : {}) },
-    }),
+    fetch: (path, options = {}) => {
+      const init = {
+        ...options,
+        headers: { ...options.headers, ...(options.method === "POST" ? { Origin: new URL(url).origin } : {}) },
+      };
+      const request = () => get(url, path, init);
+      return fetchRequest ? fetchRequest(path, init, request) : request();
+    },
   });
   const script = html.match(/<script type="module">([\s\S]*?)<\/script>/)[1]
     .replace(/^\s*import .+;\s*/m, "").replace(/\s*buildFlow\(\);\s*refresh\(\);\s*$/, "");
@@ -684,6 +688,44 @@ test("Move opens a separate popup whose draft survives refresh and conflict", as
   assert.equal(ui.get("task-list").children.length, 0);
   assert.equal(ui.document.activeElement, ui.get("detail"), "After saving, focus must stay in the task popup.");
   assert.match(ui.get("detail-status").textContent, /to Initial\. Comment saved; awaiting factory acknowledgement/);
+});
+
+test("a pending move response does not close another task's draft", async (t) => {
+  let markMoveStarted;
+  const moveStarted = new Promise((resolve) => { markMoveStarted = resolve; });
+  let releaseMoveResponse;
+  const moveResponseReleased = new Promise((resolve) => { releaseMoveResponse = resolve; });
+  const ui = await dashboard(t, {
+    fetchRequest: async (path, _, request) => {
+      const response = await request();
+      if (path.startsWith("/api/move")) {
+        markMoveStarted();
+        await moveResponseReleased;
+      }
+      return response;
+    },
+  });
+  ui.run("choose('blocked')");
+  await ui.get("task-list").querySelector(".move").fire("click");
+  const formA = ui.get("move-body").querySelector("form");
+  formA.querySelector("select").value = "initial";
+  formA.querySelector("textarea").value = "Move task A.";
+  const saveA = formA.fire("submit");
+  await moveStarted;
+  await ui.get("close-move").fire("click");
+  await ui.get("task-list").querySelector(".move").fire("click");
+  const formB = ui.get("move-body").querySelector("form");
+  const commentB = formB.querySelector("textarea");
+  commentB.value = "Keep task B's draft.";
+  commentB.focus();
+
+  releaseMoveResponse();
+  await saveA;
+
+  assert.equal(ui.get("move-dialog").open, true);
+  assert.equal(ui.get("move-body").querySelector("form"), formB);
+  assert.equal(commentB.value, "Keep task B's draft.");
+  assert.equal(ui.document.activeElement, commentB);
 });
 
 test("the move popup confirms before discarding a draft through Esc, close, or backdrop", async (t) => {
