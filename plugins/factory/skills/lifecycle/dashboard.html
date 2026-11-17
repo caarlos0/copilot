@@ -96,7 +96,6 @@
       .edge.shortcut { stroke: var(--resolved); opacity: .6; }
       .edge.shortcut.idle { opacity: .25; }
       .arrow { fill: var(--border-emphasis); }
-      .label { fill: var(--fg-muted); font-size: 12px; text-anchor: middle; }
       @keyframes flow { to { stroke-dashoffset: -28; } }
 
       .node { cursor: pointer; }
@@ -390,13 +389,6 @@
           const node = edge(`${state}>blocked`, flowRoutes[`${state}>blocked`], "dashed");
           node.setAttribute("marker-start", "url(#arrow)");
         }
-        const labels = svg("g");
-        for (const [x, y, text] of [
-          [645, 188, "PR ready"], [645, 272, "changes"], [685, 62, "already fixed, duplicate, or invalid"],
-        ]) {
-          labels.append(svg("text", { x, y, class: "label" }, text));
-        }
-
         const nodes = svg("g", { id: "nodes" });
         const source = svg("g", {
           class: "node source pop", tabindex: 0, role: "button", style: "--c: var(--accent); --i: 0",
@@ -460,7 +452,7 @@
           resolutions.append(group);
         });
 
-        flow.replaceChildren(defs, edges, labels, nodes, resolutions, svg("g", { id: "tokens" }));
+        flow.replaceChildren(defs, edges, nodes, resolutions, svg("g", { id: "tokens" }));
       }
 
       function nodeOf(state) {
