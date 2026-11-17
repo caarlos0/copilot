@@ -900,3 +900,16 @@ test("the popup can resolve an initial task with an outcome and comment", async 
   assert.equal(ui.get("detail").dataset.state, "initial");
   assert.match(ui.get("detail-status").textContent, /to Resolved\./);
 });
+
+test("the delegate-always rule is present in the agent, skill, and plugin rules", () => {
+  const plugin = join(__dirname, "..", "..");
+  for (const file of [
+    join(plugin, "agents", "general.agent.md"),
+    join(__dirname, "SKILL.md"),
+    join(plugin, "AGENTS.md"),
+  ]) {
+    const text = readFileSync(file, "utf8");
+    assert.match(text, /never do(es)? (actual )?work or investigation/i, file);
+    assert.match(text, /git merge main/, file);
+  }
+});

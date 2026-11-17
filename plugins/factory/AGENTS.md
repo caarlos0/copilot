@@ -4,6 +4,15 @@ Plugin-specific rules. Repository-wide rules are in the root `AGENTS.md`.
 
 ## Factory
 
+The factory coordinator never does work or investigation; it always delegates.
+It may only take in work, create tasks, write briefs, launch and monitor
+workers, verify results, record state, merge verified worker branches, release
+panes, and report. It never edits product files, investigates, scans, writes
+fixes, or resolves a worker's code conflicts, even for a one-line change. A
+conflicting merge goes back to a worker to run `git merge main`. Keep this rule
+in `agents/general.agent.md` and the lifecycle skill's "Delegate every task to
+workers" section in sync.
+
 `factory:general` is a thin agent over
 `plugins/factory/skills/lifecycle/SKILL.md`. It preloads `lifecycle`, which
 disables model/user invocation. It also preloads `autonomy-dial` and
