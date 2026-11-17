@@ -115,6 +115,21 @@ test("joins every matching task when a record bridges an issue and a PR", async 
   );
 });
 
+test("joins twins whose URLs differ only by query or fragment", async (t) => {
+  const f = await fixture(t);
+  await writeFile(join(f.directory, "owner.repo-implementer.json"), JSON.stringify(handoff("implementer", [
+    old("first", "pending", { pr: pull(5) }),
+    old("second", "pending", { pr: `${pull(5)}?x=1`, updated_at: later }),
+    old("third", "pending", { pr: `${pull(5)}#issuecomment-1`, updated_at: "2026-05-01T12:00:00Z" }),
+  ])));
+  await rm(join(f.directory, "owner.repo-coordinator.json"));
+  await rm(join(f.directory, "owner.repo-reviewer.json"));
+
+  const result = f.run("--dry-run");
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).tasks, 1);
+});
+
 test("dry run writes nothing; a live legacy lock stops a real run", async (t) => {
   const f = await fixture(t);
   await mkdir(join(f.directory, "owner.repo-implementer.lock"));
