@@ -67,7 +67,7 @@ function archivedMessage(id, matches) {
 function newTask(values, now) {
   for (const option of ["title", "next-action", "issue"]) {
     if (values[option] === undefined) {
-      throw new Error(`A new task needs --${option}. Use --issue null only when issue creation failed or was not authorized.`);
+      throw new Error(`A new task needs --${option}. Use --issue null for work without a GitHub issue.`);
     }
   }
   if (values.state !== undefined && values.state !== "initial") {
@@ -407,9 +407,11 @@ Create a factory (FILE is <owner.repo>-factory.json):
   node factory.mjs FILE --project owner/repo --run-goal "Run the factory for owner/repo" \\
     --rex-session "$REX_SESSION"
 
-Add a task (every task has a GitHub issue):
+Add a task (link its GitHub issue, or pass --issue null for work without one):
   node factory.mjs FILE --task issue-42 --title "Fix login" \\
     --issue https://github.com/owner/repo/issues/42 --next-action "Start investigation"
+  node factory.mjs FILE --task favicon --title "Add a favicon" --issue null \\
+    --next-action "Start investigation"
 
 Move a task (the state change and its history entry are one write):
   node factory.mjs FILE --task issue-42 --state investigation --note "Worker started"
@@ -443,9 +445,10 @@ Run options:
 Task options:
   --task ID             Task ID; required when changing a task
   --title VALUE         Task title (new task)
-  --issue VALUE         GitHub issue URL (new task); null if creation failed or was not authorized
+  --issue VALUE         GitHub issue URL (new task), or null for work without an issue
   --pr VALUE            GitHub PR URL, or null
-  --head VALUE          Full PR head SHA, or null; a new head clears the merge decision
+  --head VALUE          Full PR head SHA (local branch head without an issue), or null; a new head
+                        clears the merge decision
   --reviewed-head VALUE Full SHA of the last reviewed head, or null
   --state VALUE         initial, investigation, implementation, review, blocked, resolved
   --note VALUE          History note for the state change
@@ -470,8 +473,10 @@ Task options:
 
 Allowed moves: initial to investigation, investigation to implementation, implementation to
 review, review to implementation, any open state to blocked or resolved, blocked to any open
-state, and resolved to initial (reopen, not after a merge). The issue is required from
-investigation on, and a PR is required in review. Adding or restoring a task moves resolved tasks
+state, and resolved to initial (reopen, not after a merge). A task with an issue needs a PR in
+review and for a merge decision. A task without an issue (--issue null) uses every state without a
+PR; record its local branch head in --head and, after a local git merge, the merge commit SHA in
+--details before resolving it as merged. Adding or restoring a task moves resolved tasks
 last updated more than seven days ago, except those with pending dashboard feedback, into
 <owner.repo>-factory-archive/YYYY-MM-DD.json (by last update day). Archived tasks are never deleted.
 Adding a new task that matches an archived id, issue, or PR fails; ask the user whether to restore

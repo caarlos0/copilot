@@ -27,8 +27,12 @@ State is one `<owner.repo>-factory.json` (`factory/v1`) per project under
 `<project>-factory.lock`. Agent and dashboard writes share `factory.mjs` and
 its short-lived `<file>.write.lock`. It validates the
 state flow (`initial`, `investigation`, `implementation`, `review`, `blocked`,
-`resolved`), keeps history, and replaces the file atomically. Every task has a
-GitHub issue. `factory-data.mjs` holds the schema and is shared by the writer,
+`resolved`), keeps history, and replaces the file atomically. A task links a
+GitHub issue, or has `issue: null` for work without one. An issue-less task
+uses every state without a PR: review covers its local branch `head`, and a
+local `git merge` resolves it as `merged` with the merge commit SHA in
+`details`. Tasks with an issue keep the PR flow. `factory-data.mjs` holds the
+schema and is shared by the writer,
 `migrate.mjs`, `serve.mjs` (port 8766, lists only `*-factory.json`), and
 `dashboard.html`. `migrate.mjs` moves the implementer and coordinator handoffs
 into the factory file. It refuses to run against a live legacy lock.
