@@ -1,20 +1,16 @@
 import { randomUUID } from "node:crypto";
 import { open, readFile, realpath, rename, rm } from "node:fs/promises";
-import { basename, dirname, extname, join, resolve } from "node:path";
+import { basename, extname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { archiveDirectory, findArchived, readArchive, removeArchived, saveArchive } from "./archive.mjs";
-import { emit } from "./broker.mjs";
-import { checkTransition, format, operatorOutcomes, outcomes, validate } from "./factory-data.mjs";
+import { emit, resolveFactory } from "./broker.mjs";
+import {
+  checkTransition, defaultLimits, format, isObject, operatorOutcomes, outcomes, validate,
+} from "./factory-data.mjs";
 import { recordSessions, registryFile, sessionID } from "./sessions.mjs";
 
-const defaultLimits = { investigation: 3, implementation: 3 };
-
 export class ConflictError extends Error {}
-
-function isObject(value) {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
 
 function merge(current, patch) {
   if (!isObject(current) || !isObject(patch)) return patch;
@@ -42,6 +38,7 @@ function json(value, option, check) {
 }
 
 const nullable = (value) => (value === "null" ? null : value);
+const nullableObject = (value, option) => (value === "null" ? null : json(value, option, isObject));
 
 function normalizedURL(value) {
   if (value == null || value === "null") return null;
@@ -139,9 +136,7 @@ function taskPatch(task, values) {
     if (values[option] !== undefined) patch[option] = json(values[option], option, isObject);
   }
   for (const option of ["worktree", "merge"]) {
-    if (values[option] !== undefined) {
-      patch[option] = values[option] === "null" ? null : json(values[option], option, isObject);
-    }
+    if (values[option] !== undefined) patch[option] = nullableObject(values[option], option);
   }
   if (patch.head !== undefined && patch.head !== task.head && values.merge === undefined) {
     patch.merge = null;
@@ -209,7 +204,7 @@ async function writeFactory(file, values, operator, source) {
     const changes = {};
     if (values.ran) changes.last_run_at = rootPatch.updated_at;
     if (values["rule-worker"] !== undefined) {
-      changes.worker = values["rule-worker"] === "null" ? null : json(values["rule-worker"], "rule-worker", isObject);
+      changes.worker = nullableObject(values["rule-worker"], "rule-worker");
     }
     if (!Object.keys(changes).length) throw new Error("--rule needs --ran or --rule-worker.");
     const rules = rootPatch.rules ?? current.rules;
@@ -366,7 +361,7 @@ export async function update(file, values, { operator = false, source = operator
     file = await realpath(file);
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
-    file = join(await realpath(dirname(resolve(file))), basename(file));
+    file = await resolveFactory(file);
   }
   const lockFile = `${file}.write.lock`;
   let lock;

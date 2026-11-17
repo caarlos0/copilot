@@ -16,10 +16,11 @@ const mergeSources = ["lever", "comment", "factory-session"];
 const workerRoles = ["investigation", "implementation", "review"];
 const workerModes = ["one-shot", "continuous"];
 const workerStatuses = ["running", "idle", "closed", "unknown"];
-export const ruleKinds = ["search", "backlog", "improve"];
+const ruleKinds = ["search", "backlog", "improve"];
 const everyUnits = { m: 60_000, h: 3_600_000, d: 86_400_000 };
+export const defaultLimits = { investigation: 3, implementation: 3 };
 
-function isObject(value) {
+export function isObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
@@ -75,7 +76,7 @@ function githubKind(value, kind, field) {
   return url.href;
 }
 
-export const issueURL = (value, field = "issue") => githubKind(value, "issues", field);
+const issueURL = (value, field = "issue") => githubKind(value, "issues", field);
 export const prURL = (value, field = "pr") => githubKind(value, "pull", field);
 
 function fullSHA(value, field) {

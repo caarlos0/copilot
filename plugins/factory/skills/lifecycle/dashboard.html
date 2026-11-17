@@ -11,7 +11,7 @@
         color-scheme: light dark;
         --fg: #1f2328;
         --fg-muted: #59636e;
-        --bg: #ffffff;
+        --bg: #fff;
         --bg-muted: #f6f8fa;
         --border: #d1d9e0;
         --border-emphasis: #818b98;
@@ -88,7 +88,7 @@
         border-radius: 6px; background: color-mix(in srgb, var(--danger) 10%, var(--bg)); }
 
       #flow { width: 100%; height: auto; max-height: 70vh; display: block; }
-      .edge { fill: none; stroke: var(--border-emphasis); stroke-width: 2; stroke-dasharray: 8 6; stroke-linejoin: miter;
+      .edge { fill: none; stroke: var(--border-emphasis); stroke-width: 2; stroke-dasharray: 8 6;
         animation: flow 1s linear infinite; transition: opacity .4s; }
       .edge.idle { opacity: .35; }
       .edge.dashed { stroke: var(--blocked); opacity: .6; }
@@ -366,20 +366,28 @@
         return openState() === "resolved" && outcomes.includes(outcome) ? outcome : null;
       }
 
-      function choose(state, outcome = null) {
-        const next = !state || (openState() === state && openOutcome() === outcome)
-          ? "" : `#${state}${outcome ? `/${outcome}` : ""}`;
-        history.replaceState(null, "", `${location.pathname}${location.search}${next}`);
+      function setHash(hash) {
+        history.replaceState(null, "", `${location.pathname}${location.search}${hash}`);
         draw();
+      }
+
+      function choose(state, outcome = null) {
+        const same = openState() === state && openOutcome() === outcome;
+        setHash(!state || same ? "" : `#${state}${outcome ? `/${outcome}` : ""}`);
       }
 
       const producersOpen = () => location.hash === "#producers";
       const isFinder = (rule) => rule.kind !== "improve";
+      const chooseProducers = () => setHash(producersOpen() ? "" : "#producers");
 
-      function chooseProducers() {
-        const next = producersOpen() ? "" : "#producers";
-        history.replaceState(null, "", `${location.pathname}${location.search}${next}`);
-        draw();
+      function activateOnKey(node, action) {
+        node.addEventListener("click", action);
+        node.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            action();
+          }
+        });
       }
 
       function buildFlow() {
@@ -418,13 +426,7 @@
           svg("text", { class: "count", x: SOURCE.x + SOURCE.w / 2, y: SOURCE.y + 76 }, "0"),
           svg("text", { class: "sub", x: SOURCE.x + SOURCE.w / 2, y: SOURCE.y + 98 }, ""),
         );
-        source.addEventListener("click", chooseProducers);
-        source.addEventListener("keydown", (event) => {
-          if (event.key === "Enter" || event.key === " ") {
-            event.preventDefault();
-            chooseProducers();
-          }
-        });
+        activateOnKey(source, chooseProducers);
         nodes.append(source);
         states.forEach((state, index) => {
           const place = places[state];
@@ -440,13 +442,7 @@
             svg("text", { class: "count", x: place.x + NODE.w / 2, y: place.y + 76 }, "0"),
             svg("text", { class: "sub", x: place.x + NODE.w / 2, y: place.y + 98 }, ""),
           );
-          group.addEventListener("click", () => choose(state));
-          group.addEventListener("keydown", (event) => {
-            if (event.key === "Enter" || event.key === " ") {
-              event.preventDefault();
-              choose(state);
-            }
-          });
+          activateOnKey(group, () => choose(state));
           nodes.append(group);
         });
 
@@ -461,13 +457,7 @@
             svg("text", { x: x + 12, y: y + 19 }, outcomeTitles[outcome]),
             svg("text", { class: "outcome-count", x: x + NODE.w - 12, y: y + 19 }, "0"),
           );
-          group.addEventListener("click", () => choose("resolved", outcome));
-          group.addEventListener("keydown", (event) => {
-            if (event.key === "Enter" || event.key === " ") {
-              event.preventDefault();
-              choose("resolved", outcome);
-            }
-          });
+          activateOnKey(group, () => choose("resolved", outcome));
           resolutions.append(group);
         });
 
@@ -527,8 +517,7 @@
         const due = nextDue({ ...snapshot, rules: snapshot.rules.filter(isFinder) });
         group.classList.toggle("selected", producersOpen());
         group.querySelector(".count").textContent = String(enabled.length);
-        group.querySelector(".sub").textContent = due === null ? "on request"
-          : due <= Date.now() ? "due now" : `next in ${span(Math.ceil((due - Date.now()) / 1000))}`;
+        group.querySelector(".sub").textContent = due === null ? "on request" : dueIn(due);
         group.setAttribute("aria-label", `Find work: ${enabled.length} enabled ${enabled.length === 1 ? "rule" : "rules"}`);
       }
 
@@ -633,6 +622,10 @@
         return `${Math.floor(hours / 24)}d`;
       }
 
+      function dueIn(due) {
+        return due <= Date.now() ? "due now" : `next in ${span(Math.ceil((due - Date.now()) / 1000))}`;
+      }
+
       function reference(href) {
         const url = githubURL(href);
         const node = link(`#${url.pathname.split("/").pop()}`, url.href);
@@ -658,7 +651,12 @@
         return pre;
       }
 
-      function closeOnBackdrop(node, close) {
+      function wireDismiss(node, closeButtonId, close) {
+        document.getElementById(closeButtonId).addEventListener("click", close);
+        node.addEventListener("cancel", (event) => {
+          event.preventDefault();
+          close();
+        });
         let pressed = false;
         const outside = (event) => {
           if (event.target !== node) return false;
@@ -694,15 +692,17 @@
         });
       }
 
+      const filterQuery = () => document.getElementById("global-filter").value.trim();
+
       function filteredTasks() {
-        const query = document.getElementById("global-filter").value.trim();
+        const query = filterQuery();
         return snapshot.tasks.filter((task) => matchesTask(task, query));
       }
 
       function renderFilterStatus(matchingCount) {
         const status = document.getElementById("global-filter-count");
         const clear = document.getElementById("clear-filter");
-        const query = document.getElementById("global-filter").value.trim();
+        const query = filterQuery();
         if (!snapshot || !query) {
           status.textContent = "";
           status.hidden = true;
@@ -857,6 +857,14 @@
         return form;
       }
 
+      function appendArtifacts(parent, worker) {
+        for (const field of ["brief", "result"]) {
+          if (!worker[field]) continue;
+          const query = new URLSearchParams({ file: selection, name: artifactName(worker[field], field) });
+          parent.append(link(field, `/api/artifact?${query}`), " ");
+        }
+      }
+
       function taskRow(task, expanded) {
         const node = element("li", null, "task-row");
         node.dataset.taskId = task.id;
@@ -933,12 +941,7 @@
             const item = element("li");
             const dot = element("span", null, `dot ${worker.status}`);
             item.append(dot, `${role}: ${worker.status}${worker.name ? `, ${worker.name}` : ""}${worker.pane ? `, ${worker.pane}` : ""} `);
-            for (const field of ["brief", "result"]) {
-              if (worker[field]) {
-                const query = new URLSearchParams({ file: selection, name: artifactName(worker[field], field) });
-                item.append(link(field, `/api/artifact?${query}`), " ");
-              }
-            }
+            appendArtifacts(item, worker);
             list.append(item);
           }
           more.append(list);
@@ -967,15 +970,14 @@
           list.dataset.signature = "";
           return;
         }
-        const outcome = state === "resolved" ? openOutcome() : null;
+        const outcome = openOutcome();
         const sameList = dialog.dataset.state === state && dialog.dataset.outcome === (outcome ?? "");
-        const filter = document.getElementById("global-filter").value.trim();
+        const filter = filterQuery();
         const sameFilter = list.dataset.filter === filter;
         const expanded = new Set([...list.querySelectorAll("details[open]")].map((node) => node.dataset.taskId));
-        const allTasks = snapshot.tasks.filter((task) => task.state === state &&
-          (!outcome || task.resolution.outcome === outcome));
-        const tasks = matchingTasks.filter((task) => task.state === state &&
-          (!outcome || task.resolution.outcome === outcome))
+        const inList = (task) => task.state === state && (!outcome || task.resolution.outcome === outcome);
+        const allTasks = snapshot.tasks.filter(inList);
+        const tasks = matchingTasks.filter(inList)
           .sort((a, b) => Date.parse(entered(a)) - Date.parse(entered(b)));
         const title = document.getElementById("detail-title");
         title.textContent = outcome ? `Resolved: ${outcomeTitles[outcome]}` : places[state].title;
@@ -1039,19 +1041,14 @@
         const due = nextRun(rule);
         const when = !rule.every ? "No schedule: runs on start or when asked."
           : [`Every ${rule.every}`, rule.last_run_at ? `last run ${age(rule.last_run_at)} ago` : "never run",
-            ...(due === null ? ["disabled"] : [due <= Date.now() ? "due now"
-              : `next in ${span(Math.ceil((due - Date.now()) / 1000))}`])].join(", ");
+            ...(due === null ? ["disabled"] : [dueIn(due)])].join(", ");
         node.append(element("p", when, "muted"));
         if (rule.worker) {
           const item = element("p");
           const worker = rule.worker;
           item.append(element("span", null, `dot ${worker.status}`),
             `Worker: ${[worker.status, worker.mode].filter(Boolean).join(", ")} `);
-          for (const field of ["brief", "result"]) {
-            if (!worker[field]) continue;
-            const query = new URLSearchParams({ file: selection, name: artifactName(worker[field], field) });
-            item.append(link(field, `/api/artifact?${query}`), " ");
-          }
+          appendArtifacts(item, worker);
           node.append(item);
         }
         return node;
@@ -1231,24 +1228,10 @@
         draw();
       });
       window.addEventListener("hashchange", draw);
-      document.getElementById("close-detail").addEventListener("click", () => choose(null));
-      dialog.addEventListener("cancel", (event) => {
-        event.preventDefault();
-        choose(null);
-      });
-      closeOnBackdrop(dialog, () => choose(null));
-      document.getElementById("close-move").addEventListener("click", closeMove);
-      moveDialog.addEventListener("cancel", (event) => {
-        event.preventDefault();
-        closeMove();
-      });
-      closeOnBackdrop(moveDialog, closeMove);
-      document.getElementById("close-producers").addEventListener("click", () => choose(null));
-      producers.addEventListener("cancel", (event) => {
-        event.preventDefault();
-        choose(null);
-      });
-      closeOnBackdrop(producers, () => choose(null));
+      const closeChoice = () => choose(null);
+      wireDismiss(dialog, "close-detail", closeChoice);
+      wireDismiss(moveDialog, "close-move", closeMove);
+      wireDismiss(producers, "close-producers", closeChoice);
 
       buildFlow();
       refresh();

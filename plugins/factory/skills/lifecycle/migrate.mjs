@@ -3,10 +3,9 @@ import { access, link, mkdir, readFile, rename, rm, writeFile } from "node:fs/pr
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { format, githubResourceURL, githubURL, prURL, validate } from "./factory-data.mjs";
+import { countByState, defaultLimits, format, githubResourceURL, githubURL, prURL, validate } from "./factory-data.mjs";
 
 const sources = ["implementer", "coordinator"];
-const defaultLimits = { investigation: 3, implementation: 3 };
 
 async function exists(path) {
   try {
@@ -138,13 +137,14 @@ function reviewerPatch(reviewers) {
   return byPR;
 }
 
+const same = (a, b) => a && b && githubResourceURL(a) === githubResourceURL(b);
+
 function build(project, key, loaded, reviewers) {
   const tasks = [];
   const report = { merged: [], renamed: [], reviewer_attached: 0, reviewer_skipped: 0 };
   for (const { role, source } of loaded) {
     for (const old of source.data.tasks) {
       let task = mapTask(role, source.file, old, project);
-      const same = (a, b) => a && b && githubResourceURL(a) === githubResourceURL(b);
       const twins = tasks.flatMap((other, index) =>
         same(task.pr, other.pr) || same(task.issue, other.issue)
           ? [{ index, task: other }]
@@ -300,15 +300,12 @@ It refuses to overwrite an existing factory.json, and stops when a legacy owner 
   }
 
   const { data, report } = build(project, key, loaded, reviewers);
-  const counts = Object.fromEntries(
-    ["initial", "investigation", "implementation", "review", "blocked", "resolved"]
-      .map((state) => [state, data.tasks.filter((task) => task.state === state).length]));
   const summary = {
     file: target,
     dry_run: Boolean(options["dry-run"]),
     sources: loaded.map(({ role, source }) => ({ role, file: source.file, tasks: source.data.tasks.length })),
     tasks: data.tasks.length,
-    by_state: counts,
+    by_state: countByState(data.tasks),
     ...report,
     warnings,
   };

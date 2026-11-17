@@ -35,9 +35,8 @@ observed result in the same turn before any follow-up. Launch each worker with
 its brief in the command (`copilot ... -i 'Read <brief> and do it.'`): no fixed
 sleeps, and no `rex send` for the first message. The file already holds the
 planned role with `unknown` status; write the pane and window IDs right after
-launch. If a write is refused,
-stop and reconcile. Never track tasks only in chat, session SQL, another board,
-or another file.
+launch. If a write is refused, stop and reconcile. Never track tasks only in
+chat, session SQL, another board, or another file.
 
 On startup, recovery, every wake, every user message, and before every report,
 run the lifecycle skill's `reconcile.mjs` and act on each finding. On startup,

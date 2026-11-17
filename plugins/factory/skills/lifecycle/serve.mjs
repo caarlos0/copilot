@@ -4,8 +4,11 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { countByState, validate } from "./factory-data.mjs";
+import { countByState, isObject, validate } from "./factory-data.mjs";
 import { ConflictError, update } from "./factory.mjs";
+
+const factoryFile = /-factory\.json$/i;
+const maxBody = 16384;
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -66,7 +69,7 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
   }
 
   async function loadFactory(file) {
-    if (!file || !/-factory\.json$/i.test(file) || file.includes("/")) {
+    if (!file || !factoryFile.test(file) || file.includes("/")) {
       throw new HttpError(400, "Select a <owner.repo>-factory.json file.");
     }
     const data = JSON.parse(await readFile(await localFile(file), "utf8"));
@@ -83,7 +86,7 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
     const errors = [];
     for (const entry of await readdir(directory, { withFileTypes: true })) {
       const file = entry.name;
-      if ((!entry.isFile() && !entry.isSymbolicLink()) || !/-factory\.json$/i.test(file) ||
+      if ((!entry.isFile() && !entry.isSymbolicLink()) || !factoryFile.test(file) ||
           file.startsWith(".")) continue;
       try {
         const data = await loadFactory(file);
@@ -124,18 +127,18 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
     if (request.headers["content-type"]?.split(";")[0].trim() !== "application/json") {
       throw new HttpError(415, "State changes require application/json.");
     }
-    if (Number(request.headers["content-length"]) > 16384) {
+    if (Number(request.headers["content-length"]) > maxBody) {
       throw new HttpError(413, "State change is too large (maximum 16 KiB).");
     }
     const chunks = [];
     let size = 0;
     for await (const chunk of request) {
       size += chunk.length;
-      if (size > 16384) throw new HttpError(413, "State change is too large (maximum 16 KiB).");
+      if (size > maxBody) throw new HttpError(413, "State change is too large (maximum 16 KiB).");
       chunks.push(chunk);
     }
     const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-    if (!body || typeof body !== "object" || Array.isArray(body) ||
+    if (!isObject(body) ||
         Object.keys(body).some((key) => !["task", "state", "comment", "revision", "resolution"].includes(key)) ||
         !["task", "state", "comment"].every((key) => typeof body[key] === "string" && body[key].trim()) ||
         !Number.isSafeInteger(body.revision) || body.revision < 0) {

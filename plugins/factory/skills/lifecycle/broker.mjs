@@ -4,14 +4,14 @@ import { open, readFile, realpath, stat } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
-import { dueRules, nextDue } from "./factory-data.mjs";
+import { dueRules, isObject, nextDue } from "./factory-data.mjs";
 
 const maxTimer = 2 ** 31 - 1;
 const maxLine = 64 * 1024;
 const workerOutcomes = ["working", "waiting", "complete", "blocked"];
 
 // Each type lists whether it needs --task and the data keys it must carry.
-export const eventTypes = {
+const eventTypes = {
   "task.moved": { task: true, data: ["to"] },
   "task.updated": { task: true, data: ["revision"] },
   "worker.result": { task: true, data: ["role", "outcome"] },
@@ -19,10 +19,8 @@ export const eventTypes = {
   "feedback.pending": { task: true, data: ["feedback_id"] },
 };
 
-export const eventsFile = (file) =>
+const eventsFile = (file) =>
   join(dirname(file), `${basename(file, extname(file))}-events.jsonl`);
-
-const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 
 class UsageError extends Error {}
 
@@ -70,7 +68,7 @@ export async function emit(factory, { type, task = null, source, data = {} }) {
 }
 
 // Reads complete lines after the byte offset; a trailing partial line stays unread.
-export async function readEvents(file, offset) {
+async function readEvents(file, offset) {
   let handle;
   try {
     handle = await open(file, "r");
@@ -100,7 +98,7 @@ export async function readEvents(file, offset) {
   }
 }
 
-export async function waitForEvents(factory, { since, timeout, exclude = [], due = false }) {
+async function waitForEvents(factory, { since, timeout, exclude = [], due = false }) {
   const file = eventsFile(factory);
   let cursor = since ?? await size(file);
   const state = async () => JSON.parse(await readFile(factory, "utf8"));
