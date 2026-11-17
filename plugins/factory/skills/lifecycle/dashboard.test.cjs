@@ -416,6 +416,7 @@ test("Move opens a separate popup whose draft survives refresh and conflict", as
   const form = ui.get("move-body").querySelector("form");
   const comment = form.querySelector("textarea");
   const state = form.querySelector("select");
+  assert.equal(ui.document.activeElement, state, "Opening Move must focus the destination, not the title.");
   state.value = "initial";
   comment.value = "This is now unblocked.\nUse the new docs setup.";
   comment.focus();
@@ -444,10 +445,11 @@ test("Move opens a separate popup whose draft survives refresh and conflict", as
   assert.equal(ui.get("detail").open, true);
   assert.equal(ui.get("detail").dataset.state, "blocked", "The list must stay on the state it showed.");
   assert.equal(ui.get("task-list").children.length, 0);
+  assert.equal(ui.document.activeElement, ui.get("close-detail"), "After saving, focus must stay in the task popup.");
   assert.match(ui.get("detail-status").textContent, /to Initial\. Comment saved; awaiting factory acknowledgement/);
 });
 
-test("the move popup closes on Cancel and on its backdrop without saving", async (t) => {
+test("the move popup closes on its close button and backdrop without saving", async (t) => {
   const ui = await dashboard(t);
   const file = join(ui.directory, factoryFile);
   const original = await readFile(file, "utf8");

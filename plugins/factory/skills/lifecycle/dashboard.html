@@ -16,6 +16,9 @@
         --border-emphasis: #818b98;
         --btn-bg: #f6f8fa;
         --btn-hover: #eff2f5;
+        --btn-primary: #1f883d;
+        --btn-primary-hover: #1a7f37;
+        --btn-danger-hover: #a40e26;
         --accent: #0969da;
         --success: #1a7f37;
         --attention: #9a6700;
@@ -46,6 +49,9 @@
           --border-emphasis: #656c76;
           --btn-bg: #212830;
           --btn-hover: #262c36;
+          --btn-primary: #238636;
+          --btn-primary-hover: #29903b;
+          --btn-danger-hover: #b62324;
           --accent: #4493f8;
           --success: #3fb950;
           --attention: #d29922;
@@ -67,7 +73,13 @@
       code, pre { font-family: var(--mono); font-size: 12px; }
       button, select, textarea { font: inherit; line-height: 20px; color: var(--fg); border: 1px solid var(--border); border-radius: 6px; }
       button { padding: 5px 16px; font-weight: 500; background: var(--btn-bg); cursor: pointer; }
-      button:hover { background: var(--btn-hover); }
+      button:hover:not(:disabled) { background: var(--btn-hover); }
+      .action-primary { color: #fff; background: var(--btn-primary); border-color: rgb(31 35 40 / .15); }
+      .action-primary:hover:not(:disabled) { background: var(--btn-primary-hover); }
+      .action-positive { color: var(--success); }
+      .action-positive:hover:not(:disabled) { color: #fff; background: var(--btn-primary); }
+      .action-danger { color: var(--danger); }
+      .action-danger:hover:not(:disabled) { color: #fff; background: var(--btn-danger-hover); }
       select { width: 480px; max-width: 100%; padding: 5px 12px; background: var(--bg); }
       textarea { width: 100%; padding: 8px 12px; background: var(--bg); resize: vertical; }
       button:disabled { opacity: .6; cursor: default; }
@@ -118,9 +130,13 @@
       dialog::backdrop { background: rgb(0 0 0 / .5); }
       #move-dialog { width: min(560px, calc(100% - 32px)); }
       body:has(dialog[open]) { overflow: hidden; }
-      .detail-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px;
+      .detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
         position: sticky; top: 0; z-index: 1; padding: 16px 24px; background: var(--bg-muted);
         border-bottom: 1px solid var(--border); }
+      .detail-head h2 { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+      .close-button { flex: none; width: 32px; height: 32px; padding: 0; font-size: 24px;
+        line-height: 28px; background: transparent; border-color: transparent; }
+      .move-form .controls { justify-content: flex-end; }
       #detail-status, #detail-empty { margin: 16px 24px; }
       #detail-status:empty { display: none; }
       .counter { display: inline-block; min-width: 20px; margin-left: 8px; padding: 0 6px; border-radius: 2em;
@@ -186,8 +202,9 @@
       <svg id="flow" viewBox="0 0 1160 560" role="group" aria-label="Factory flow: tasks per state"></svg>
       <dialog id="detail" aria-labelledby="detail-title">
         <div class="detail-head">
-          <h2 id="detail-title" tabindex="-1" autofocus></h2>
-          <button id="close-detail" type="button">Close</button>
+          <h2 id="detail-title"></h2>
+          <button id="close-detail" class="close-button action-danger" type="button"
+            aria-label="Close task list" title="Close task list" autofocus>&times;</button>
         </div>
         <p id="detail-status" role="status"></p>
         <ul id="task-list"></ul>
@@ -195,8 +212,9 @@
       </dialog>
       <dialog id="move-dialog" aria-labelledby="move-title">
         <div class="detail-head">
-          <h2 id="move-title" tabindex="-1"></h2>
-          <button id="close-move" type="button">Cancel</button>
+          <h2 id="move-title"></h2>
+          <button id="close-move" class="close-button action-danger" type="button"
+            aria-label="Cancel move" title="Cancel move">&times;</button>
         </div>
         <div id="move-body"></div>
       </dialog>
@@ -505,7 +523,7 @@
         title.textContent = `Move: ${task.title}`;
         document.getElementById("move-body").replaceChildren(moveForm(task));
         moveDialog.showModal();
-        title.focus();
+        moveDialog.querySelector("select").focus();
       }
 
       function moveForm(task) {
@@ -516,6 +534,7 @@
         const stateLabel = element("label", "Move to");
         const state = element("select");
         state.name = "state";
+        state.autofocus = true;
         const resolutionLabel = element("label", "Resolution outcome");
         const resolution = element("select");
         resolution.name = "resolution";
@@ -559,13 +578,13 @@
         const error = element("p", null, "save-error");
         error.setAttribute("role", "alert");
         error.hidden = true;
-        const save = element("button", "Save move");
+        const save = element("button", "Save move", "action-primary");
         save.type = "submit";
         const reload = element("button", "Reload task");
         reload.type = "button";
         reload.hidden = true;
         const actions = element("div", null, "controls");
-        actions.append(save, reload);
+        actions.append(reload, save);
         fields.append(stateLabel, resolutionLabel, commentLabel, notice, error, actions);
         form.append(fields);
         const failed = (cause) => {
@@ -617,7 +636,7 @@
               load(data, file);
               document.getElementById("detail-status").textContent =
                 `Moved "${task.title}" to ${places[destination].title}. Comment saved; awaiting factory acknowledgement.`;
-              document.getElementById("detail-title").focus();
+              document.getElementById("close-detail").focus();
             }
           } catch (cause) {
             failed(new Error(`Move was not confirmed: ${cause.message} Reload the task before trying again.`));
@@ -640,7 +659,7 @@
         const actions = element("span", null, "row-actions");
         actions.append(links);
         if (operatorStates(task).length) {
-          const move = element("button", "Move", "move");
+          const move = element("button", "Move", "move action-positive");
           move.type = "button";
           move.addEventListener("click", () => openMove(task));
           actions.append(move);
