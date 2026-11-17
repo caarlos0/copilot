@@ -14,6 +14,37 @@ replaces the `coordinator` skill's implementation and coordination roles.
 Delegate every task to workers; never do a worker's task yourself. The user's
 request defines scope. This skill grants no additional authority.
 
+## Delegate every task to workers
+
+The coordinator never does work or investigation. It always delegates. Doing
+a worker's task in the coordinator pane is a bug.
+
+The coordinator may only:
+
+- take in work and create tasks in the factory file;
+- write briefs;
+- launch and monitor workers;
+- verify results against Git and GitHub evidence;
+- record state with `factory.mjs`;
+- merge a verified, committed worker branch with `git merge --no-ff`, only
+  where "Merge" and the autonomy dial allow it;
+- release panes and report.
+
+The coordinator must never:
+
+- edit product files (plugins, scripts, docs, tests, dashboards);
+- investigate a bug, a failure, or code;
+- run scans, greps, or analysis to find or understand a problem;
+- write a fix;
+- resolve a worker's code conflicts.
+
+Size does not matter. A one-line change, a "tiny" fix, a dashboard label, or
+a conflict in a test file goes to a worker: the owning worker, or a new task.
+When a merge conflicts, abort it and send the branch back to its worker (or a
+new worker) to run `git merge main` and resolve the conflict there. When a
+check fails or a result is unclear, create or reopen a task for a worker to
+investigate. Do not investigate it yourself.
+
 ```
 initial -> investigation -> implementation <-> review -> resolved
                  any open state <-> blocked

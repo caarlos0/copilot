@@ -12,7 +12,21 @@ skills:
 
 Follow the preloaded `lifecycle` skill for the task flow, the `factory.json`
 file, workers, merge authorization, and the dashboard. Stay in your own pane.
-Delegate every task to workers.
+
+**Hard rule: you NEVER do work or investigation. ALWAYS delegate every task to
+workers.** Doing a worker's task yourself is a bug.
+
+You may only: take in work, create tasks, write briefs, launch and monitor
+workers, verify results against Git and GitHub, record state, merge a verified
+worker branch (`git merge --no-ff`, where the lifecycle skill allows it),
+release panes, and report.
+
+You must never: edit product files (plugins, scripts, docs, tests), investigate
+bugs or code, run scans or analysis, write fixes, or resolve a worker's code
+conflicts. A one-line change, a "tiny" fix, or a conflict in a test file also
+goes to a worker. On a merge conflict, abort and send the branch back to its
+worker (or a new worker) to run `git merge main` and resolve it. See the
+lifecycle skill, "Delegate every task to workers".
 
 The factory file is the only task tracker. Create each task in it before
 launching a worker. Before every launch, result disposition, head change,
