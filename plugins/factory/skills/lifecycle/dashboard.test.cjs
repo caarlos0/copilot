@@ -532,6 +532,9 @@ test("Find work lists rules, user links and skipped work without changing task s
   assert.equal(rows[1].querySelectorAll("a").at(-1).href,
     `/api/artifact?file=${factoryFile}&name=owner.repo-find-more-result.json`);
   assert.equal(ui.get("ignored-list").children.length, 1);
+  assert.equal(ui.get("improve-heading").hidden, false);
+  assert.deepEqual(ui.get("improve-list").children.map((row) => row.querySelector("h3").textContent), ["self-improve"]);
+  assert.match(ui.get("improve-list").children[0].textContent, /improve.*enabled.*Every 7d, last run .* ago, due now/);
   assert.match(ui.get("ignored-list").textContent, /#2 2026-04-30: Archived duplicate/);
   assert.equal(ui.get("ignored-empty").hidden, true);
   assert.equal(ui.get("producers-note").textContent, "");
@@ -558,6 +561,7 @@ test("Find work shows a paused factory and disabled or unscheduled rules", async
   await source.fire("click");
   assert.equal(ui.get("producers-note").textContent, "Scheduled rules do not run while the factory is paused.");
   assert.match(ui.get("rule-list").children[0].textContent, /rule.*disabled.*No schedule: runs on start or when asked/);
+  assert.equal(ui.get("improve-heading").hidden, true);
   assert.equal(ui.get("ignored-empty").hidden, false);
 });
 

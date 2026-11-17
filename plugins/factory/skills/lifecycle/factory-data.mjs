@@ -17,7 +17,7 @@ const workerRoles = ["investigation", "implementation", "review"];
 const workerModes = ["one-shot", "continuous"];
 const workerStatuses = ["running", "idle", "closed", "unknown"];
 const issueStates = ["investigation", "implementation", "review"];
-export const ruleKinds = ["search", "backlog"];
+export const ruleKinds = ["search", "backlog", "improve"];
 const everyUnits = { m: 60_000, h: 3_600_000, d: 86_400_000 };
 
 function isObject(value) {

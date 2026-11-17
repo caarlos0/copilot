@@ -30,6 +30,14 @@
         "session": "7f4c2a90-1d3e-4b5a-9c8d-2e6f0a1b3c4d",
         "result": "owner.repo-find-more-result.json"
       }
+    },
+    {
+      "id": "self-improve",
+      "description": "Review this factory's sessions and propose one change.",
+      "kind": "improve",
+      "every": "7d",
+      "enabled": true,
+      "last_run_at": "2026-04-28T09:00:00Z"
     }
   ],
   "ignored": [

@@ -29,10 +29,13 @@ caller explicitly requests autopilot.
 
 On start:
 
-1. Read the project's factory file, or create it.
+1. Read the project's factory file, or create it. Record your own Copilot
+   session with `--session` (see the lifecycle skill, "Self-improve").
 2. Ask the user for discovery rules with `ask_user` only when there are no
-   rules and the user gave no work. Rules with `every` run on a schedule while
-   you run (see the lifecycle skill, "Find more work").
+   `search` or `backlog` rules and the user gave no work. `--rules` replaces the
+   whole array, so keep the default `self-improve` rule when you save; it only
+   proposes changes. Rules with `every` run on a schedule while you run (see the
+   lifecycle skill, "Find more work").
 3. Reconcile every saved result, pane, and PR before you trust the saved state.
 4. Print the file path and the dashboard URL.
 

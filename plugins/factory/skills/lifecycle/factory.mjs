@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { archiveDirectory, findArchived, readArchive, removeArchived, saveArchive } from "./archive.mjs";
 import { checkTransition, format, operatorOutcomes, outcomes, validate } from "./factory-data.mjs";
+import { recordSessions, registryFile, sessionID } from "./sessions.mjs";
 
 const defaultLimits = { investigation: 3, implementation: 3 };
 
@@ -181,6 +182,15 @@ async function writeFactory(file, values, operator) {
   if (values.rules !== undefined) rootPatch.rules = json(values.rules, "rules", Array.isArray);
   if (values.limits !== undefined) rootPatch.limits = json(values.limits, "limits", isObject);
   if (values.ignored !== undefined) rootPatch.ignored = json(values.ignored, "ignored", Array.isArray);
+  const sessions = [];
+  const track = (value, role, owner) => {
+    const id = sessionID(value);
+    if (id) sessions.push({ id, role, ...owner, at: rootPatch.updated_at });
+  };
+  if (values.session !== undefined) {
+    if (!sessionID(values.session)) throw new Error("--session must be a Copilot session UUID.");
+    track(values.session, "factory", {});
+  }
   if (values.rule === undefined) {
     if (values.ran || values["rule-worker"] !== undefined) throw new Error("--ran and --rule-worker need --rule ID.");
   } else {
@@ -191,8 +201,10 @@ async function writeFactory(file, values, operator) {
     }
     if (!Object.keys(changes).length) throw new Error("--rule needs --ran or --rule-worker.");
     const rules = rootPatch.rules ?? current.rules;
-    if (!rules.some((rule) => rule.id === values.rule)) throw new Error(`Unknown rule: ${values.rule}`);
-    rootPatch.rules = rules.map((rule) => (rule.id === values.rule ? { ...rule, ...changes } : rule));
+    const rule = rules.find((item) => item.id === values.rule);
+    if (!rule) throw new Error(`Unknown rule: ${values.rule}`);
+    rootPatch.rules = rules.map((item) => (item === rule ? { ...rule, ...changes } : item));
+    track(changes.worker?.session, rule.kind === "improve" ? "improver" : "producer", { rule: rule.id });
   }
 
   let tasks = Array.isArray(current.tasks) ? current.tasks : [];
@@ -271,7 +283,11 @@ async function writeFactory(file, values, operator) {
         throw new Error("--resolution is allowed only when moving to resolved.");
       }
     }
-    task = merge(task, { ...taskPatch(task, values), updated_at: at, revision: revision + 1 });
+    const patch = taskPatch(task, values);
+    task = merge(task, { ...patch, updated_at: at, revision: revision + 1 });
+    for (const [role, worker] of Object.entries(patch.workers ?? {})) {
+      track(worker?.session, role, { task: task.id });
+    }
     if (operator) {
       const id = randomUUID();
       Object.assign(task.history.at(-1), { source: "dashboard", feedback_id: id });
@@ -308,6 +324,7 @@ async function writeFactory(file, values, operator) {
     }
     // Archive first: a retry upserts by ID, so a failure never loses a task.
     if (stale.length) await saveArchive(directory, current.project, stale);
+    await recordSessions(registryFile(file), sessions);
     await rename(temporary, file);
   } finally {
     await rm(temporary, { force: true });
@@ -375,6 +392,7 @@ async function main() {
         rule: { type: "string" },
         ran: { type: "boolean" },
         "rule-worker": { type: "string" },
+        session: { type: "string" },
         ...Object.fromEntries(taskOptions.map((option) => [option, { type: "string" }])),
       },
       allowPositionals: true,
@@ -409,12 +427,16 @@ Run options:
   --run-status VALUE    active, paused, blocked, or finished (default active on create)
   --rex-session VALUE   Rex session the factory started in, or null
   --rules JSON          Replace the rules array. A rule: {id, description, enabled, kind?, query?,
-                        every?, prompt?, last_run_at?, worker?}. kind: search (needs query) or backlog.
-                        every (30m, 6h, 1d) makes the rule run on a schedule while the factory runs
+                        every?, prompt?, last_run_at?, worker?}. kind: search (needs query), backlog,
+                        or improve. every (30m, 6h, 1d) makes the rule run on a schedule while the
+                        factory runs
   --rule ID --ran       Stamp the rule's last_run_at now. Do it before dispatching the run, and after
                         every due wake, even when nothing was found
   --rule ID --rule-worker JSON  Set the rule's worker record (same fields as a task worker), or null
   --ignored JSON        Replace the skipped-work list: [{url, at, reason}]
+  --session UUID        Record the factory's own Copilot session in FILE's sessions registry
+                        (<owner.repo>-factory-sessions.jsonl). Worker sessions are recorded
+                        automatically from --workers and --rule-worker records that have a session
   --limits JSON         Merge worker caps, e.g. '{"investigation":2}' (default 3 each)
   --updated-at VALUE    Explicit run timestamp (ISO 8601 with timezone)
 

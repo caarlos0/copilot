@@ -459,3 +459,36 @@ test("schedule helpers say what is due, only for an active factory", async () =>
     assert.equal(nextDue(data(status)), null, status);
   }
 });
+
+const uuid = (n) => `${String(n).repeat(8)}-${String(n).repeat(4)}-4${String(n).repeat(3)}-8${String(n).repeat(3)}-${String(n).repeat(12)}`;
+
+test("the sessions registry records each factory and worker session once, privately", async (t) => {
+  const f = await started(t);
+  const registry = join(f.directory, "owner.repo-factory-sessions.jsonl");
+  assert.deepEqual(await readdir(f.directory), ["owner.repo-factory.json"], "No session means no registry.");
+  const lines = async () => (await readFile(registry, "utf8")).split("\n").filter(Boolean).map((line) => JSON.parse(line));
+
+  f.ok("--session", uuid(1), "--updated-at", "2026-05-01T12:00:00Z");
+  f.ok("--session", uuid(1));
+  f.ok("--rules", JSON.stringify([{ ...search, kind: "improve", query: null, id: "self" }, search]));
+  f.ok("--rule", "self", "--rule-worker", JSON.stringify({ status: "running", session: `session:${uuid(2)}` }));
+  f.ok("--rule", "bugs", "--rule-worker", JSON.stringify({ status: "running", session: uuid(3) }));
+  f.ok("--task", "issue-1", "--state", "investigation", "--note", "Go",
+    "--workers", JSON.stringify({ investigation: { status: "running", session: uuid(4), pane: "p1" } }));
+  f.ok("--task", "issue-1", "--workers", JSON.stringify({ investigation: { status: "idle", session: uuid(4) } }));
+  f.ok("--task", "issue-1", "--workers", JSON.stringify({ investigation: { status: "running", session: "not-a-session" } }));
+
+  assert.deepEqual((await lines()).map(({ at, ...entry }) => entry), [
+    { id: uuid(1), role: "factory" },
+    { id: uuid(2), role: "improver", rule: "self" },
+    { id: uuid(3), role: "producer", rule: "bugs" },
+    { id: uuid(4), role: "investigation", task: "issue-1" },
+  ]);
+  assert.equal((await lines())[0].at, "2026-05-01T12:00:00Z");
+  assert.equal((await stat(registry)).mode & 0o777, 0o600);
+
+  f.fails(/Task issue-1 cannot move/, "--task", "issue-1", "--state", "review", "--note", "Skip",
+    "--workers", JSON.stringify({ review: { status: "running", session: uuid(5) } }));
+  f.fails(/--session must be a Copilot session UUID/, "--session", "pane-1");
+  assert.equal((await lines()).length, 4, "A refused write must not record a session.");
+});

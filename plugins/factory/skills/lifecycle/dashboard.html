@@ -132,7 +132,7 @@
       dialog::backdrop { background: rgb(0 0 0 / .5); }
       #move-dialog { width: min(560px, calc(100% - 32px)); }
       #producers-dialog { width: min(720px, calc(100% - 32px)); }
-      #rule-list, #ignored-list { list-style: none; margin: 0; padding: 0; }
+      #rule-list, #improve-list, #ignored-list { list-style: none; margin: 0; padding: 0; }
       #producers-note { margin: 16px 24px 0; }
       #producers-note:empty { display: none; }
       #producers-dialog h3.section { margin: 0; padding: 16px 24px 0; border-top: 1px solid var(--border); }
@@ -236,6 +236,8 @@
         </div>
         <p id="producers-note" class="muted"></p>
         <ul id="rule-list"></ul>
+        <h3 id="improve-heading" class="section">Self-improve</h3>
+        <ul id="improve-list"></ul>
         <h3 class="section">Skipped</h3>
         <ul id="ignored-list"></ul>
         <p id="ignored-empty" class="muted" hidden>Nothing skipped.</p>
@@ -336,6 +338,7 @@
       }
 
       const producersOpen = () => location.hash === "#producers";
+      const isFinder = (rule) => rule.kind !== "improve";
 
       function chooseProducers() {
         const next = producersOpen() ? "" : "#producers";
@@ -472,7 +475,7 @@
         }
         const counts = countByState(snapshot.tasks);
         Object.assign(targets, counts);
-        const enabled = snapshot.rules.filter((rule) => rule.enabled);
+        const enabled = snapshot.rules.filter((rule) => rule.enabled && isFinder(rule));
         for (const edge of flow.querySelectorAll(".edge")) {
           const key = edge.dataset.edge;
           const [from] = key.split(">");
@@ -488,7 +491,7 @@
 
       function drawSource(enabled) {
         const group = flow.querySelector(".source");
-        const due = nextDue(snapshot);
+        const due = nextDue({ ...snapshot, rules: snapshot.rules.filter(isFinder) });
         group.classList.toggle("selected", producersOpen());
         group.querySelector(".count").textContent = String(enabled.length);
         group.querySelector(".sub").textContent = due === null ? "on request"
@@ -947,7 +950,10 @@
         const manual = element("li", null, "task-row");
         manual.append(element("h3", "User links"),
           element("p", "Send an issue or PR link to the factory session. Links you send do not use the rules or the skipped list.", "muted"));
-        document.getElementById("rule-list").replaceChildren(...snapshot.rules.map(ruleRow), manual);
+        document.getElementById("rule-list").replaceChildren(...snapshot.rules.filter(isFinder).map(ruleRow), manual);
+        const improve = snapshot.rules.filter((rule) => !isFinder(rule));
+        document.getElementById("improve-list").replaceChildren(...improve.map(ruleRow));
+        document.getElementById("improve-heading").hidden = improve.length === 0;
         document.getElementById("producers-note").textContent = snapshot.status === "active" ? ""
           : `Scheduled rules do not run while the factory is ${snapshot.status}.`;
         const ignored = snapshot.ignored ?? [];

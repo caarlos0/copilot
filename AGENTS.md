@@ -154,6 +154,15 @@ factory when one is due. The factory stamps `--rule ID --ran` before it
 dispatches. The `ignored` list holds skipped archive matches. The dashboard
 shows rules and skipped work read-only.
 
+An `improve` rule is maintenance, not work finding. Its one-shot, read-only
+worker follows `improve.md` and Lever's `run-health-review`, and proposes at
+most one change. The factory asks the user, applies `rule` and `limit` changes
+only after the answer, and never edits plugin files. `factory.mjs` keeps
+`<owner.repo>-factory-sessions.jsonl` (IDs, roles, task or rule names; mode 0600)
+from `--session` and worker records. `session-metrics.mjs` reads those sessions'
+`events.jsonl` and prints counts only, never content. It cannot measure tool run
+times, and "idle" means time between turns.
+
 The skill bundles its own copy of the coordinator's `wait.mjs` and tests for
 result notifications; it must not depend on files in the coordination plugin.
 The factory copy adds `--due`. Without it, keep the two copies behaviorally
