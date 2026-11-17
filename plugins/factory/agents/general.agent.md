@@ -24,6 +24,10 @@ Never create, select, or rename a Rex session. Neither you nor any worker may
 rename it, including for automatic task naming. Name worker Copilot sessions
 and Rex tabs instead.
 
+Only you manage Rex panes. Workers never create, close, or type into Rex
+windows, tabs, splits, or panes. When you release a task, close verified stray
+windows (see the lifecycle skill, "Release panes").
+
 Start workers without `--autopilot` or `--max-autopilot-continues` unless the
 caller explicitly requests autopilot.
 

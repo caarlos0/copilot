@@ -82,6 +82,17 @@ Never run `rex session rename` or `rex new`. Task titles name worker Copilot
 sessions and Rex tabs only. Put this rule in every worker's startup
 instructions.
 
+Only the factory manages Rex panes. Workers inherit `REX_SESSION`,
+`REX_BLOCK`, and `REX_SERVER`, and the `rex` skill is visible to them. Without
+a rule, a worker runs ordinary commands in new Rex windows and leaves them
+behind. Workers run every command with their own shell tool. They never create
+a Rex window, tab, split, or pane, and never close, type into, or rename one.
+Do not unset the `REX_*` variables for workers: `wt` reads them only for
+`--tab` and `--split`, which workers must not use, but the `rex` CLI still
+reaches the default server without them. Unsetting only hides the problem
+and breaks legitimate Rex tooling. The startup rule and the release check below
+are the controls.
+
 ## Keep the factory file
 
 Use `~/.local/state/copilot-coordinator/` for durable state. Keep files
@@ -433,6 +444,11 @@ Tell every worker:
   work done under an older direction.
 - Never rename the Rex session. Do not run `rex session rename`, even if
   startup context asks for automatic task naming.
+- Run every command, build, test, and server with your own shell tool. Never
+  use the `rex` skill or CLI to create a window, tab, split, or pane, and never
+  close, type into, or rename a pane you did not create. Only the factory
+  manages Rex panes. If a command needs a long-lived process, start it with
+  your shell tool's async mode and stop it when done.
 - Never abandon work for a local environment problem. Stop a denied operation
   without bypassing it and continue safe, permitted work. If local checks are
   blocked and publication is authorized, open a draft PR, state the limitation,
@@ -453,10 +469,15 @@ the result, close its pane.
 Continuous. Use a new worktree for every task:
 
 ```sh
-wt fix-login --main -- copilot --agent coding:caarlos0 --name 'Fix login redirect' --yolo --sandbox
+wt fix-login -- copilot --agent coding:caarlos0 --name 'Fix login redirect' --yolo --sandbox
 ```
 
-Run `wt` inside the new tab, without `--tab` or `--split`. For a task that
+Run `wt` inside the new tab, without `--tab` or `--split`, and without
+`--main`. Open the tab with its working directory set to the project's main
+checkout (`rex window new -c MAIN_CHECKOUT ...`). Plain `wt NAME` there branches
+from the current local `HEAD`; `--main` branches from `origin/<default>`, which
+drops local commits that are not pushed yet. Check that the main checkout is on
+the default branch before you launch. For a task that
 already has a PR, use `wt --pr N`: it may reuse a worktree, so record
 `created_by_run` as false. Keep `--sandbox`: `--yolo` skips tool permission
 prompts, not sandbox restrictions. Omit `--autopilot` unless the user asks.
@@ -509,7 +530,8 @@ The factory runs no GitHub watcher.
 
 Before every launch, put an `AGENTS.md` in a private, task-specific
 instructions directory under the state directory. It points to the exact brief
-and carries the Rex rule above in its own text. Add the directory to
+and carries both Rex rules above in its own text: never rename the session, and
+never create, close, or type into Rex windows, tabs, splits, or panes. Add the directory to
 `COPILOT_CUSTOM_INSTRUCTIONS_DIRS` for that worker only, keeping existing
 entries. Check `copilot instruction list` in that cwd and environment. If the
 launch loses these instructions, record a blocker. Never start an unconstrained
@@ -626,6 +648,18 @@ If a write has an unknown outcome, reconcile it before any further attempt.
 - **Blocked:** Keep the panes. A PR closed without a merge is blocked, not
   delivered. A watcher stopping on closure does not authorize cleanup.
 - Stop only a waiter you own before you close an identity-verified idle pane.
+- **Stray windows:** Each time you release a task's panes, list the session's
+  windows with `rex window ls -s "$REX_SESSION" --json` and `rex block ls -s
+  "$REX_SESSION" --json`. A window is a stray only if all of these hold: no
+  factory file entry (any task, rule, or the factory) records its window or
+  pane; it is not your own window (`$REX_BLOCK`) or one you started, such as the
+  dashboard server; its ID is newer than the task's worker launch (Rex IDs are
+  time-ordered); and `rex block inspect`/`capture` shows a command run from the
+  worker's worktree or from the brief. Close each such window with `rex window
+  close` and say what you closed. If any check fails or is unclear, leave the
+  window and report its ID. Never close a window by label alone. Another
+  worker's window can also match; leave it if the task owner is unclear.
+  Report each stray as a worker rule violation.
 
 Remove a worktree only as a separate action: one created by this run, with
 complete work and nothing uncommitted or unpushed. Use `wt NAME --delete`. If
