@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231f883d'/%3E%3Cpath d='M8 8h8v8h8m-8 0v8' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='8' cy='8' r='3' fill='white'/%3E%3Ccircle cx='16' cy='16' r='3' fill='white'/%3E%3Ccircle cx='24' cy='16' r='3' fill='white'/%3E%3Ccircle cx='16' cy='24' r='3' fill='white'/%3E%3C/svg%3E">
+    <link id="icon" rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231f883d'/%3E%3Cpath d='M8 8h8v8h8m-8 0v8' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='8' cy='8' r='3' fill='white'/%3E%3Ccircle cx='16' cy='16' r='3' fill='white'/%3E%3Ccircle cx='24' cy='16' r='3' fill='white'/%3E%3Ccircle cx='16' cy='24' r='3' fill='white'/%3E%3C/svg%3E">
     <title>Factory</title>
     <style>
       /* GitHub Primer tokens, inlined so the loopback page needs no network. */
@@ -60,9 +60,27 @@
         }
       }
       * { box-sizing: border-box; }
-      body { max-width: 1280px; margin: 0 auto; padding: 24px 32px; }
-      header { margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
-      h1 { margin: 0 0 8px; font-size: 24px; font-weight: 600; }
+      body { margin: 0; }
+      .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 24px; padding: 12px 24px;
+        border-bottom: 1px solid var(--border); background: var(--bg-muted); }
+      .brand { display: flex; align-items: center; gap: 10px; }
+      .brand img { display: block; width: 28px; height: 28px; }
+      h1 { margin: 0; font-size: 20px; font-weight: 600; }
+      .refresh { display: flex; align-items: center; gap: 12px; margin-left: auto; }
+      .layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); align-items: start; }
+      #factories { display: flex; flex-direction: column; gap: 2px; padding: 16px 12px;
+        border-right: 1px solid var(--border); }
+      #factories p { margin: 4px 12px; }
+      .factory-item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 12px; text-align: left;
+        background: transparent; border-color: transparent; font-weight: 400; }
+      .factory-item:hover:not(:disabled) { background: var(--btn-hover); }
+      .factory-item[aria-current="true"] { background: var(--btn-bg); border-color: var(--border); font-weight: 600; }
+      .factory-item .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .factory-item .count { color: var(--fg-muted); font-size: 12px; }
+      .update-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--accent);
+        animation: blink 1.2s ease-in-out infinite; }
+      @keyframes blink { 50% { opacity: .2; } }
+      main { padding: 24px 32px; max-width: 1280px; }
       h2 { margin: 0; font-size: 20px; font-weight: 400; }
       h3 { margin: 0; font-size: 16px; font-weight: 600; }
       p { margin: 8px 0; }
@@ -124,7 +142,7 @@
       @keyframes pop { from { opacity: 0; transform: scale(.7); } to { opacity: 1; transform: scale(1); } }
       .token { stroke: var(--bg); stroke-width: 2; }
       @media (prefers-reduced-motion: reduce) {
-        .edge, .active .ring, .node.bump, .pop { animation: none; }
+        .edge, .active .ring, .node.bump, .pop, .update-dot { animation: none; }
         .ring { display: none; }
       }
 
@@ -150,11 +168,9 @@
       .move-form .controls { justify-content: flex-end; }
       #detail-status, #detail-empty { margin: 16px 24px; }
       #detail-status:empty { display: none; }
-      .global-filter { max-width: 720px; margin: 16px 0 8px; }
-      .global-filter .controls { align-items: center; }
-      .global-filter input { flex: 1; min-width: 240px; }
-      .global-filter p { margin: 4px 0 0; }
-      #global-filter-count { margin: 8px 0; }
+      .global-filter { display: flex; flex: 1; align-items: center; gap: 8px; max-width: 560px; min-width: 200px; }
+      .global-filter input { flex: 1; min-width: 0; }
+      #global-filter-count { margin: 0; white-space: nowrap; }
       #detail-filter-count { margin: 8px 24px; }
       .counter { display: inline-block; min-width: 20px; margin-left: 8px; padding: 0 6px; border-radius: 2em;
         background: color-mix(in srgb, var(--neutral) 20%, transparent); font-size: 12px; font-weight: 500;
@@ -196,38 +212,43 @@
         .json-string { color: #a5d6ff; }
         .json-literal { color: #79c0ff; }
       }
-      @media (max-width: 600px) { body { padding: 16px; } .detail-head, .task-row { padding: 16px; } }
+      @media (max-width: 700px) {
+        .layout { grid-template-columns: 1fr; }
+        #factories { flex-direction: row; flex-wrap: wrap; border-right: 0; border-bottom: 1px solid var(--border); }
+        .factory-item { width: auto; }
+        .refresh { margin-left: 0; }
+      }
+      @media (max-width: 600px) { main { padding: 16px; } .detail-head, .task-row { padding: 16px; } }
     </style>
   </head>
   <body>
-    <header>
-      <h1 id="goal">Factory</h1>
-      <label for="factory">Factory</label>
-      <div class="controls">
-        <select id="factory"><option value="">Choose a factory...</option></select>
-        <button id="refresh" type="button">Refresh now</button>
+    <header class="bar">
+      <div class="brand">
+        <img id="logo" alt="" width="28" height="28">
+        <h1>Factory</h1>
       </div>
       <div class="global-filter">
-        <label for="global-filter">Filter all tasks</label>
-        <div class="controls">
-          <input id="global-filter" type="search" autocomplete="off"
-            placeholder="state:review workers.review.status:running"
-            aria-describedby="global-filter-help global-filter-count">
-          <button id="clear-filter" type="button" hidden>Clear</button>
-        </div>
-        <p id="global-filter-help" class="muted">Search all fields. Separate terms with spaces to match all of them; use field:value for a field, or field.path:value for nested fields.</p>
+        <input id="global-filter" type="search" autocomplete="off" placeholder="Filter tasks"
+          aria-label="Filter tasks" aria-describedby="global-filter-count">
+        <button id="clear-filter" type="button" hidden>Clear</button>
         <p id="global-filter-count" class="muted" role="status" hidden></p>
       </div>
-      <p id="run-state" class="muted">Choose a factory to display its flow.</p>
-      <p id="freshness" class="muted"></p>
+      <div class="refresh">
+        <span id="freshness" class="muted"></span>
+        <button id="refresh" type="button">Refresh now</button>
+      </div>
+    </header>
+    <div class="layout">
+    <nav id="factories" aria-label="Factories"></nav>
+    <main>
+      <h2 id="goal"></h2>
+      <p id="run-state" class="muted"></p>
       <p id="discovery-error" role="alert" hidden></p>
       <details id="skipped" hidden>
         <summary>Some factories could not be listed</summary>
         <ul id="skipped-files"></ul>
       </details>
       <p id="error" role="alert" hidden></p>
-    </header>
-    <main>
       <svg id="flow" viewBox="0 0 1160 560" role="group" aria-label="Factory flow: tasks per state"></svg>
       <dialog id="detail" aria-labelledby="detail-title" tabindex="-1">
         <div class="detail-head">
@@ -263,6 +284,7 @@
         <p id="ignored-empty" class="muted" hidden>Nothing skipped.</p>
       </dialog>
     </main>
+    </div>
     <noscript>Enable JavaScript to read the factory.</noscript>
     <script type="module">
       import { states, outcomes, artifactName, githubURL, validate, countByState, hopsSince, entered, cyclesOf, operatorStates, operatorOutcomes, nextRun, nextDue } from "./factory-data.mjs";
@@ -324,6 +346,8 @@
       let refreshing = false;
       let pendingRefresh = false;
       let listedChoices = "";
+      let listed = [];
+      const seen = {};
       let mutation = 0;
       const shown = Object.fromEntries(states.map((state) => [state, 0]));
       const targets = Object.fromEntries(states.map((state) => [state, 0]));
@@ -1088,27 +1112,44 @@
         return data;
       }
 
+      function renderFactories() {
+        const items = listed.map((item) => ({
+          file: item.file, label: item.project, count: item.task_count,
+          updated: item.file !== selection && seen[item.file] !== item.updated_at,
+        }));
+        if (selection && !listed.some((item) => item.file === selection)) {
+          items.unshift({ file: selection, label: `Unavailable: ${selection}`, count: null, updated: false });
+        }
+        const signature = JSON.stringify([selection, items]);
+        if (signature === listedChoices) return;
+        listedChoices = signature;
+        document.getElementById("factories").replaceChildren(...(items.length
+          ? items.map((item) => {
+            const button = element("button", null, "factory-item");
+            button.type = "button";
+            button.setAttribute("aria-current", String(item.file === selection));
+            button.append(element("span", item.label, "name"));
+            if (item.count !== null) button.append(element("span", item.count, "count"));
+            if (item.updated) {
+              const dot = element("span", null, "update-dot");
+              dot.setAttribute("role", "img");
+              dot.setAttribute("aria-label", "Updated");
+              button.append(dot);
+            }
+            button.addEventListener("click", () => select(item.file));
+            return button;
+          })
+          : [element("p", "No valid factories found", "muted")]));
+      }
+
       async function discover() {
         const data = await requestJSON("/api/factories");
-        const signature = JSON.stringify([selection, data.factories.map((item) => [item.file, item.task_count])]);
-        if (signature !== listedChoices) {
-          const selector = document.getElementById("factory");
-          const placeholder = element("option", data.factories.length ? "Choose a factory..." : "No valid factories found");
-          placeholder.value = "";
-          const choices = data.factories.map((item) => {
-            const option = element("option", `${item.project} / ${item.task_count} ${item.task_count === 1 ? "task" : "tasks"}`);
-            option.value = item.file;
-            return option;
-          });
-          if (selection && !data.factories.some((item) => item.file === selection)) {
-            const missing = element("option", `Unavailable: ${selection}`);
-            missing.value = selection;
-            choices.unshift(missing);
-          }
-          selector.replaceChildren(placeholder, ...choices);
-          selector.value = selection;
-          listedChoices = signature;
+        listed = [...data.factories].sort((a, b) => a.file.localeCompare(b.file));
+        // The first sighting is the baseline: only later changes count as updates.
+        for (const item of listed) {
+          if (item.file === selection || !(item.file in seen)) seen[item.file] = item.updated_at;
         }
+        renderFactories();
         document.getElementById("skipped").hidden = !data.errors.length;
         document.getElementById("skipped-files").replaceChildren(
           ...data.errors.map((error) => element("li", `${error.file}: ${error.error}`)),
@@ -1118,10 +1159,14 @@
       }
 
       function freshness() {
-        if (!snapshot) return;
-        const seconds = Math.max(0, Math.floor((Date.now() - Date.parse(snapshot.updated_at)) / 1000));
-        document.getElementById("freshness").textContent =
-          `Snapshot: ${snapshot.updated_at} (${seconds}s ago). Last successful read: ${lastRead}. Shows saved factory state, not live worker telemetry.`;
+        const label = document.getElementById("freshness");
+        if (!snapshot) {
+          label.textContent = "";
+          return;
+        }
+        const seconds = Math.max(0, Math.floor((Date.now() - lastRead) / 1000));
+        label.textContent = seconds < 2 ? "refreshed just now"
+          : `refreshed ${seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m`} ago`;
       }
 
       function showError(cause) {
@@ -1138,7 +1183,7 @@
         const hops = before ? hopsSince(data.tasks, cutoff) : [];
         snapshot = data;
         lastSource = file;
-        lastRead = new Date().toISOString();
+        lastRead = Date.now();
         document.getElementById("error").hidden = true;
         cutoff = data.tasks.flatMap((task) => task.history.map((item) => item.at))
           .reduce((latest, at) => (Date.parse(at) > Date.parse(latest) ? at : latest), "1970-01-01T00:00:00Z");
@@ -1151,7 +1196,7 @@
             group.classList.add("pop");
           }
         }
-        document.getElementById("goal").textContent = `Factory: ${data.project}`;
+        document.getElementById("goal").textContent = data.project;
         document.getElementById("run-state").textContent =
           `${data.id} / ${data.status} / ${data.tasks.length} ${data.tasks.length === 1 ? "task" : "tasks"}`;
         document.title = `${data.project} - Factory`;
@@ -1181,7 +1226,6 @@
             const url = new URL(location.href);
             url.searchParams.set("file", selection);
             history.replaceState(null, "", url);
-            listedChoices = "";
             await discover();
           }
           const current = selection;
@@ -1208,19 +1252,23 @@
         }
       }
 
-      document.getElementById("factory").addEventListener("change", () => {
-        selection = document.getElementById("factory").value;
+      function select(file) {
+        if (file === selection) return;
+        selection = file;
+        const item = listed.find((entry) => entry.file === file);
+        if (item) seen[file] = item.updated_at;
+        renderFactories();
         document.getElementById("global-filter").value = "";
         const url = new URL(location.href);
-        if (selection) url.searchParams.set("file", selection);
-        else url.searchParams.delete("file");
+        url.searchParams.set("file", selection);
         url.hash = "";
         history.replaceState(null, "", url);
         renderDetail(null);
         snapshot = lastSource = null;
         renderFilterStatus(0);
+        freshness();
         return refresh();
-      });
+      }
       document.getElementById("refresh").addEventListener("click", refresh);
       document.getElementById("global-filter").addEventListener("input", draw);
       document.getElementById("clear-filter").addEventListener("click", () => {
@@ -1233,6 +1281,8 @@
       wireDismiss(moveDialog, "close-move", closeMove);
       wireDismiss(producers, "close-producers", closeChoice);
 
+      document.getElementById("logo").src = document.getElementById("icon").href;
+      setInterval(freshness, 1000);
       buildFlow();
       refresh();
     </script>

@@ -371,7 +371,7 @@ async function dashboard(t, { reducedMotion = true, confirm = () => true, now = 
     matchMedia: () => ({ matches: reducedMotion }),
     performance: { now: () => 0 },
     requestAnimationFrame: (callback) => callback(2000),
-    setTimeout() {}, clearTimeout() {},
+    setTimeout() {}, clearTimeout() {}, setInterval() {},
     fetch: (path, options = {}) => {
       const init = {
         ...options,
@@ -454,6 +454,47 @@ test("state selection opens a modal list that can close and reopen", async (t) =
   ui.run("choose('investigation')");
   assert.equal(ui.get("detail-empty").hidden, false);
   assert.equal(ui.get("task-list").children.length, 0);
+});
+
+test("the sidebar lists every factory and blinks a dot on one that changed until it is selected", async (t) => {
+  const ui = await dashboard(t);
+  const other = "other.repo-factory.json";
+  const write = (updated_at) => writeFile(join(ui.directory, other),
+    JSON.stringify({ ...example, id: "other-factory", project: "other/repo", updated_at }));
+  const items = () => ui.get("factories").querySelectorAll("button");
+  const dots = () => ui.get("factories").querySelectorAll(".update-dot");
+  await write("2026-05-01T12:00:00Z");
+  await ui.run("refresh()");
+  assert.deepEqual(items().map((item) => item.querySelector(".name").textContent), ["other/repo", "owner/repo"]);
+  assert.equal(dots().length, 0, "The first sighting is a baseline, not an update.");
+
+  await write("2026-05-01T13:00:00Z");
+  await ui.run("refresh()");
+  assert.equal(dots().length, 1);
+  assert.equal(items()[0].querySelectorAll(".update-dot").length, 1, "The changed factory gets the dot.");
+  assert.equal(items()[1]["aria-current"], "true");
+
+  await items()[0].fire("click");
+  assert.equal(dots().length, 0, "Selecting a factory clears its dot.");
+  assert.match(ui.run("location.href"), /file=other\.repo-factory\.json/);
+  assert.equal(ui.get("goal").textContent, "other/repo");
+
+  await write("2026-05-01T14:00:00Z");
+  await ui.run("refresh()");
+  assert.equal(dots().length, 0, "The selected factory never shows a dot.");
+});
+
+test("the dot never animates for reduced motion and the header shows a short refresh label", async (t) => {
+  assert.match(html, /prefers-reduced-motion: reduce\) \{[^}]*\.update-dot \{ animation: none; \}/);
+  assert.doesNotMatch(html, /Search all fields|<select id="factory"/);
+  const ui = await dashboard(t, { now: Date.parse("2026-05-01T12:05:00Z") });
+  assert.equal(ui.get("freshness").textContent, "refreshed just now");
+  ui.setNow(Date.parse("2026-05-01T12:05:07Z"));
+  ui.run("freshness()");
+  assert.equal(ui.get("freshness").textContent, "refreshed 7s ago");
+  ui.setNow(Date.parse("2026-05-01T12:08:00Z"));
+  ui.run("freshness()");
+  assert.equal(ui.get("freshness").textContent, "refreshed 3m ago");
 });
 
 test("global task filters search any field, combine terms, and survive refresh and move dialogs", async (t) => {
