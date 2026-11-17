@@ -142,6 +142,17 @@ the factory must re-arm `wait` immediately after handling events. A failed
 emit never fails a state write; `reconcile.mjs` catches whatever an event
 missed.
 
+Every turn of a non-finished factory ends with exactly one armed `broker.mjs
+wait` (async bash, latest cursor), after a wake, a merge, a test run, a tool
+completion, and a user message alike. Arm it first in a turn with a long step,
+not last. `wait` records its PID in `<owner.repo>-factory-waiter.pid` beside
+the factory file and removes it on exit. A second `wait` for the same factory
+is refused with exit 1 unless the first PID is dead. `broker.mjs armed FILE`
+exits 0 when a waiter is alive and 1 otherwise, and `reconcile.mjs` reports
+`no-waiter` while the run is `active` or a task is open. Keep the rule in
+`agents/general.agent.md` and the lifecycle skill's "Receive worker events"
+in sync.
+
 The skill still bundles `wait.mjs` and its tests, deprecated in favor of the
 broker; keep it working until it is removed. It must not depend on files in the
 coordination plugin. The factory copy adds `--due`. Without it, keep the two
@@ -153,11 +164,11 @@ server on purpose: the two plugins load independently.
 newer than their task, open issue-less task branches ahead of the default
 branch, clean worktrees of merged tasks whose HEAD is in the default branch
 (`merged-worktree`: remove with `wt NAME --delete`, only if the run created it;
-never `wt --cleanup`), and open Rex windows of resolved tasks. The factory runs
-it at startup, on every wake and user message, and before every report, so a
-missed waiter wake cannot leave finished work unmerged. The waiter is re-armed
-after each wake or user message, and `broker.mjs cursor` is taken before the
-startup sweep. Closing a task's panes belongs to the step that records
+never `wt --cleanup`), open Rex windows of resolved tasks, and a missing waiter (`no-waiter`). The
+factory runs it at startup, on every wake and user message, and before every
+report, so a missed waiter wake cannot leave finished work unmerged. The waiter
+is re-armed after each wake or user message, and `broker.mjs cursor` is taken
+and the waiter armed before the startup sweep. Closing a task's panes belongs to the step that records
 `resolved`.
 
 On every wake, drain all actionable tasks and reconcile results/worktrees,

@@ -41,8 +41,11 @@ async function fixture(t, rex) {
   const file = join(directory, "owner.repo-factory.json");
   return {
     directory, repo, file,
-    async run(tasks) {
-      await writeFile(file, JSON.stringify({ rex_session: "work", tasks }));
+    async run(tasks, { status = "active", waiter = process.pid } = {}) {
+      await writeFile(file, JSON.stringify({ rex_session: "work", status, tasks }));
+      const pidFile = join(directory, "owner.repo-factory-waiter.pid");
+      if (waiter === null) await rm(pidFile, { force: true });
+      else await writeFile(pidFile, `${waiter}\n`);
       const result = spawnSync(process.execPath, [script, file], {
         encoding: "utf8",
         env: { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH}` },
@@ -133,4 +136,19 @@ test("reports a Rex failure without failing the sweep", async (t) => {
   assert.deepEqual(findings, []);
   assert.equal(errors.length, 1);
   assert.match(errors[0], /^rex: /);
+});
+
+test("reports no-waiter while the run is active or a task is open, and no waiter is alive", async (t) => {
+  const f = await fixture(t, fakeRex);
+  const dead = spawnSync(process.execPath, ["-e", ""]).pid;
+  const open = [task("busy", "implementation")];
+  const done = [task("done", "resolved")];
+  const kinds = async (...args) => (await f.run(...args)).findings.map(({ kind }) => kind);
+
+  assert.deepEqual(await kinds(open, { waiter: null }), ["no-waiter"]);
+  assert.deepEqual(await kinds(open, { waiter: dead }), ["no-waiter"]);
+  assert.deepEqual(await kinds(done, { status: "active", waiter: null }), ["no-waiter"]);
+  assert.deepEqual(await kinds(open, { status: "paused", waiter: null }), ["no-waiter"]);
+  assert.deepEqual(await kinds(open), []);
+  assert.deepEqual(await kinds(done, { status: "finished", waiter: null }), []);
 });

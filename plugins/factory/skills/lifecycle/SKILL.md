@@ -244,6 +244,9 @@ It prints `{findings, errors}` as JSON. Run it at startup, on every wake, on
 every user message, and before every report. A missed waiter wake must never
 leave work behind. Treat each finding as unfinished work:
 
+- `no-waiter`: the run is `active`, or a task is open, and no `broker.mjs wait`
+  is alive for this factory. Arm one now (see "Receive worker events"), then
+  continue the sweep. Armed first at startup, this never fires.
 - `unprocessed-result`: a `complete` result is newer than its task. Mirror and
   verify it now, then advance the task.
 - `branch-ahead`: an open issue-less task's branch (it lands by local merge)
@@ -392,7 +395,8 @@ use `blocked` only when open tasks need an outside action and no worker or
 enabled work-finding or scheduled rule can act, and `paused` only when
 explicitly paused. A blocked or paused run still watches the factory file for
 operator changes. The dashboard status must match the saved run status.
-Only a truly `finished` run may end without an armed waiter.
+Only a truly `finished` run may end without an armed waiter. Every other turn
+ends with exactly one (see "Receive worker events").
 
 ### Find more work
 
@@ -817,19 +821,28 @@ the cursor. Each event has `id`, `at`, `type`, `task`, `source`, and `data`:
 
 Rules:
 
-1. Start with `broker.mjs cursor FACTORY_FILE`, then run the startup
-   reconcile. Keep the cursor from each `wait` and pass it as the next
-   `--since`. Nothing appended between two waits is lost; a wait with no
-   `--since` starts at the end of the log. After a restart or a lost cursor,
-   take a new `cursor` first, then reconcile, so nothing falls between them.
+1. Start with `broker.mjs cursor FACTORY_FILE`, then arm `wait --since CURSOR`,
+   then run the startup reconcile. Keep the cursor from each `wait` and pass it
+   as the next `--since`. Nothing appended between two waits is lost; a wait
+   with no `--since` starts at the end of the log. After a restart or a lost
+   cursor, take a new `cursor` first, arm, then reconcile, so nothing falls
+   between them.
 2. `--exclude-source coordinator` skips events from your own `factory.mjs`
    writes (the default source), so they never wake you. Skipped events still
    advance the cursor. Dashboard events have source `dashboard` and always
    wake you, even when every worker is blocked.
-3. Re-arm `wait` immediately after you handle events, in the same turn, before
-   you do anything slow. A turn that ends without an armed `wait` is idle time
-   nothing can shorten. Keep exactly one waiter and one cursor per factory.
-   When a waiter exits, read its output at once.
+3. Every turn of a non-finished factory ends with exactly one armed `wait`
+   (async bash, latest cursor). Never end a turn without one: not after a
+   notification, a merge, a test run, a tool completion, or a user message. Arm
+   it FIRST in a turn that takes a long step (tests, merges), not last. Handle
+   a user message the same way: re-arm before you reply. When a waiter exits,
+   read its output at once and re-arm in the same turn. Before you end a turn,
+   run `broker.mjs armed FACTORY_FILE`; exit 1 means arm a waiter now. A second
+   `wait` for the same factory is refused (exit 1) unless the first is stale,
+   so there is never a duplicate. `wait` records its PID in
+   `<owner.repo>-factory-waiter.pid` beside the factory file and removes it on
+   exit; `armed` and the `no-waiter` finding of `reconcile.mjs` read it. A
+   process that died leaves a stale file, which counts as no waiter.
 4. Use the tool's completion notification to resume. Reconcile dashboard
    direction first, then handle each event in order. For a `worker.result`,
    read the result file named in `data.result`, verify its feedback ID and

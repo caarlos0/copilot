@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { parseArgs } from "node:util";
+import { resolveFactory, waiterPid } from "./broker.mjs";
 
 const usage = "Usage: node reconcile.mjs FACTORY_FILE [--default-branch NAME]";
 
@@ -48,6 +49,11 @@ async function reconcile(file, defaultBranch = "main") {
   const findings = [];
   const errors = [];
   const open = factory.tasks.filter((task) => task.state !== "resolved");
+
+  // Only a finished run with no open task may sit without a waiter.
+  if ((factory.status === "active" || open.length > 0) && await waiterPid(await resolveFactory(file)) === null) {
+    findings.push({ kind: "no-waiter", status: factory.status ?? null, open: open.length });
+  }
 
   for (const task of open) {
     for (const [role, worker] of Object.entries(task.workers ?? {})) {

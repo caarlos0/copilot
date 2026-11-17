@@ -190,3 +190,55 @@ test("--due returns a synthetic rule.due event for a due rule", async (t) => {
   assert.deepEqual(out.events[0].data, { rules: ["backlog"] });
   assert.equal(out.cursor, "0");
 });
+
+test("armed reports a live waiter and the waiter file goes away when it exits", async (t) => {
+  const f = await fixture(t);
+  const pidFile = join(f.directory, "owner.repo-factory-waiter.pid");
+  const idle = f.run("armed", f.factory);
+  assert.equal(idle.status, 1);
+  assert.deepEqual(JSON.parse(idle.stdout), { armed: false });
+
+  const done = await f.wait();
+  const armed = f.run("armed", f.factory);
+  assert.equal(armed.status, 0);
+  const { pid } = JSON.parse(armed.stdout);
+  assert.equal(Number((await readFile(pidFile, "utf8")).trim()), pid);
+  assert.equal((await stat(pidFile)).mode & 0o777, 0o600);
+
+  f.emit("worker.result");
+  await done();
+  assert.equal(f.run("armed", f.factory).status, 1);
+  await assert.rejects(stat(pidFile), { code: "ENOENT" });
+});
+
+test("a second wait for the same factory is refused, then allowed once the first exits", async (t) => {
+  const f = await fixture(t);
+  const done = await f.wait();
+  const second = f.run("wait", f.factory, "--timeout", "1");
+  assert.equal(second.status, 1);
+  assert.match(second.stderr, /already armed/);
+  assert.equal(f.run("armed", f.factory).status, 0);
+
+  f.emit("worker.result");
+  await done();
+  const again = await f.wait("--timeout", "0.1");
+  assert.deepEqual((await again()).timeout, true);
+});
+
+test("a stale waiter file counts as no waiter and is replaced by the next wait", async (t) => {
+  const f = await fixture(t);
+  const pidFile = join(f.directory, "owner.repo-factory-waiter.pid");
+  const dead = spawnSync(process.execPath, ["-e", ""]).pid;
+  await writeFile(pidFile, `${dead}\n`);
+  assert.equal(f.run("armed", f.factory).status, 1);
+
+  const done = await f.wait();
+  const armed = f.run("armed", f.factory);
+  assert.equal(armed.status, 0);
+  assert.notEqual(JSON.parse(armed.stdout).pid, dead);
+  f.emit("worker.result");
+  await done();
+
+  await writeFile(pidFile, "garbage\n");
+  assert.equal(f.run("armed", f.factory).status, 1);
+});
