@@ -178,7 +178,9 @@ server on purpose: the two plugins load independently.
 newer than their task, open issue-less task branches ahead of the default
 branch, clean worktrees of merged tasks whose HEAD is in the default branch
 (`merged-worktree`: remove with `wt NAME --delete`, only if the run created it;
-never `wt --cleanup`), open Rex windows of resolved tasks, and a missing waiter (`no-waiter`). The
+never `wt --cleanup`), open Rex windows of resolved tasks, finished rule workers
+whose window is open or whose status is still `running` (`rule-worker-done`),
+and a missing waiter (`no-waiter`). The
 factory runs it at startup, on every wake and user message, and before every
 report, so a missed waiter wake cannot leave finished work unmerged. The waiter
 is re-armed after each wake or user message, and `broker.mjs cursor` is taken

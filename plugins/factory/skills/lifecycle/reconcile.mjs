@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { parseArgs } from "node:util";
 import { resolveFactory, waiterPid } from "./broker.mjs";
@@ -106,17 +106,42 @@ async function reconcile(file, defaultBranch = "main") {
     }
   }
 
-  if (factory.rex_session && resolved.some((task) => Object.values(task.workers ?? {}).some((w) => w?.window))) {
-    try {
-      const windows = liveWindows(factory.rex_session);
-      for (const task of resolved) {
-        for (const [role, worker] of Object.entries(task.workers ?? {})) {
-          const window = windows.find((id) => worker?.window && sameWindow(id, worker.window));
-          if (window) findings.push({ kind: "open-window", task: task.id, role, window });
-        }
+  // One Rex read per sweep, and only when a check needs it.
+  let windows;
+  const openWindows = () => {
+    if (windows === undefined) {
+      try {
+        windows = factory.rex_session ? liveWindows(factory.rex_session) : [];
+      } catch (error) {
+        errors.push(`rex: ${error.message.split("\n")[0]}`);
+        windows = [];
       }
-    } catch (error) {
-      errors.push(`rex: ${error.message.split("\n")[0]}`);
+    }
+    return windows;
+  };
+
+  if (resolved.some((task) => Object.values(task.workers ?? {}).some((w) => w?.window))) {
+    for (const task of resolved) {
+      for (const [role, worker] of Object.entries(task.workers ?? {})) {
+        const window = openWindows().find((id) => worker?.window && sameWindow(id, worker.window));
+        if (window) findings.push({ kind: "open-window", task: task.id, role, window });
+      }
+    }
+  }
+
+  // A rule worker is finished when its result is newer than the rule's last run stamp.
+  for (const rule of factory.rules ?? []) {
+    const worker = rule.worker;
+    if (!worker?.result) continue;
+    const file = join(directory, worker.result);
+    const result = await readJSON(file);
+    if (!result) continue;
+    const at = Date.parse(result.updated_at) || (await stat(file)).mtimeMs;
+    const finished = rule.last_run_at ? at > Date.parse(rule.last_run_at) : result.outcome === "complete";
+    if (!finished) continue;
+    const window = worker.window ? openWindows().find((id) => sameWindow(id, worker.window)) : undefined;
+    if (window || worker.status === "running") {
+      findings.push({ kind: "rule-worker-done", rule: rule.id, window: window ?? null, result: worker.result });
     }
   }
 
