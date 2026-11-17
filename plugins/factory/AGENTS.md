@@ -31,6 +31,15 @@ workers. Implementation worktrees come from the local default branch: launch
 plain `wt NAME` in the main checkout, never `wt NAME --main`, which uses
 `origin/<default>` and loses unpushed local commits.
 
+Every brief sets a write boundary. The worker's assigned worktree is the only
+writable root; the result path and `$TMPDIR` are the only other writable
+paths. Workers never create a worktree, switch or check out a branch in
+another checkout, or edit or commit on the primary checkout or default branch.
+A brief never gives the primary checkout as the repo path of a writing worker.
+A worker whose cwd or branch differs from its brief writes a `blocked` result
+and does not edit. Every brief tells the worker to read
+`plugins/factory/AGENTS.md` before its first edit.
+
 State is one `<owner.repo>-factory.json` (`factory/v1`) per project under
 `~/.local/state/copilot-coordinator/`, with one agent owner guarded by
 `<project>-factory.lock`. Agent and dashboard writes share `factory.mjs` and
