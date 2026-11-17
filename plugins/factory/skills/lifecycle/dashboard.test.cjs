@@ -457,13 +457,15 @@ test("state selection opens a docked list that can close and reopen", async (t) 
   assert.equal(ui.get("task-list").children.length, 0);
 });
 
-test("the task list is docked between the factory list and the flow, and the flow shrinks or scrolls", () => {
+test("the task list is docked on the right of the flow, and the flow shrinks or scrolls", () => {
   assert.doesNotMatch(html, /<dialog id="detail"/);
   const layout = html.match(/<div class="layout">([\s\S]*?)<noscript>/)[1];
-  assert.ok(layout.indexOf('id="factories"') < layout.indexOf('<aside id="detail"')
-    && layout.indexOf('<aside id="detail"') < layout.indexOf("<main>"));
-  assert.match(html, /\.layout \{[^}]*grid-template-columns: 240px auto minmax\(0, 1fr\)/);
-  assert.match(html, /#detail \{[^}]*position: sticky;[^}]*width: clamp\(420px, 34vw, 520px\)/);
+  assert.ok(layout.indexOf('id="factories"') < layout.indexOf("<main>")
+    && layout.indexOf("</main>") < layout.indexOf('<aside id="detail"'));
+  assert.equal(layout.split('id="detail"').length, 2, "The panel appears once.");
+  assert.match(html, /\.layout \{[^}]*grid-template-columns: 240px minmax\(0, 1fr\) auto/);
+  assert.match(html, /main \{[^}]*grid-column: 2/);
+  assert.match(html, /#detail \{[^}]*grid-column: 3;[^}]*position: sticky;[^}]*width: clamp\(420px, 34vw, 520px\)[^}]*border-left: 1px solid var\(--border\)/);
   assert.match(html, /main \{[^}]*overflow-x: auto/);
   assert.match(html, /#flow \{[^}]*min-width: 720px/);
 });
