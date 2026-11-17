@@ -144,24 +144,33 @@ function build(project, key, loaded, reviewers) {
   for (const { role, source } of loaded) {
     for (const old of source.data.tasks) {
       let task = mapTask(role, source.file, old, project);
-      const twin = tasks.findIndex((other) =>
-        (task.pr && other.pr === task.pr) || (task.issue && other.issue === task.issue));
-      if (twin >= 0) {
-        const other = tasks[twin];
-        const newer = Date.parse(task.updated_at) > Date.parse(other.updated_at);
-        const [keep, drop] = newer ? [task, other] : [other, task];
-        keep.links = [...new Set([...keep.links, ...drop.links])];
-        keep.workers = { ...drop.workers, ...keep.workers };
-        keep.worktree ??= drop.worktree;
-        keep.pr ??= drop.pr;
-        keep.issue ??= drop.issue;
-        keep.details.legacy_merged = [
-          ...(keep.details.legacy_merged ?? []),
-          drop.details.legacy,
-          ...(drop.details.legacy_merged ?? []),
-        ];
-        tasks[twin] = keep;
-        report.merged.push({ kept: keep.id, merged: drop.id });
+      const twins = tasks.flatMap((other, index) =>
+        (task.pr && other.pr === task.pr) || (task.issue && other.issue === task.issue)
+          ? [{ index, task: other }]
+          : []);
+      if (twins.length) {
+        const group = [...twins.map(({ task: twin }) => twin), task];
+        let keep = group[0];
+        for (const candidate of group.slice(1)) {
+          if (Date.parse(candidate.updated_at) > Date.parse(keep.updated_at)) keep = candidate;
+        }
+        const drops = group.filter((candidate) => candidate !== keep)
+          .sort((a, b) => Date.parse(a.updated_at) - Date.parse(b.updated_at));
+        for (const drop of drops) {
+          keep.links = [...new Set([...keep.links, ...drop.links])];
+          keep.workers = { ...drop.workers, ...keep.workers };
+          keep.worktree ??= drop.worktree;
+          keep.pr ??= drop.pr;
+          keep.issue ??= drop.issue;
+          keep.details.legacy_merged = [
+            ...(keep.details.legacy_merged ?? []),
+            drop.details.legacy,
+            ...(drop.details.legacy_merged ?? []),
+          ];
+          report.merged.push({ kept: keep.id, merged: drop.id });
+        }
+        tasks[twins[0].index] = keep;
+        for (const { index } of twins.slice(1).reverse()) tasks.splice(index, 1);
         continue;
       }
       if (tasks.some((other) => other.id === task.id)) {
