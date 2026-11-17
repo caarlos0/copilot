@@ -408,9 +408,7 @@
           const live = state === "blocked" ? tasks.length > 0 : running > 0;
           group.classList.toggle("active", live);
           const idle = { initial: "queued", blocked: "needs a decision", resolved: "done" }[state] ?? "waiting";
-          group.querySelector(".sub").textContent = running
-            ? `${running} ${running === 1 ? "worker" : "workers"} running`
-            : (tasks.length ? idle : "");
+          group.querySelector(".sub").textContent = tasks.length ? idle : "";
           group.setAttribute("aria-label",
             `${places[state].title}: ${tasks.length} ${tasks.length === 1 ? "task" : "tasks"}`);
         }

@@ -574,6 +574,10 @@ test("the move popup closes on its close button and backdrop without saving", as
 test("a saved move fades out before its row is removed, even during refresh", async (t) => {
   const ui = await dashboard(t, { reducedMotion: false });
   ui.run("choose('blocked')");
+  const implementation = ui.run("nodeOf('implementation')");
+  assert.equal(implementation.querySelector(".sub").textContent, "waiting");
+  assert.ok(implementation.className.split(" ").includes("active"),
+    "The running-worker activity indicator remains separate from the task label.");
   const list = ui.get("task-list");
   const row = list.children[0];
   const animation = {};
