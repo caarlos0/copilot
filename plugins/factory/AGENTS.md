@@ -69,7 +69,7 @@ acknowledgement. Reconcile all pending comments before worker results, include
 the current feedback ID in worker briefs/results, and acknowledge only after
 workers are safely rebriefed or parked. CLI writes after dashboard feedback need
 `--expected-revision` plus `--ack-feedback` or `--feedback-id`.
-The factory waiter watches its state file even when all workers are blocked.
+The factory waits on dashboard events even when all workers are blocked.
 Dashboard changes do not stop workers, resume a paused run, or grant authority.
 
 Implementation workers use `pr-shepherd` and are the sole landing writers.
@@ -96,8 +96,8 @@ or autopilot merely because factory is running.
 The producer ("Find work") is not a task state. It feeds `initial` from three
 sources: user links, `search` rules, and `backlog` rules (a one-shot read-only
 worker using `keep-the-pool-full`). A rule with `every` runs on a schedule only
-while the factory is active and running; `wait.mjs --due FACTORY_FILE` wakes the
-factory when one is due. The factory stamps `--rule ID --ran` before it
+while the factory is active and running; `broker.mjs wait --due` returns a
+`rule.due` event when one is due. The factory stamps `--rule ID --ran` before it
 dispatches. The `ignored` list holds skipped archive matches. The dashboard
 shows rules and skipped work read-only.
 
@@ -110,10 +110,26 @@ from `--session` and worker records. `session-metrics.mjs` reads those sessions'
 `events.jsonl` and prints counts only, never content. It cannot measure tool run
 times, and "idle" means time between turns.
 
-The skill bundles its own copy of the coordinator's `wait.mjs` and tests for
-result notifications; it must not depend on files in the coordination plugin.
-The factory copy adds `--due`. Without it, keep the two copies behaviorally
-aligned.
+The factory waits with `broker.mjs wait`, not `wait.mjs`. The broker keeps one
+append-only JSONL log, `<owner.repo>-factory-events.jsonl` (mode 0600), beside
+the factory file. Events are typed notifications (`task.moved`, `task.updated`,
+`feedback.pending`, `worker.result`, `worker.blocked`; `rule.due` is computed by
+`wait --due` and never stored), each with a `source`. A cursor is a byte offset,
+so no event is lost between two `wait` calls. `factory.mjs` emits after every
+successful write (source `coordinator`, or `dashboard` for operator moves), and
+the factory waits with `--exclude-source coordinator` so its own writes never
+wake it. Workers write their result file atomically, then run
+`broker.mjs emit worker.result` (or `worker.blocked`). The factory JSON stays the
+only task tracker and the result files stay evidence; events are only
+notifications and the worker-to-factory channel. This exists to cut idle time:
+the factory must re-arm `wait` immediately after handling events. A failed
+emit never fails a state write; `reconcile.mjs` catches whatever an event
+missed.
+
+The skill still bundles `wait.mjs` and its tests, deprecated in favor of the
+broker; keep it working until it is removed. It must not depend on files in the
+coordination plugin. The factory copy adds `--due`. Without it, keep the two
+copies behaviorally aligned.
 `serve.mjs` repeats the small state-directory confinement code of the coordinator
 server on purpose: the two plugins load independently.
 
@@ -121,8 +137,8 @@ server on purpose: the two plugins load independently.
 newer than their task, open-task branches ahead of the default branch, and open
 Rex windows of resolved tasks. The factory runs it at startup, on every wake and
 user message, and before every report, so a missed waiter wake cannot leave
-finished work unmerged. The waiter always lists every active result file and is
-re-armed after each wake or user message. Closing a task's panes belongs to the
+finished work unmerged. The waiter is re-armed after each wake or user message,
+and `broker.mjs cursor` is taken before the startup sweep. Closing a task's panes belongs to the
 step that records `resolved`.
 
 On every wake, drain all actionable tasks and reconcile results/worktrees,

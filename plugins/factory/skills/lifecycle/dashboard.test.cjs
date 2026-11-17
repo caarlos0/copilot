@@ -138,7 +138,7 @@ test("moving back persists the comment, keeps worker context, and rejects a stal
   assert.equal(updated.pr, review.pr);
   assert.equal(updated.merge, null);
   assert.deepEqual((await readdir(directory)).sort(),
-    [factoryFile, "owner.repo-issue-9-implementation-brief.md", "owner.repo-issue-9-investigation-brief.md", "unrelated-notes.md"].sort());
+    [factoryFile, "owner.repo-factory-events.jsonl", "owner.repo-issue-9-implementation-brief.md", "owner.repo-issue-9-investigation-brief.md", "unrelated-notes.md"].sort());
 });
 
 test("the dashboard can resolve a task directly from every open state", async (t) => {

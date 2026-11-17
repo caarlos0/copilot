@@ -4,6 +4,7 @@ import { basename, dirname, extname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { archiveDirectory, findArchived, readArchive, removeArchived, saveArchive } from "./archive.mjs";
+import { emit } from "./broker.mjs";
 import { checkTransition, format, operatorOutcomes, outcomes, validate } from "./factory-data.mjs";
 import { recordSessions, registryFile, sessionID } from "./sessions.mjs";
 
@@ -148,7 +149,18 @@ function taskPatch(task, values) {
   return patch;
 }
 
-async function writeFactory(file, values, operator) {
+// The state is already saved, so a failed notification only warns.
+async function announce(file, source, events) {
+  for (const event of events) {
+    try {
+      await emit(file, { ...event, source });
+    } catch (error) {
+      console.error(`${file}: ${event.type} event not emitted: ${error.message}`);
+    }
+  }
+}
+
+async function writeFactory(file, values, operator, source) {
   const original = await readOptional(file);
   const isNew = original === null;
   const now = new Date().toISOString();
@@ -221,6 +233,7 @@ async function writeFactory(file, values, operator) {
   const addingTask = values.task !== undefined && !live && !restoring;
   const inserting = addingTask || restoring;
   let archived = null;
+  const events = [];
   if (values.task !== undefined) {
     if (inserting) {
       const matches = findArchived(await readArchive(directory, current.project), restoring
@@ -298,6 +311,13 @@ async function writeFactory(file, values, operator) {
       task.feedback.acknowledged_id = values["ack-feedback"];
     }
     tasks = inserting ? [...tasks, task] : tasks.map((item) => (item.id === task.id ? task : item));
+    const from = addingTask ? null : before.state;
+    events.push(from === task.state
+      ? { type: "task.updated", task: task.id, data: { revision: task.revision } }
+      : { type: "task.moved", task: task.id, data: { from, to: task.state, revision: task.revision } });
+    if (operator) {
+      events.push({ type: "feedback.pending", task: task.id, data: { feedback_id: task.feedback.id } });
+    }
   }
   current = merge(current, rootPatch);
   current.tasks = tasks;
@@ -329,6 +349,7 @@ async function writeFactory(file, values, operator) {
   } finally {
     await rm(temporary, { force: true });
   }
+  await announce(file, source, events);
   if (archived) {
     try {
       await removeArchived(directory, current.project, values.task);
@@ -339,7 +360,7 @@ async function writeFactory(file, values, operator) {
   return current;
 }
 
-export async function update(file, values, { operator = false } = {}) {
+export async function update(file, values, { operator = false, source = operator ? "dashboard" : "coordinator" } = {}) {
   try {
     file = await realpath(file);
   } catch (error) {
@@ -355,7 +376,7 @@ export async function update(file, values, { operator = false } = {}) {
     throw new ConflictError("Factory write is locked. Reread before retrying; remove a stale .write.lock only after verifying no writer is active.");
   }
   try {
-    return await writeFactory(file, values, operator);
+    return await writeFactory(file, values, operator, source);
   } finally {
     try {
       await lock.close();
@@ -393,6 +414,7 @@ async function main() {
         ran: { type: "boolean" },
         "rule-worker": { type: "string" },
         session: { type: "string" },
+        source: { type: "string" },
         ...Object.fromEntries(taskOptions.map((option) => [option, { type: "string" }])),
       },
       allowPositionals: true,
@@ -441,6 +463,9 @@ Run options:
                         automatically from --workers and --rule-worker records that have a session
   --limits JSON         Merge worker caps, e.g. '{"investigation":2}' (default 3 each)
   --updated-at VALUE    Explicit run timestamp (ISO 8601 with timezone)
+  --source NAME         Source of the events this write emits to the broker (default coordinator;
+                        task.moved, task.updated, feedback.pending). The factory waits with
+                        --exclude-source coordinator, so its own writes do not wake it
 
 Task options:
   --task ID             Task ID; required when changing a task
@@ -506,7 +531,8 @@ with an old feedback ID. A conflict is an error, never an automatic retry.`);
     return;
   }
   try {
-    await update(file, values);
+    const { source, ...writes } = values;
+    await update(file, writes, { source });
   } catch (error) {
     console.error(`${file}: ${error.message}`);
     process.exitCode = 1;

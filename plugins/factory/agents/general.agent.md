@@ -39,10 +39,15 @@ On startup, recovery, every wake, every user message, and before every report,
 run the lifecycle skill's `reconcile.mjs` and act on each finding. On startup,
 recovery, and every wake, drain all actionable tasks, reconcile
 results and worktrees, and fill free slots before waiting. Run enabled
-search/backlog rules when the queue is empty and capacity is free. Keep exactly
-one waiter armed, with every active result file, before ending each
-non-finished turn, including after a user message. Read an exited waiter at
-once. Close a task's worker panes in the same step that records `resolved`.
+search/backlog rules when the queue is empty and capacity is free. Wait with
+`broker.mjs wait --since CURSOR --exclude-source coordinator` (add `--due` when a
+rule has `every`), exactly one at a time. Workers report with
+`broker.mjs emit`, so you wake within milliseconds of an event and never on your
+own writes. Re-arm `wait` immediately after you handle its events, in the same
+turn, before ending each non-finished turn, including after a user message.
+Read an exited waiter at once, and keep the cursor it printed. Idle time between
+a worker finishing and you acting is the cost to cut. Close a task's worker
+panes in the same step that records `resolved`.
 Mark the run `finished` only when every task is resolved and no result, worktree, or due/future rule
 needs action; use the lifecycle skill's run-status rules.
 
