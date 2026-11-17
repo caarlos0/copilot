@@ -128,12 +128,13 @@ server on purpose: the two plugins load independently.
 
 `reconcile.mjs` is a read-only sweep that prints JSON findings: complete results
 newer than their task, open issue-less task branches ahead of the default
-branch, and open Rex windows of resolved tasks. The factory runs it at startup,
-on every wake and user message, and before every report, so a missed waiter wake
-cannot leave finished work unmerged. The waiter always lists every active result
-file and is re-armed after each wake or user message. Closing a task's panes
-belongs to the
-step that records `resolved`.
+branch, clean worktrees of merged tasks whose HEAD is in the default branch
+(`merged-worktree`: remove with `wt NAME --delete`, only if the run created it;
+never `wt --cleanup`), and open Rex windows of resolved tasks. The factory runs
+it at startup, on every wake and user message, and before every report, so a
+missed waiter wake cannot leave finished work unmerged. The waiter always lists
+every active result file and is re-armed after each wake or user message.
+Closing a task's panes belongs to the step that records `resolved`.
 
 On every wake, drain all actionable tasks and reconcile results/worktrees,
 fill free worker slots before waiting, and run enabled search/backlog rules

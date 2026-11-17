@@ -250,6 +250,9 @@ leave work behind. Treat each finding as unfinished work:
   worker still runs; otherwise verify and land or block it.
 - `open-window`: a resolved task still has an open Rex window. Release it as in
   "Release panes".
+- `merged-worktree`: a `merged` task's worktree is clean and its HEAD is in the
+  default branch. If `created_by_run` is true, remove it with `wt NAME --delete`
+  as in "Release panes". Leave a reused worktree (`false`).
 
 Do not report a sweep as clean while `findings` or `errors` is not empty.
 
@@ -898,7 +901,9 @@ written and the panes are closed, or the reason they stay is recorded. The
 Remove a worktree only as a separate action: one created by this run, with
 complete work and nothing uncommitted or unpushed. Use `wt NAME --delete`. If
 it asks for confirmation, leave it to the user. Never run `wt --cleanup`.
-Never delete a reused worktree or one with pending work.
+Never delete a reused worktree or one with pending work. The `merged-worktree`
+finding from `reconcile.mjs` flags a merged task's worktree that is ready for
+this.
 
 ## Migrate old handoffs
 
