@@ -265,6 +265,18 @@ test("one issue or PR belongs to one task", async (t) => {
   f.fails(/Duplicate issue URL/, "--task", "issue-2", "--title", "x", "--next-action", "y", "--issue", issue(1));
 });
 
+test("issue and PR identity ignores query and fragment without changing evidence links", async (t) => {
+  const f = await started(t);
+  const evidence = `${issue(1)}#issuecomment-123`;
+  f.fails(/Duplicate issue URL/, "--task", "issue-2", "--title", "x", "--next-action", "y",
+    "--issue", evidence);
+  f.ok("--task", "issue-2", "--title", "x", "--next-action", "y", "--issue", issue(2), "--pr", pull(99),
+    "--links", JSON.stringify([evidence]));
+  f.fails(/Duplicate pr URL/, "--task", "issue-3", "--title", "x", "--next-action", "y",
+    "--issue", issue(3), "--pr", `${pull(99)}?diff=split`);
+  assert.deepEqual((await f.read()).tasks.find((task) => task.id === "issue-2").links, [evidence]);
+});
+
 const archiveFile = (f, day) => join(f.directory, "owner.repo-factory-archive", `${day}.json`);
 
 async function withArchived(t) {
@@ -301,7 +313,9 @@ test("a new task that matches archived work is refused until the user decides", 
   const archived = /matches archived work[\s\S]*old "Old" \(completed, archived 2020-01-01, revision \d+\)[\s\S]*--restore/;
   f.fails(archived, "--task", "old", "--title", "Again", "--issue", issue(90), "--next-action", "x");
   f.fails(archived, "--task", "other", "--title", "Same issue", "--issue", issue(7), "--next-action", "x");
+  f.fails(archived, "--task", "other", "--title", "Issue variant", "--issue", `${issue(7)}#issuecomment-123`, "--next-action", "x");
   f.fails(archived, "--task", "other", "--title", "Same PR", "--issue", issue(91), "--pr", pull(70), "--next-action", "x");
+  f.fails(archived, "--task", "other", "--title", "PR variant", "--issue", issue(91), "--pr", `${pull(70)}?diff=split`, "--next-action", "x");
   assert.equal(await readFile(f.file, "utf8"), before);
   f.ok("--task", "linked", "--title", "Only linked", "--issue", issue(92), "--next-action", "x", "--links", JSON.stringify([issue(7)]));
 });

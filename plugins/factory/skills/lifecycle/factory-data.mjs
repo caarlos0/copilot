@@ -62,6 +62,11 @@ export function githubURL(value, field = "link") {
   return url;
 }
 
+export function githubResourceURL(value, field = "link") {
+  const url = githubURL(value, field);
+  return `${url.origin}${url.pathname}`;
+}
+
 function githubKind(value, kind, field) {
   const url = githubURL(value, field);
   if (url.pathname.split("/")[3] !== kind) {
@@ -134,8 +139,9 @@ function validateTask(task, seen) {
   for (const [field, check] of [["issue", issueURL], ["pr", prURL]]) {
     if (task[field] == null) continue;
     const href = check(task[field], `${at} ${field}`);
-    if (seen[field].has(href)) throw new Error(`Duplicate ${field} URL across tasks: ${href}`);
-    seen[field].add(href);
+    const identity = githubResourceURL(href, `${at} ${field}`);
+    if (seen[field].has(identity)) throw new Error(`Duplicate ${field} URL across tasks: ${href}`);
+    seen[field].add(identity);
   }
   fullSHA(task.head, `${at} head`);
   fullSHA(task.reviewed_head, `${at} reviewed_head`);

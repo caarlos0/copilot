@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join } from "node:path";
-import { archiveFormat, validateArchive } from "./factory-data.mjs";
+import { archiveFormat, githubResourceURL, validateArchive } from "./factory-data.mjs";
 
 const dayFile = /^\d{4}-\d{2}-\d{2}\.json$/;
 
@@ -48,7 +48,9 @@ export function findArchived(days, { id, issue, pr }) {
   const newest = new Map();
   for (const { day, tasks } of days) {
     for (const task of tasks) {
-      if (task.id !== id && !(issue && task.issue === issue) && !(pr && task.pr === pr)) continue;
+      if (task.id !== id &&
+          !(issue && task.issue && githubResourceURL(task.issue) === githubResourceURL(issue)) &&
+          !(pr && task.pr && githubResourceURL(task.pr) === githubResourceURL(pr))) continue;
       const known = newest.get(task.id);
       if (!known || Date.parse(task.updated_at) >= Date.parse(known.task.updated_at)) {
         newest.set(task.id, { task, day });
