@@ -112,8 +112,6 @@
       .edge { fill: none; stroke: var(--border-emphasis); stroke-width: 2; stroke-dasharray: 8 6;
         animation: flow 1s linear infinite; transition: opacity .4s; }
       .edge.idle { opacity: .35; }
-      .edge.shortcut { stroke: var(--resolved); opacity: .6; }
-      .edge.shortcut.idle { opacity: .25; }
       .arrow { fill: var(--border-emphasis); }
       @keyframes flow { to { stroke-dashoffset: -28; } }
 
@@ -422,8 +420,8 @@
         defs.append(marker);
 
         const edges = svg("g", { id: "edges" });
-        const edge = (key, route, className = "") => {
-          const node = svg("path", { d: pathOf(route), class: `edge ${className}`, "marker-end": "url(#arrow)" });
+        const edge = (key, route) => {
+          const node = svg("path", { d: pathOf(route), class: "edge", "marker-end": "url(#arrow)" });
           node.dataset.edge = key;
           edges.append(node);
           return node;
@@ -433,7 +431,7 @@
         edge("implementation>review", flowRoutes["implementation>review"]);
         edge("review>implementation", flowRoutes["review>implementation"]);
         edge("review>resolved", flowRoutes["review>resolved"]);
-        edge("shortcut", SHORTCUT, "shortcut");
+        edge("shortcut", SHORTCUT);
         edge("source>initial", SOURCE_ROUTE);
         for (const state of Object.keys(blockedLanes)) {
           const node = edge(`${state}>blocked`, flowRoutes[`${state}>blocked`]);
