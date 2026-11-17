@@ -41,8 +41,8 @@ async function fixture(t, rex) {
   const file = join(directory, "owner.repo-factory.json");
   return {
     directory, repo, file,
-    async run(tasks, { status = "active", waiter = process.pid } = {}) {
-      await writeFile(file, JSON.stringify({ rex_session: "work", status, tasks }));
+    async run(tasks, { status = "active", waiter = process.pid, rules } = {}) {
+      await writeFile(file, JSON.stringify({ rex_session: "work", status, tasks, rules }));
       const pidFile = join(directory, "owner.repo-factory-waiter.pid");
       if (waiter === null) await rm(pidFile, { force: true });
       else await writeFile(pidFile, `${waiter}\n`);
@@ -117,6 +117,34 @@ test("flags a clean worktree of a merged task whose HEAD is in the default branc
   assert.deepEqual(errors, []);
   assert.deepEqual(findings, [
     { kind: "merged-worktree", task: "clean", path: clean, created_by_run: true },
+  ]);
+});
+
+test("flags a finished rule worker whose window is open or whose status is still running", async (t) => {
+  const f = await fixture(t, fakeRex);
+  const before = "2026-05-01T10:00:00Z";
+  const after = "2026-05-01T13:00:00Z";
+  const stamp = (name, updated_at, outcome = "complete") =>
+    writeFile(join(f.directory, name), JSON.stringify({ outcome, updated_at }));
+  await stamp("scan-result.json", after);
+  await stamp("open-result.json", after);
+  await stamp("closed-result.json", after);
+  await stamp("fresh-result.json", before);
+  const rule = (id, worker, last_run_at = "2026-05-01T12:00:00Z") =>
+    ({ id, description: id, kind: "backlog", enabled: true, last_run_at, worker });
+  const rules = [
+    rule("scan", { status: "running", result: "scan-result.json" }),
+    rule("open", { status: "closed", window: "a621-95363a2bc34f", result: "open-result.json" }),
+    rule("closed", { status: "closed", window: "window:other-id", result: "closed-result.json" }),
+    rule("fresh", { status: "running", window, result: "fresh-result.json" }),
+    rule("missing", { status: "running", result: "none-result.json" }),
+    rule("cleared", null),
+  ];
+  const { findings, errors } = await f.run([], { rules });
+  assert.deepEqual(errors, []);
+  assert.deepEqual(findings, [
+    { kind: "rule-worker-done", rule: "scan", window: null, result: "scan-result.json" },
+    { kind: "rule-worker-done", rule: "open", window, result: "open-result.json" },
   ]);
 });
 

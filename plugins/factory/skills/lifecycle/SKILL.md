@@ -260,6 +260,11 @@ leave work behind. Treat each finding as unfinished work:
   worker still runs; otherwise verify and land or block it.
 - `open-window`: a resolved task still has an open Rex window. Release it as in
   "Release panes".
+- `rule-worker-done`: a rule's worker has a result newer than the rule's
+  `last_run_at` (or a `complete` result when the rule never ran), and its Rex
+  window is still open or its status is still `running`. Read the result, process
+  the candidates, clear the record with `--rule ID --rule-worker null`, and
+  close the window (see "Find more work").
 - `merged-worktree`: a `merged` task's worktree is clean and its HEAD is in the
   default branch. If `created_by_run` is true, remove it with `wt NAME --delete`
   as in "Release panes". Leave a reused worktree (`false`).
@@ -442,8 +447,10 @@ work".
      hit, with the issue-first steps above.
    - **Backlog:** start one worker, unless the rule's `worker` is still
      `running` and alive (verify its pane identity first). Record it with
-     `--rule ID --rule-worker JSON`, and set it to `null` or `closed` when its
-     result is read.
+     `--rule ID --rule-worker JSON`. In the same step in which you read its
+     result, close the worker's tab and clear the record with
+     `--rule ID --rule-worker null` (or `closed`). A tab left open after the
+     result is read shows as `rule-worker-done` in the sweep.
 4. Accept links and tasks the user gives you at any time, without waiting for
    other workers. A link the user sends does not use `ignored`. If it is in
    that list, remove the entry when you create or restore the task.
