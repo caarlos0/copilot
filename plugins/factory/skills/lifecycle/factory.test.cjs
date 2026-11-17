@@ -53,7 +53,7 @@ test("creates a private factory with defaults and a new task in initial", async 
   assert.equal(data.tasks[0].state, "initial");
   assert.deepEqual(data.tasks[0].history.map((item) => item.state), ["initial"]);
   assert.equal((await stat(f.file)).mode & 0o777, 0o600);
-  assert.deepEqual(await readdir(f.directory), ["owner.repo-factory.json"]);
+  assert.deepEqual(await readdir(f.directory), ["owner.repo-factory-events.jsonl", "owner.repo-factory.json"]);
 });
 
 test("the shipped example is a valid factory", async () => {
@@ -112,7 +112,7 @@ test("a rejected move leaves the file unchanged", async (t) => {
   const before = await readFile(f.file, "utf8");
   f.fails(/cannot move/, "--task", "issue-1", "--state", "review");
   assert.equal(await readFile(f.file, "utf8"), before);
-  assert.deepEqual(await readdir(f.directory), ["owner.repo-factory.json"]);
+  assert.deepEqual(await readdir(f.directory), ["owner.repo-factory-events.jsonl", "owner.repo-factory.json"]);
 });
 
 test("blocked needs a reason that is cleared on leaving; resolved needs an outcome", async (t) => {
@@ -371,7 +371,7 @@ test("archive write failures never lose a task or half-apply a restore", async (
     const before = await readFile(f.file, "utf8");
     f.fails(/EACCES/, "--task", "issue-3", "--title", "New", "--issue", issue(3), "--next-action", "go");
     assert.equal(await readFile(f.file, "utf8"), before);
-    assert.deepEqual((await readdir(f.directory)).sort(), ["owner.repo-factory-archive", "owner.repo-factory.json"]);
+    assert.deepEqual((await readdir(f.directory)).sort(), ["owner.repo-factory-archive", "owner.repo-factory-events.jsonl", "owner.repo-factory.json"]);
 
     await chmod(directory, 0o700);
     f.ok("--task", "issue-3", "--title", "New", "--issue", issue(3), "--next-action", "go");
@@ -509,7 +509,7 @@ const uuid = (n) => `${String(n).repeat(8)}-${String(n).repeat(4)}-4${String(n).
 test("the sessions registry records each factory and worker session once, privately", async (t) => {
   const f = await started(t);
   const registry = join(f.directory, "owner.repo-factory-sessions.jsonl");
-  assert.deepEqual(await readdir(f.directory), ["owner.repo-factory.json"], "No session means no registry.");
+  assert.deepEqual(await readdir(f.directory), ["owner.repo-factory-events.jsonl", "owner.repo-factory.json"], "No session means no registry.");
   const lines = async () => (await readFile(registry, "utf8")).split("\n").filter(Boolean).map((line) => JSON.parse(line));
 
   f.ok("--session", uuid(1), "--updated-at", "2026-05-01T12:00:00Z");

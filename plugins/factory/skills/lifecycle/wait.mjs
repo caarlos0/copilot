@@ -145,6 +145,9 @@ async function main() {
     if (values.help) {
       console.log(`Wait for coordinator worker result changes without polling.
 
+Deprecated in the factory plugin: use broker.mjs wait, which wakes on typed events and ignores
+the waiter's own writes.
+
 Usage: node wait.mjs --cursor FILE [--due FACTORY_FILE] RESULT [RESULT ...]
        bun wait.mjs --cursor FILE [--due FACTORY_FILE] RESULT [RESULT ...]
 
