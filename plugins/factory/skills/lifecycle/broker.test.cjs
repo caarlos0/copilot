@@ -175,6 +175,47 @@ test("factory.mjs writes emit task.moved, task.updated, and dashboard feedback e
   ]);
 });
 
+test("--due follows run-status and rule edits made while the waiter is armed", async (t) => {
+  const f = await fixture(t);
+  const factory = (...args) => {
+    const out = spawnSync(process.execPath, [factoryScript, f.factory, ...args], { encoding: "utf8" });
+    assert.equal(out.status, 0, out.stderr);
+  };
+  const lastRun = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+  const rules = (every) => JSON.stringify([{ id: "backlog", description: "Find work", enabled: true, kind: "backlog", every, last_run_at: lastRun }]);
+  factory("--project", "owner/repo", "--run-goal", "Run it", "--run-status", "paused", "--rules", rules("1m"));
+
+  let done = await f.wait("--due", "--exclude-source", "coordinator", "--timeout", "10");
+  factory("--run-status", "active");
+  let out = await done();
+  assert.equal(out.timeout, undefined);
+  assert.deepEqual(out.events.map(({ type, data }) => [type, data]), [["rule.due", { rules: ["backlog"] }]]);
+
+  factory("--rules", rules("1d"));
+  done = await f.wait("--due", "--exclude-source", "coordinator", "--timeout", "10");
+  factory("--rules", rules("1m"));
+  out = await done();
+  assert.equal(out.timeout, undefined);
+  assert.deepEqual(out.events.map(({ type, data }) => [type, data]), [["rule.due", { rules: ["backlog"] }]]);
+});
+
+test("--due re-arms its timer when a rule edit moves the due time", async (t) => {
+  const f = await fixture(t);
+  const factory = (...args) => {
+    const out = spawnSync(process.execPath, [factoryScript, f.factory, ...args], { encoding: "utf8" });
+    assert.equal(out.status, 0, out.stderr);
+  };
+  const rules = (every, lastRun) => JSON.stringify([{ id: "backlog", description: "Find work", enabled: true, kind: "backlog", every, last_run_at: lastRun }]);
+  factory("--project", "owner/repo", "--run-goal", "Run it", "--rules", rules("1d", new Date().toISOString()));
+
+  const done = await f.wait("--due", "--exclude-source", "coordinator", "--timeout", "10");
+  // Due in about 2 seconds: only the re-armed timer can wake the waiter.
+  factory("--rules", rules("1m", new Date(Date.now() - 58 * 1000).toISOString()));
+  const out = await done();
+  assert.equal(out.timeout, undefined);
+  assert.deepEqual(out.events.map(({ type }) => type), ["rule.due"]);
+});
+
 test("--due returns a synthetic rule.due event for a due rule", async (t) => {
   const f = await fixture(t);
   await writeFile(f.factory, JSON.stringify({

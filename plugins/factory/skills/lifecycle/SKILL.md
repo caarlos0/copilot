@@ -853,11 +853,13 @@ Rules:
    evidence, mirror it with `factory.mjs`, then write the state change.
    The event is a hint; the result file and Git are the evidence.
 5. `--due` also returns `rule.due` when an enabled rule with `every` is due
-   while the factory is `active`. It reads the factory when it starts, so
-   re-arm after every wake. Handle each due rule as in "Find more work", which
-   stamps it first. Leave out `--due` when no rule has `every`, or while no
-   slot is free for a due backlog worker; otherwise it returns the due rule
-   again at once. This is the only timer.
+   while the factory is `active`. It rereads the factory on every write to it
+   (`--run-status`, `--rules`, `--rule --ran`) and moves its timer, even for
+   your own `coordinator` writes, so it still wakes at the new due time. Handle
+   each due rule as in "Find more work", which stamps it first. Leave out
+   `--due` when no rule has `every`, or while no slot is free for a due backlog
+   worker; otherwise it returns the due rule again at once. This is the only
+   timer.
 6. `--timeout S` makes `wait` exit with `"events":[]` and `"timeout":true`;
    use it only for a bounded check, never as a poll loop.
 7. If nothing needs action, re-arm without writing a timestamp or an
