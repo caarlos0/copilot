@@ -113,10 +113,11 @@
         .ring { display: none; }
       }
 
-      #detail { width: min(960px, calc(100% - 32px)); max-height: 85vh; padding: 0;
+      dialog { width: min(960px, calc(100% - 32px)); max-height: 85vh; padding: 0;
         color: var(--fg); background: var(--bg); border: 1px solid var(--border); border-radius: 12px; }
-      #detail::backdrop { background: rgb(0 0 0 / .5); }
-      body:has(#detail[open]) { overflow: hidden; }
+      dialog::backdrop { background: rgb(0 0 0 / .5); }
+      #move-dialog { width: min(560px, calc(100% - 32px)); }
+      body:has(dialog[open]) { overflow: hidden; }
       .detail-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px;
         position: sticky; top: 0; z-index: 1; padding: 16px 24px; background: var(--bg-muted);
         border-bottom: 1px solid var(--border); }
@@ -135,8 +136,9 @@
       .chip.state { color: var(--c); border-color: var(--c); }
       .blocker { padding: 8px 16px; }
       .feedback-note { white-space: pre-wrap; border-left: 3px solid var(--accent); padding-left: 12px; }
-      .move { margin-top: 8px; }
-      .move-form { margin-top: 12px; padding: 16px; background: var(--bg-muted); border-radius: 6px; }
+      .row-actions { display: flex; align-items: center; gap: 8px 16px; }
+      .move { padding: 3px 12px; font-size: 12px; }
+      .move-form { padding: 16px 24px; }
       .move-form fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
       .move-form label + label { margin-top: 12px; }
       .move-form label[hidden] { display: none; }
@@ -146,8 +148,20 @@
       .dot.running { background: var(--success); }
       .dot.unknown { background: var(--attention); }
       ul.workers, ol.history { margin: 8px 0; padding-left: 20px; }
+      h4 { margin: 12px 0 0; font-size: 12px; font-weight: 600; color: var(--fg-muted); }
+      ol.history { font-size: 12px; }
+      ol.history .history-state { font-weight: 600; }
       summary { cursor: pointer; color: var(--fg-muted); }
       pre { padding: 16px; border-radius: 6px; background: var(--bg-muted); white-space: pre-wrap; }
+      /* Primer "prettylights" syntax colours. */
+      .json-key { color: #116329; }
+      .json-string { color: #0a3069; }
+      .json-literal { color: #0550ae; }
+      @media (prefers-color-scheme: dark) {
+        .json-key { color: #7ee787; }
+        .json-string { color: #a5d6ff; }
+        .json-literal { color: #79c0ff; }
+      }
       @media (max-width: 600px) { body { padding: 16px; } .detail-head, .task-row { padding: 16px; } }
     </style>
   </head>
@@ -178,6 +192,13 @@
         <p id="detail-status" role="status"></p>
         <ul id="task-list"></ul>
         <p id="detail-empty" class="muted" hidden>No tasks in this state.</p>
+      </dialog>
+      <dialog id="move-dialog" aria-labelledby="move-title">
+        <div class="detail-head">
+          <h2 id="move-title" tabindex="-1"></h2>
+          <button id="close-move" type="button">Cancel</button>
+        </div>
+        <div id="move-body"></div>
       </dialog>
     </main>
     <noscript>Enable JavaScript to read the factory.</noscript>
@@ -231,6 +252,7 @@
 
       const flow = document.getElementById("flow");
       const dialog = document.getElementById("detail");
+      const moveDialog = document.getElementById("move-dialog");
 
       function element(tag, value, className) {
         const node = document.createElement(tag);
@@ -443,14 +465,52 @@
         const url = githubURL(href);
         const node = link(`#${url.pathname.split("/").pop()}`, url.href);
         node.title = url.href;
+        node.target = "_blank";
+        node.rel = "noopener noreferrer";
         return node;
+      }
+
+      function highlightJSON(value) {
+        const pre = element("pre", null, "json");
+        const source = JSON.stringify(value, null, 2);
+        const token = /("(?:\\.|[^"\\])*")(\s*:)?|\b(?:true|false|null)\b|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g;
+        let last = 0;
+        for (const match of source.matchAll(token)) {
+          const [text, string, colon] = match;
+          pre.append(source.slice(last, match.index));
+          if (colon) pre.append(element("span", string, "json-key"), colon);
+          else pre.append(element("span", text, string ? "json-string" : "json-literal"));
+          last = match.index + text.length;
+        }
+        pre.append(source.slice(last));
+        return pre;
+      }
+
+      function closeOnBackdrop(node, close) {
+        let pressed = false;
+        const outside = (event) => {
+          if (event.target !== node) return false;
+          const box = node.getBoundingClientRect();
+          return event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom;
+        };
+        node.addEventListener("pointerdown", (event) => { pressed = outside(event); });
+        node.addEventListener("click", (event) => {
+          if (pressed && outside(event)) close();
+          pressed = false;
+        });
+      }
+
+      function openMove(task) {
+        const title = document.getElementById("move-title");
+        title.textContent = `Move: ${task.title}`;
+        document.getElementById("move-body").replaceChildren(moveForm(task));
+        moveDialog.showModal();
+        title.focus();
       }
 
       function moveForm(task) {
         const file = selection;
         let current = task;
-        const editor = element("details", null, "move");
-        editor.append(element("summary", "Move task"));
         const form = element("form", null, "move-form");
         const fields = element("fieldset");
         const stateLabel = element("label", "Move to");
@@ -508,7 +568,6 @@
         actions.append(save, reload);
         fields.append(stateLabel, resolutionLabel, commentLabel, notice, error, actions);
         form.append(fields);
-        editor.append(form);
         const failed = (cause) => {
           error.textContent = cause.message;
           error.hidden = false;
@@ -553,12 +612,11 @@
               }),
             });
             validate(data);
-            editor.open = false;
+            moveDialog.close();
             if (selection === file) {
-              history.replaceState(null, "", `${location.pathname}${location.search}#${destination}`);
               load(data, file);
               document.getElementById("detail-status").textContent =
-                `Moved to ${places[destination].title}. Comment saved; awaiting factory acknowledgement.`;
+                `Moved "${task.title}" to ${places[destination].title}. Comment saved; awaiting factory acknowledgement.`;
               document.getElementById("detail-title").focus();
             }
           } catch (cause) {
@@ -568,7 +626,7 @@
             fields.disabled = false;
           }
         });
-        return editor;
+        return form;
       }
 
       function taskRow(task, expanded) {
@@ -579,7 +637,15 @@
         const links = element("span", null, "links");
         const references = new Set([...(task.issue ? [task.issue] : []), ...(task.pr ? [task.pr] : []), ...task.links]);
         for (const href of references) links.append(reference(href));
-        heading.append(element("h3", task.title), links);
+        const actions = element("span", null, "row-actions");
+        actions.append(links);
+        if (operatorStates(task).length) {
+          const move = element("button", "Move", "move");
+          move.type = "button";
+          move.addEventListener("click", () => openMove(task));
+          actions.append(move);
+        }
+        heading.append(element("h3", task.title), actions);
         node.append(heading);
         const chips = element("p", null, "chips");
         chips.append(element("span", `${task.state} for ${age(entered(task))}`, "chip state"));
@@ -604,6 +670,15 @@
               ? "Factory acknowledged this direction." : "Awaiting factory acknowledgement.", "muted"));
         }
         node.append(element("p", `Next: ${task.next_action}`));
+        const items = element("ol", null, "history");
+        for (const item of task.history) {
+          const entry = element("li");
+          entry.append(element("span", item.state, "history-state"),
+            element("span", ` ${item.at}${item.source ? ` (${item.source})` : ""}`, "muted"),
+            ...(item.note ? [`: ${item.note}`] : []));
+          items.append(entry);
+        }
+        node.append(element("h4", `History (${task.history.length})`), items);
         const more = element("details");
         more.dataset.taskId = `${task.id}:details`;
         more.open = expanded.has(more.dataset.taskId);
@@ -634,38 +709,27 @@
         }
         if (task.worktree) more.append(element("p", `Worktree: ${task.worktree.path}`, "muted"));
 
-        const timeline = element("details");
-        timeline.dataset.taskId = `${task.id}:history`;
-        timeline.open = expanded.has(timeline.dataset.taskId);
-        const items = element("ol", null, "history");
-        for (const item of task.history) {
-          items.append(element("li", `${item.state}, ${item.at}${item.source ? ` (${item.source})` : ""}${item.note ? `: ${item.note}` : ""}`));
-        }
-        timeline.append(element("summary", `History (${task.history.length})`), items);
-        more.append(timeline);
         if (task.details && Object.keys(task.details).length) {
           const details = element("details");
           details.dataset.taskId = task.id;
           details.open = expanded.has(task.id);
-          details.append(element("summary", "Evidence and task details"),
-            element("pre", JSON.stringify(task.details, null, 2)));
+          details.append(element("summary", "Evidence and task details"), highlightJSON(task.details));
           more.append(details);
         }
         node.append(more);
-        if (operatorStates(task).length) node.append(moveForm(task));
         return node;
       }
 
       function renderDetail(state) {
         const list = document.getElementById("task-list");
         if (!state) {
+          moveDialog.close();
           dialog.close();
           dialog.dataset.state = "";
           list.replaceChildren();
           list.dataset.signature = "";
           return;
         }
-        if (dialog.dataset.state === state && dialog.querySelector(".move[open]")) return;
         const expanded = new Set([...list.querySelectorAll("details[open]")].map((node) => node.dataset.taskId));
         const tasks = snapshot.tasks.filter((task) => task.state === state)
           .sort((a, b) => Date.parse(entered(a)) - Date.parse(entered(b)));
@@ -828,6 +892,9 @@
         event.preventDefault();
         choose(openState());
       });
+      closeOnBackdrop(dialog, () => choose(openState()));
+      document.getElementById("close-move").addEventListener("click", () => moveDialog.close());
+      closeOnBackdrop(moveDialog, () => moveDialog.close());
 
       buildFlow();
       refresh();

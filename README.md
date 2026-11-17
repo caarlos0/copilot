@@ -95,7 +95,7 @@ authority. Existing comment-based records are historical evidence only.
 State lives in `<owner.repo>-factory.json` (`factory/v1`) in
 `~/.local/state/copilot-coordinator/`. Run `node serve.mjs` from the
 `lifecycle` skill directory in the factory plugin for an animated flowchart
-dashboard. Click a state for a popup task list. Use **Move task** to return a
+dashboard. Click a state for a popup task list. Use a task's **Move** button to return a
 task to an earlier state, unblock it, or move it directly to **Resolved**, with
 a comment for the factory. Resolution requires an outcome (default: completed)
 and does not merge or close GitHub items.

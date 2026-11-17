@@ -303,7 +303,8 @@ async function dashboard(t) {
     get options() { return this.children.filter((child) => child.tag === "option"); }
     setAttribute(name, value) { this[name] = value; }
     addEventListener(name, callback) { this.listeners.set(name, callback); }
-    async fire(name) { await this.listeners.get(name)?.({ preventDefault() {} }); }
+    async fire(name, event = {}) { await this.listeners.get(name)?.({ target: this, preventDefault() {}, ...event }); }
+    getBoundingClientRect() { return { left: 100, right: 900, top: 100, bottom: 700 }; }
     focus() { document.activeElement = this; }
     showModal() { this.open = true; }
     close() { this.open = false; }
@@ -325,6 +326,7 @@ async function dashboard(t) {
   for (const [, tag, id] of html.matchAll(/<(\w+)[^>]*\bid="([^"]+)"/g)) elements.set(id, new Element(tag));
   elements.get("detail").append(...["detail-title", "close-detail", "detail-status", "task-list", "detail-empty"]
     .map((id) => elements.get(id)));
+  elements.get("move-dialog").append(...["move-title", "close-move", "move-body"].map((id) => elements.get(id)));
   const location = new URL(`?file=${factoryFile}`, url);
   const context = vm.createContext({
     ...await import("./factory-data.mjs"),
@@ -363,18 +365,55 @@ test("state selection opens a modal list that can close and reopen", async (t) =
   assert.equal(ui.get("task-list").children.length, 1);
   await ui.get("detail").fire("cancel");
   assert.equal(ui.get("detail").open, false);
+  ui.run("choose('blocked')");
+  const outside = { clientX: 10, clientY: 10 };
+  await ui.get("detail").fire("pointerdown", { clientX: 500, clientY: 400 });
+  await ui.get("detail").fire("click", { clientX: 500, clientY: 400 });
+  assert.equal(ui.get("detail").open, true, "A click inside the popup must not close it.");
+  await ui.get("detail").fire("pointerdown", { ...outside, target: ui.get("task-list") });
+  await ui.get("detail").fire("click", outside);
+  assert.equal(ui.get("detail").open, true, "A drag that starts inside the popup must not close it.");
+  await ui.get("detail").fire("pointerdown", outside);
+  await ui.get("detail").fire("click", outside);
+  assert.equal(ui.get("detail").open, false, "A click on the backdrop must close the popup.");
   ui.run("choose('investigation')");
   assert.equal(ui.get("detail-empty").hidden, false);
   assert.equal(ui.get("task-list").children.length, 0);
 });
 
-test("an open move draft survives refresh and conflict, then saves after explicit reload", async (t) => {
+test("rows show history, open references in a new tab, and highlight evidence", async (t) => {
+  const ui = await dashboard(t);
+  ui.run("choose('implementation')");
+  const row = ui.get("task-list").children[0];
+  const history = row.children.find((child) => child.tag === "ol");
+  assert.ok(history, "History must be a direct, always-visible part of the row.");
+  assert.equal(history.children.length, 3);
+  const links = row.querySelectorAll("a").filter((node) => node.href?.startsWith("https://github.com/"));
+  assert.ok(links.length > 0);
+  for (const node of links) {
+    assert.equal(node.target, "_blank", node.href);
+    assert.equal(node.rel, "noopener noreferrer", node.href);
+  }
+  const evidence = row.querySelector("pre");
+  assert.equal(evidence.textContent, JSON.stringify(example.tasks.find((task) => task.id === "issue-9").details, null, 2));
+  assert.equal(evidence.querySelector(".json-key").textContent, '"verdict"');
+  const value = { note: 'say "a": 1', count: -2.5e3, ok: true, gone: null, list: [1, "x"] };
+  const pre = ui.run(`highlightJSON(${JSON.stringify(value)})`);
+  assert.equal(pre.textContent, JSON.stringify(value, null, 2));
+  const tokens = (name) => pre.querySelectorAll(`.json-${name}`).map((node) => node.textContent);
+  assert.deepEqual(tokens("key"), ['"note"', '"count"', '"ok"', '"gone"', '"list"']);
+  assert.deepEqual(tokens("string"), ['"say \\"a\\": 1"', '"x"']);
+  assert.deepEqual(tokens("literal"), ["-2500", "true", "null", "1"]);
+});
+
+test("Move opens a separate popup whose draft survives refresh and conflict", async (t) => {
   const ui = await dashboard(t);
   ui.run("choose('blocked')");
   const list = ui.get("task-list");
-  const editor = list.querySelector(".move");
-  editor.open = true;
-  const form = editor.querySelector("form");
+  await list.querySelector(".move").fire("click");
+  assert.equal(ui.get("move-dialog").open, true);
+  assert.equal(ui.get("detail").open, true);
+  const form = ui.get("move-body").querySelector("form");
   const comment = form.querySelector("textarea");
   const state = form.querySelector("select");
   state.value = "initial";
@@ -384,12 +423,13 @@ test("an open move draft survives refresh and conflict, then saves after explici
   const { update } = await import("./factory.mjs");
   await update(file, { task: "issue-5", "next-action": "An agent changed the task while editing" });
   await ui.run("refresh()");
-  assert.equal(list.querySelector("textarea"), comment);
+  assert.equal(ui.get("move-body").querySelector("textarea"), comment);
   assert.equal(ui.document.activeElement, comment);
   assert.equal(state.value, "initial");
   await form.fire("submit");
   assert.match(form.querySelector(".save-error").textContent, /changed since it was read/);
   assert.equal(form.querySelector(".save-error").hidden, false);
+  assert.equal(ui.get("move-dialog").open, true);
   assert.equal(comment.value, "This is now unblocked.\nUse the new docs setup.");
   assert.equal(JSON.parse(await readFile(file, "utf8")).tasks.find((task) => task.id === "issue-5").state, "blocked");
   const reload = form.querySelectorAll("button").find((button) => button.textContent === "Reload task");
@@ -400,18 +440,37 @@ test("an open move draft survives refresh and conflict, then saves after explici
   assert.equal(saved.state, "initial");
   assert.equal(saved.history.at(-1).note, comment.value);
   assert.equal(saved.feedback.acknowledged_id, null);
-  assert.equal(ui.get("detail").dataset.state, "initial");
-  assert.equal(ui.get("task-list").children.length, 2);
-  assert.match(ui.get("detail-status").textContent, /Comment saved; awaiting factory acknowledgement/);
+  assert.equal(ui.get("move-dialog").open, false);
+  assert.equal(ui.get("detail").open, true);
+  assert.equal(ui.get("detail").dataset.state, "blocked", "The list must stay on the state it showed.");
+  assert.equal(ui.get("task-list").children.length, 0);
+  assert.match(ui.get("detail-status").textContent, /to Initial\. Comment saved; awaiting factory acknowledgement/);
+});
+
+test("the move popup closes on Cancel and on its backdrop without saving", async (t) => {
+  const ui = await dashboard(t);
+  const file = join(ui.directory, factoryFile);
+  const original = await readFile(file, "utf8");
+  ui.run("choose('blocked')");
+  await ui.get("task-list").querySelector(".move").fire("click");
+  await ui.get("close-move").fire("click");
+  assert.equal(ui.get("move-dialog").open, false);
+  await ui.get("task-list").querySelector(".move").fire("click");
+  const outside = { clientX: 950, clientY: 400 };
+  await ui.get("move-dialog").fire("pointerdown", outside);
+  await ui.get("move-dialog").fire("click", outside);
+  assert.equal(ui.get("move-dialog").open, false);
+  assert.equal(ui.get("detail").open, true);
+  assert.equal(await readFile(file, "utf8"), original);
 });
 
 test("the popup can resolve an initial task with an outcome and comment", async (t) => {
   const ui = await dashboard(t);
   ui.run("choose('initial')");
-  const editor = ui.get("task-list").querySelector(".move");
-  assert.ok(editor, "An initial task must offer a move to resolved.");
-  editor.open = true;
-  const form = editor.querySelector("form");
+  const button = ui.get("task-list").querySelector(".move");
+  assert.ok(button, "An initial task must offer a move to resolved.");
+  await button.fire("click");
+  const form = ui.get("move-body").querySelector("form");
   const selects = form.querySelectorAll("select");
   const state = selects.find((select) => select.name === "state");
   const outcome = selects.find((select) => select.name === "resolution");
@@ -432,6 +491,6 @@ test("the popup can resolve an initial task with an outcome and comment", async 
   assert.equal(saved.resolution.outcome, "cancelled");
   assert.equal(saved.resolution.note, comment.value);
   assert.equal(saved.feedback.acknowledged_id, null);
-  assert.equal(ui.get("detail").dataset.state, "resolved");
-  assert.match(ui.get("detail-status").textContent, /Moved to Resolved/);
+  assert.equal(ui.get("detail").dataset.state, "initial");
+  assert.match(ui.get("detail-status").textContent, /to Resolved\./);
 });

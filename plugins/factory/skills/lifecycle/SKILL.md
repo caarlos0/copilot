@@ -574,13 +574,15 @@ printed HTTP URL, not a `file://` link. Do not open the browser for the user.
 
 The page draws the flow as a flowchart with a task count per state. A moving
 token shows each new transition from the file history. Click a state to open
-a modal task list, with links, time in state, blocker or resolution, and
-expandable worker, head, cycle, merge, history, and evidence details.
-**Move task** saves an allowed return state or a direct move to `resolved`,
+a modal task list, with links (opened in a new tab), time in state, blocker or
+resolution, the full history, and expandable worker, head, cycle, merge, and
+syntax-highlighted evidence details. A task's **Move** button opens a second
+popup that saves an allowed return state or a direct move to `resolved`,
 with a required operator comment. Resolving also requires a non-merge outcome.
-It shows acknowledgement status without claiming that a worker stopped or
-restarted. Close the popup with Close or Escape. An open move editor retains
-its draft and original revision during refresh; on conflict, reload the task,
+The task list stays on the state it showed. It shows acknowledgement status
+without claiming that a worker stopped or restarted. Close a popup with its
+button, Escape, or a click outside it. The move popup retains its draft and
+original revision during refresh; on conflict, reload the task,
 review the destination, and save again. It rereads the file every 10
 seconds and keeps the last good snapshot when a read fails. It lists only
 `*-factory.json` files; the old board lists the old formats. It shows saved
