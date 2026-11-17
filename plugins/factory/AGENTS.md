@@ -14,7 +14,13 @@ The coordination plugin stays unchanged, and the reviewer handoff stays with
 `coordination:review`.
 The factory runs every worker in the Rex session it started in (`$REX_SESSION`).
 It never creates or renames a Rex session; it records the session in the
-root `rex_session` field.
+root `rex_session` field. Only the factory manages Rex panes. Workers run
+commands with their own shell tool and never create, close, or type into Rex
+windows, tabs, splits, or panes; the launch instructions carry this rule, and
+release closes verified stray windows. The `REX_*` variables stay set for
+workers. Implementation worktrees come from the local default branch: launch
+plain `wt NAME` in the main checkout, never `wt NAME --main`, which uses
+`origin/<default>` and loses unpushed local commits.
 
 State is one `<owner.repo>-factory.json` (`factory/v1`) per project under
 `~/.local/state/copilot-coordinator/`, with one agent owner guarded by
