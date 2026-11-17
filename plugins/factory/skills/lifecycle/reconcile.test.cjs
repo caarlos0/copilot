@@ -80,6 +80,19 @@ test("reports a complete result newer than its task, a branch ahead, and a windo
   ]);
 });
 
+test("flags a branch ahead only for tasks that land by local merge", async (t) => {
+  const f = await fixture(t, fakeRex);
+  const worktree = { path: f.repo, created_by_run: true };
+  const { findings, errors } = await f.run([
+    task("with-pr", "review", { issue: { number: 1 }, pr: { number: 2 }, worktree }),
+    task("local", "review", { worktree }),
+  ]);
+  assert.deepEqual(errors, []);
+  assert.deepEqual(findings, [
+    { kind: "branch-ahead", task: "local", state: "review", branch: "work", ahead: 1 },
+  ]);
+});
+
 test("is quiet when everything is reconciled", async (t) => {
   const f = await fixture(t, fakeRex);
   const { findings, errors } = await f.run([

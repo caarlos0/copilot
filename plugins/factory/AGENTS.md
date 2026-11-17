@@ -38,6 +38,15 @@ workers. The planned role with `unknown` status is in the factory file before
 launch, and the pane and window IDs are written right after it. The short gap
 between them cannot be removed.
 
+Every brief sets a write boundary. The worker's assigned worktree is the only
+writable root; the result path and `$TMPDIR` are the only other writable
+paths. Workers never create a worktree, switch or check out a branch in
+another checkout, or edit or commit on the primary checkout or default branch.
+A brief never gives the primary checkout as the repo path of a writing worker.
+A worker whose cwd or branch differs from its brief writes a `blocked` result
+and does not edit. Every brief tells the worker to read
+`plugins/factory/AGENTS.md` before its first edit.
+
 State is one `<owner.repo>-factory.json` (`factory/v1`) per project under
 `~/.local/state/copilot-coordinator/`, with one agent owner guarded by
 `<project>-factory.lock`. Agent and dashboard writes share `factory.mjs` and
@@ -125,11 +134,12 @@ aligned.
 server on purpose: the two plugins load independently.
 
 `reconcile.mjs` is a read-only sweep that prints JSON findings: complete results
-newer than their task, open-task branches ahead of the default branch, and open
-Rex windows of resolved tasks. The factory runs it at startup, on every wake and
-user message, and before every report, so a missed waiter wake cannot leave
-finished work unmerged. The waiter always lists every active result file and is
-re-armed after each wake or user message. Closing a task's panes belongs to the
+newer than their task, open issue-less task branches ahead of the default
+branch, and open Rex windows of resolved tasks. The factory runs it at startup,
+on every wake and user message, and before every report, so a missed waiter wake
+cannot leave finished work unmerged. The waiter always lists every active result
+file and is re-armed after each wake or user message. Closing a task's panes
+belongs to the
 step that records `resolved`.
 
 On every wake, drain all actionable tasks and reconcile results/worktrees,

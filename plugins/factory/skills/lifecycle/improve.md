@@ -28,6 +28,16 @@ The brief gives you `WINDOW_START` (an ISO time) and absolute paths for:
   commands, file contents, or secrets in the result, an issue, a PR, or a
   comment.
 
+## Session history queries
+
+If you use `session_store_sql`, follow these rules:
+
+- Use `source: "local"` with SQLite syntax. Do not use `INTERVAL` or `ILIKE`.
+  Example: `substr(created_at,1,10) >= date('now','-7 days')`.
+- Time-bound every query. Cloud queries time out after 60 seconds.
+- Select IDs and summaries first. Then fetch details for only those IDs.
+- If a query fails, do not repeat it. Count events in `events.jsonl` instead.
+
 ## Steps
 
 1. **Check the previous run.** If the result file has a `change`, read the

@@ -153,6 +153,14 @@ test("revisions reject stale writes even when timestamps are identical", async (
   f.fails(/non-negative safe integer/, "--task", "issue-1", "--expected-revision=-1");
 });
 
+test("--expected-revision on a new task is a usage error, not a conflict", async (t) => {
+  const f = await started(t);
+  const before = await readFile(f.file, "utf8");
+  f.fails(/applies only to existing tasks/, "--task", "issue-2", "--title", "Other", "--issue", issue(2),
+    "--next-action", "Start", "--expected-revision", "0");
+  assert.equal(await readFile(f.file, "utf8"), before);
+});
+
 test("dashboard directions must be acknowledged and old worker generations stay fenced", async (t) => {
   const f = await fixture(t, example);
   const { update } = await import("./factory.mjs");

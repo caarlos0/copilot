@@ -494,6 +494,23 @@ test("global task filters search any field, combine terms, and survive refresh a
   assert.equal(rows().length, example.tasks.filter((task) => task.state === "implementation").length);
 });
 
+test("flow edges and token routes use only straight horizontal and vertical segments", async (t) => {
+  const ui = await dashboard(t);
+  const paths = ui.get("flow").querySelectorAll(".edge").map((edge) => edge.d);
+  for (const hop of [{ from: null, to: "initial" }, { from: "blocked", to: "review" }, { from: "initial", to: "review" }]) {
+    paths.push(ui.run(`routeFor(${JSON.stringify(hop)})`));
+  }
+  assert.equal(paths.length, 14);
+  for (const path of paths) {
+    assert.match(path, /^M[\d.,-]+( L[\d.,-]+)+$/, `Only M and L commands: ${path}`);
+    const points = path.slice(1).split(" L").map((point) => point.split(",").map(Number));
+    points.slice(1).forEach(([x, y], index) => {
+      const [px, py] = points[index];
+      assert.ok(x === px || y === py, `Diagonal segment in ${path}`);
+    });
+  }
+});
+
 test("global filters update state totals, resolution outcomes, and every opened list", async (t) => {
   const ui = await dashboard(t);
   const filter = ui.get("global-filter");
@@ -911,5 +928,14 @@ test("the delegate-always rule is present in the agent, skill, and plugin rules"
     const text = readFileSync(file, "utf8");
     assert.match(text, /never do(es)? (actual )?work or investigation/i, file);
     assert.match(text, /git merge main/, file);
+  }
+});
+
+test("the worker write boundary is present in the skill and plugin rules", () => {
+  for (const file of [join(__dirname, "SKILL.md"), join(__dirname, "..", "..", "AGENTS.md")]) {
+    const text = readFileSync(file, "utf8");
+    assert.match(text, /only\s+writable\s+root/i, file);
+    assert.match(text, /primary checkout/, file);
+    assert.match(text, /read\s+`plugins\/factory\/AGENTS\.md`\s+before\s+(its|the)\s+first\s+edit/i, file);
   }
 });
