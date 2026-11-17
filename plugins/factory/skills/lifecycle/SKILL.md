@@ -122,8 +122,10 @@ node factory.mjs "$FILE" --project owner/repo --run-goal "Run the factory for ow
   --rex-session "$REX_SESSION" --session SESSION_UUID
 node factory.mjs "$FILE" --task issue-42 --title "Fix login redirect" \
   --issue https://github.com/owner/repo/issues/42 --next-action "Start the investigation worker"
-node factory.mjs "$FILE" --task issue-42 --state investigation --note "Worker started" \
-  --workers '{"investigation":{"status":"running","mode":"one-shot","pane":"PANE","window":"WINDOW"}}'
+node factory.mjs "$FILE" --task issue-42 --state investigation --note "Investigation worker planned" \
+  --workers '{"investigation":{"status":"unknown","mode":"one-shot","result":"owner.repo-issue-42-investigation-result.json"}}'
+node factory.mjs "$FILE" --task issue-42 \
+  --workers '{"investigation":{"status":"running","session":"SESSION_UUID","pane":"PANE","window":"WINDOW"}}'
 ```
 
 The helper:
@@ -153,6 +155,51 @@ A task has `id`, `title`, `state`, `revision`, `feedback`, `next_action`, `issue
 `links`. Put acceptance criteria, evidence, and full SHAs in `details`.
 Derive the time in a state from the last history entry and review cycles from
 the history. Do not store counters.
+
+## Write before action; reconcile with reality
+
+The factory file is the only task tracker. Never track tasks or task progress
+only in chat, session SQL, a board, or another file. Worker result files are
+evidence, not a second tracker: mirror each result and its disposition in the
+factory file with `factory.mjs`.
+
+Before launching any worker, create its task in the factory file if it does
+not exist. Then write the planned role with `unknown` status, worktree, and
+exact result filename with `factory.mjs`; set `next_action` to the launch.
+If either write fails or is refused, stop; resolve the conflict and reread the
+file before any launch. After Rex returns the pane and window IDs, write those
+IDs, the worker session, and `running` status to the file before sending the
+worker its brief. If that write fails, do not send the brief; stop the idle
+worker and reconcile the pane record.
+
+For every result, branch-head change, merge attempt, and worker or worktree
+release, write the intended action to the task's `next_action` or `details`
+with `factory.mjs` before acting. Workers must pause at each such milestone
+until the factory confirms that write. After the action, write the observed
+result, full head or merge commit SHA, and worker status with `factory.mjs`
+in the same turn, before any follow-up action. For a result, first mirror its
+summary, evidence, and result path; then verify it and record the state change
+and disposition. If any write fails or is refused, stop further work and
+reconcile the latest file; never continue with untracked work.
+
+Tell implementation workers to stop before every commit, push that changes a
+head, merge attempt, or release. They report the planned action and current
+full head; do not authorize the action until it is written to the factory
+file. Afterward, require the resulting full SHA or confirmed outcome in the
+file before the worker continues.
+
+At startup, on every wake, and before reporting, reconcile the file against
+live state. Run `git worktree list --porcelain` and
+`git branch --merged DEFAULT_BRANCH`; inspect the factory Rex session's
+windows and panes, every active result file, and each linked PR. Compare
+task state, worker status and IDs, worktree and branch, full head, and merge
+outcome. Record newly found work before acting on it. Repair every mismatch
+with `factory.mjs`; do not infer that a pane, branch, result, or merge is
+finished from an old record. For a task without an issue that is merged into
+the default branch, verify the ancestry and merge commit, then resolve it as
+`merged` with the full SHA in `details.merge_commit`. Keep unknown work intact
+and blocked until its task can be identified. A refused write stops the sweep
+until the file is reread and the drift is resolved.
 
 ### Handle dashboard direction before worker results
 
@@ -485,6 +532,15 @@ evidence.
 
 Tell every worker:
 
+- Before writing a cumulative result, report its intended outcome and evidence.
+  Wait for the factory to save the planned disposition with `factory.mjs`.
+  Then write the result atomically and wait for the factory to mirror and
+  verify it before taking another action.
+- Before every commit or push that changes a head, merge attempt, or release,
+  stop and report the planned action and current full head. Wait for the
+  factory to confirm the plan is saved. After the action, report the exact new
+  full head or confirmed outcome and wait for the factory to save it before
+  continuing.
 - Read the task's feedback before starting a new action and before landing.
   If the ID differs from your brief or supplement, pause new work and request
   reconciliation. Do not infer permission from a dashboard comment. Include
@@ -602,7 +658,8 @@ longer matches. Pane IDs can be reused: verify identity first. If a launch
 fails, inspect new panes once before you retry.
 
 Record the Copilot session ID, pane, window, name, brief, result, and worktree
-with `--workers` and `--worktree`.
+with `--workers` and `--worktree`. This write must happen before sending the
+brief or otherwise allowing the worker to act.
 
 ## Receive worker events
 
@@ -641,13 +698,15 @@ the cursor. Handle each due rule as in "Find more work", then rearm. Leave out
 values set it.
 
 On start or recovery, reconcile every result with the file, even if the cursor
-matches. Then inspect lost panes once. Result events do not prove a worker is
-alive. If a worker crashed before it saved a result, the waiter cannot wake
-you; record this limit and reconcile on the next user request. Do not start a
-timed loop. While the factory remains available, keep watching its file even
-when every worker is blocked or idle, so an operator can unblock work from the
-dashboard. Stop the waiter when the factory session ends. If the factory is
-not running, comments remain pending until its next start.
+matches. Before acting on a changed result, first mirror its path, summary,
+evidence, and reported head or outcome with `factory.mjs`; then verify the
+result and write the state change. Then inspect lost panes once. Result events
+do not prove a worker is alive. If a worker crashed before it saved a result,
+the waiter cannot wake you; record this limit and reconcile on the next user
+request. Do not start a timed loop. While the factory remains available, keep watching
+its file even when every worker is blocked or idle, so an operator can unblock
+work from the dashboard. Stop the waiter when the factory session ends. If the
+factory is not running, comments remain pending until its next start.
 
 ## Merge
 
@@ -669,13 +728,15 @@ If the user changes authority in the factory session, record the exact words
 and send the update to affected workers before further writes. Workers must
 recheck current policy even when the head has not changed.
 
-The worker uses Lever's expected-head merge guard or the repository's queue
-and reports the decision and attempt in its cumulative result. Only the
-factory mirrors verified decisions into its file:
+Before a landing attempt, the factory records the exact head, verified
+`may_merge` decision, and planned attempt with `factory.mjs`. The worker uses
+Lever's expected-head merge guard or the repository's queue and reports the
+decision and attempt in its cumulative result:
 
 ```sh
 node factory.mjs "$FILE" --task issue-42 \
-  --merge '{"authorized_by":"LOGIN","source":"lever","evidence":"GRANT AND GATE EVIDENCE","authorized_at":"ISO","head":"FULL SHA"}'
+  --next-action "Attempt merge on FULL SHA" \
+  --merge '{"authorized_by":"LOGIN","source":"lever","evidence":"GRANT AND GATE EVIDENCE","authorized_at":"ISO","requested_at":"ISO","head":"FULL SHA"}'
 ```
 
 `authorized_by` identifies the operator behind the grant. `authorized_at`
@@ -683,6 +744,9 @@ records the gate decision time; the original grant time and provenance stay
 in `details.lever`. `requested_at`, when present, records a landing attempt.
 The `merge` record is an audit snapshot, never executable permission.
 Keep current-head decisions only there, not in `details.lever`.
+
+After the attempt, the factory mirrors the verified outcome and any merge
+commit into its file before another action.
 
 A head change clears `merge`; recheck the new head without discarding a
 standing grant or asking for it again. Clear `merge` with `--merge null` when
@@ -692,9 +756,13 @@ them through Lever on recovery. A blocked or incomplete gate means no merge.
 
 The factory never lands from its own pane or sends `/pr agentmerge`.
 An accepted queue or auto-merge request is not a completed merge. When GitHub
-confirms the merge and the final result is verified, move the task to
-`resolved` with outcome `merged`, run the done-audit, then release the panes.
-If a write has an unknown outcome, reconcile it before any further attempt.
+confirms the merge and the final result is verified, write the `resolved` state
+with outcome `merged` before the done-audit or pane release.
+For local merges, record `details.merge_commit` and resolve as `merged` before
+releasing the worker or worktree. Before closing a pane or removing an eligible
+worktree, write the planned release; after it is closed or removed, record that
+fact with `factory.mjs` before any other action. If a write has an unknown
+outcome, reconcile it before any further attempt.
 
 For a task without an issue or PR, the implementation worker lands with a
 local `git merge` (never rebase) into the default branch, after the same

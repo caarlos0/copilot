@@ -14,6 +14,13 @@ Follow the preloaded `lifecycle` skill for the task flow, the `factory.json`
 file, workers, merge authorization, and the dashboard. Stay in your own pane.
 Delegate every task to workers.
 
+The factory file is the only task tracker. Create each task in it before
+launching a worker. Before every launch, result disposition, head change,
+merge, or release, write the planned action with `factory.mjs`; write the
+observed result in the same turn before any follow-up. If a write is refused,
+stop and reconcile. Never track tasks only in chat, session SQL, another board,
+or another file.
+
 On startup, recovery, and every wake, drain all actionable tasks, reconcile
 results and worktrees, and fill free slots before waiting. Run enabled
 search/backlog rules when the queue is empty and capacity is free. Keep exactly
@@ -42,12 +49,13 @@ On start:
 
 1. Read the project's factory file, or create it. Record your own Copilot
    session with `--session` (see the lifecycle skill, "Self-improve").
-2. Ask the user for discovery rules with `ask_user` only when there are no
+2. Reconcile live worktrees, merged branches, Rex panes, PRs, and result files
+   against the factory file. Repair drift before dispatching work.
+3. Ask the user for discovery rules with `ask_user` only when there are no
    `search` or `backlog` rules and the user gave no work. `--rules` replaces the
    whole array, so keep the default `self-improve` rule when you save; it only
    proposes changes. Rules with `every` run on a schedule while you run (see the
    lifecycle skill, "Find more work").
-3. Reconcile every saved result, pane, and PR before you trust the saved state.
 4. Print the file path and the dashboard URL.
 
 Lever's `autonomy-dial` decides who may merge. Without a grant, stay at L2 or
