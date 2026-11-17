@@ -16,7 +16,6 @@ const mergeSources = ["lever", "comment", "factory-session"];
 const workerRoles = ["investigation", "implementation", "review"];
 const workerModes = ["one-shot", "continuous"];
 const workerStatuses = ["running", "idle", "closed", "unknown"];
-const issueStates = ["investigation", "implementation", "review"];
 export const ruleKinds = ["search", "backlog", "improve"];
 const everyUnits = { m: 60_000, h: 3_600_000, d: 86_400_000 };
 
@@ -89,12 +88,14 @@ export function cyclesOf(task) {
     item.state === "implementation" && task.history[index - 1]?.state === "review").length;
 }
 
+// A task without an issue follows the local flow: it can review and merge without a PR.
+const needsPR = (task) => task.issue != null && task.pr == null;
+
 export function operatorStates(task) {
   const open = ["initial", "investigation", "implementation", "review"];
   if (task.state === "resolved") return task.resolution?.outcome === "merged" ? [] : ["initial"];
   const candidates = task.state === "blocked" ? open : open.slice(0, open.indexOf(task.state));
-  return [...candidates.filter((state) => (!issueStates.includes(state) || task.issue != null) &&
-    (state !== "review" || task.pr != null)), "resolved"];
+  return [...candidates.filter((state) => state !== "review" || !needsPR(task)), "resolved"];
 }
 
 export function checkTransition(task, to, operator = false) {
@@ -104,7 +105,7 @@ export function checkTransition(task, to, operator = false) {
     throw new Error(`Task ${task.id} cannot move from ${task.state} to ${to}. Allowed: ${allowed.join(", ") || "none"}.`);
   }
   if (task.state === "resolved" && task.resolution?.outcome === "merged") {
-    throw new Error(`Task ${task.id} was merged. Create a new task and issue instead of reopening it.`);
+    throw new Error(`Task ${task.id} was merged. Create a new task instead of reopening it.`);
   }
 }
 
@@ -135,9 +136,6 @@ function validateTask(task, seen) {
     const href = check(task[field], `${at} ${field}`);
     if (seen[field].has(href)) throw new Error(`Duplicate ${field} URL across tasks: ${href}`);
     seen[field].add(href);
-  }
-  if (task.issue == null && issueStates.includes(task.state)) {
-    throw new Error(`${at}: a task in ${task.state} needs a GitHub issue. Create or link one first.`);
   }
   fullSHA(task.head, `${at} head`);
   fullSHA(task.reviewed_head, `${at} reviewed_head`);
@@ -196,13 +194,13 @@ function validateTask(task, seen) {
   } else if (task.resolution != null) {
     throw new Error(`${at}: resolution is allowed only in the resolved state.`);
   }
-  if (task.state === "review" && task.pr == null) {
-    throw new Error(`${at}: a task in review needs a pr.`);
+  if (task.state === "review" && needsPR(task)) {
+    throw new Error(`${at}: a task with an issue needs a pr in review.`);
   }
 
   if (task.merge != null) {
     if (!isObject(task.merge)) throw new Error(`${at} merge must be an object or null.`);
-    if (task.pr == null) throw new Error(`${at}: merge decision needs a pr.`);
+    if (needsPR(task)) throw new Error(`${at}: a merge decision for a task with an issue needs a pr.`);
     text(task.merge.authorized_by, `${at} merge.authorized_by`);
     oneOf(task.merge.source, mergeSources, `${at} merge.source`);
     text(task.merge.evidence, `${at} merge.evidence`);

@@ -61,11 +61,32 @@ test("the shipped example is a valid factory", async () => {
   validate(example);
 });
 
-test("a new task needs an issue; null is accepted only on purpose", async (t) => {
+test("a new task needs --issue; null is accepted only on purpose", async (t) => {
   const f = await started(t);
   f.fails(/needs --issue/, "--task", "issue-2", "--title", "x", "--next-action", "y");
   f.ok("--task", "issue-2", "--title", "x", "--next-action", "y", "--issue", "null");
-  f.fails(/needs a GitHub issue/, "--task", "issue-2", "--state", "investigation");
+});
+
+test("a task without an issue moves through every state and merges without a pr", async (t) => {
+  const f = await started(t);
+  f.ok("--task", "favicon", "--title", "Add a favicon", "--issue", "null", "--next-action", "Start");
+  f.ok("--task", "favicon", "--state", "investigation");
+  f.ok("--task", "favicon", "--state", "implementation");
+  f.ok("--task", "favicon", "--state", "review", "--head", sha("a"));
+  const merge = {
+    authorized_by: "owner", source: "lever", evidence: "may_merge allowed at L4",
+    authorized_at: "2026-05-01T12:00:00Z", head: sha("a"),
+  };
+  f.ok("--task", "favicon", "--merge", JSON.stringify(merge));
+  f.ok("--task", "favicon", "--state", "resolved", "--resolution", "merged",
+    "--details", JSON.stringify({ merge_commit: sha("b") }));
+  const task = (await f.read()).tasks.find((item) => item.id === "favicon");
+  assert.deepEqual(task.history.map((item) => item.state),
+    ["initial", "investigation", "implementation", "review", "resolved"]);
+  assert.equal(task.pr, null);
+  assert.equal(task.details.merge_commit, sha("b"));
+  f.fails(/needs a pr/, "--task", "issue-1", "--head", sha("c"),
+    "--merge", JSON.stringify({ ...merge, head: sha("c") }));
 });
 
 test("moves follow the flow and each move adds history", async (t) => {
@@ -178,7 +199,8 @@ test("operator moves do not broaden worker transitions or bypass prerequisites",
   checkTransition(review, "initial", true);
   const blocked = example.tasks.find((item) => item.state === "blocked");
   assert.deepEqual(operatorStates(blocked), ["initial", "investigation", "implementation", "resolved"]);
-  assert.deepEqual(operatorStates({ ...blocked, issue: null }), ["initial", "resolved"]);
+  assert.deepEqual(operatorStates({ ...blocked, issue: null }),
+    ["initial", "investigation", "implementation", "review", "resolved"]);
   assert.deepEqual(operatorStates({ ...blocked, pr: pull(99) }),
     ["initial", "investigation", "implementation", "review", "resolved"]);
   assert.deepEqual(operatorStates(example.tasks.find((item) => item.state === "resolved")), []);
