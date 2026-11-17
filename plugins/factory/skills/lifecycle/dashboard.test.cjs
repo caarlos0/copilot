@@ -101,6 +101,8 @@ test("serves only artifacts that the selected factory references, inside the sta
   const ok = await artifact("owner.repo-issue-9-implementation-brief.md");
   assert.equal(ok.status, 200);
   assert.equal(await ok.text(), "# The brief\n");
+  const referenced = await artifact("owner.repo-find-more-result.json");
+  assert.equal(referenced.status, 404, "A rule worker result is referenced; only the missing file fails.");
   assert.equal((await artifact("unrelated-notes.md")).status, 403);
   assert.equal((await artifact("../etc/passwd")).status, 403);
   const escaped = await artifact("owner.repo-issue-9-investigation-brief.md");
@@ -332,7 +334,7 @@ async function dashboard(t, { reducedMotion = true } = {}) {
     close() { this.open = false; }
     querySelector(selector) { return this.querySelectorAll(selector)[0] ?? null; }
     querySelectorAll(selector) {
-      const match = /^([a-z]+|\.[\w-]+)(?:\[(open|data-state)(?:="([^"]*)")?\])?$/.exec(selector);
+      const match = /^([a-z][a-z0-9]*|\.[\w-]+)(?:\[(open|data-state)(?:="([^"]*)")?\])?$/.exec(selector);
       assert.ok(match, `Unsupported test selector: ${selector}`);
       const [, name, attribute, value] = match;
       return this.children.flatMap((child) => {
@@ -509,6 +511,54 @@ test("resolution counts and sublists update when a task is resolved and reopened
   assert.equal(ui.run("location.hash"), "#resolved/completed");
   assert.equal(ui.get("task-list").children.length, 0);
   assert.equal(ui.get("detail-empty").hidden, false);
+});
+
+test("Find work lists rules, user links and skipped work without changing task states", async (t) => {
+  const ui = await dashboard(t);
+  const source = ui.get("flow").querySelector(".source");
+  assert.equal(source["aria-label"], "Find work: 2 enabled rules");
+  assert.equal(source.querySelector(".count").textContent, "2");
+  assert.equal(source.querySelector(".sub").textContent, "due now");
+  assert.equal(ui.get("flow").querySelectorAll(".edge")
+    .find((edge) => edge.dataset.edge === "source>initial").className.includes("idle"), false);
+  await source.fire("click");
+  assert.equal(ui.run("location.hash"), "#producers");
+  assert.equal(ui.get("producers-dialog").open, true);
+  assert.equal(ui.get("detail").open, false);
+  const rows = ui.get("rule-list").children;
+  assert.deepEqual(rows.map((row) => row.querySelector("h3").textContent), ["new-bugs", "find-more", "User links"]);
+  assert.match(rows[0].textContent, /search.*enabled.*Search: repo:owner\/repo is:issue.*Every 30m, last run .* ago, due now/);
+  assert.match(rows[1].textContent, /backlog.*Prompt: Prefer flaky tests.*Every 1d.*Worker: closed, one-shot result/);
+  assert.equal(rows[1].querySelectorAll("a").at(-1).href,
+    `/api/artifact?file=${factoryFile}&name=owner.repo-find-more-result.json`);
+  assert.equal(ui.get("ignored-list").children.length, 1);
+  assert.match(ui.get("ignored-list").textContent, /#2 2026-04-30: Archived duplicate/);
+  assert.equal(ui.get("ignored-empty").hidden, true);
+  assert.equal(ui.get("producers-note").textContent, "");
+  await ui.get("close-producers").fire("click");
+  assert.equal(ui.get("producers-dialog").open, false);
+  assert.equal(ui.run("location.hash"), "");
+  await source.fire("keydown", { key: "Enter" });
+  assert.equal(ui.get("producers-dialog").open, true);
+  await ui.get("producers-dialog").fire("cancel");
+  assert.equal(ui.get("producers-dialog").open, false);
+});
+
+test("Find work shows a paused factory and disabled or unscheduled rules", async (t) => {
+  const ui = await dashboard(t);
+  const data = structuredClone(example);
+  data.status = "paused";
+  data.rules = [{ id: "legacy", description: "Old rule.", query: "is:issue", enabled: false, last_run_at: null }];
+  data.ignored = [];
+  await writeFile(join(ui.directory, factoryFile), JSON.stringify(data));
+  await ui.run("refresh()");
+  const source = ui.get("flow").querySelector(".source");
+  assert.equal(source["aria-label"], "Find work: 0 enabled rules");
+  assert.equal(source.querySelector(".sub").textContent, "on request");
+  await source.fire("click");
+  assert.equal(ui.get("producers-note").textContent, "Scheduled rules do not run while the factory is paused.");
+  assert.match(ui.get("rule-list").children[0].textContent, /rule.*disabled.*No schedule: runs on start or when asked/);
+  assert.equal(ui.get("ignored-empty").hidden, false);
 });
 
 test("Move opens a separate popup whose draft survives refresh and conflict", async (t) => {

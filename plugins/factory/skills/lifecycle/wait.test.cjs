@@ -26,8 +26,8 @@ async function fixture(t) {
     await writeFile(temporary, content);
     await rename(temporary, file);
   }
-  async function start(files = [first, second]) {
-    const child = spawn(process.execPath, [script, "--cursor", cursor, ...files], {
+  async function start(files = [first, second], options = []) {
+    const child = spawn(process.execPath, [script, "--cursor", cursor, ...options, ...files], {
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
@@ -113,10 +113,38 @@ test("reports deletion once and detects recreation with the same contents",
     assert.deepEqual(await finish(), { changed: [f.first] });
   });
 
+test("rule schedules wake the waiter, but only active factories with due rules, and never touch the cursor",
+  { timeout: 10000 }, async (t) => {
+    const f = await fixture(t);
+    const factory = join(f.directory, "owner.repo-factory.json");
+    const write = (status, rules) => writeFile(factory, JSON.stringify({ status, rules }));
+    const rule = (id, last, every = "1m", enabled = true) => ({ id, enabled, every, last_run_at: last });
+    const ago = (ms) => new Date(Date.now() - ms).toISOString();
+
+    await write("active", [rule("never", null), rule("later", ago(0), "1d"), rule("off", null, "1m", false)]);
+    let finish = await f.start([f.first], ["--due", factory]);
+    assert.deepEqual(await finish(), { changed: [], due: ["never"] });
+    await assert.rejects(readFile(f.cursor), { code: "ENOENT" });
+
+    await write("active", [rule("soon", ago(60_000 - 300))]);
+    finish = await f.start([f.first], ["--due", factory]);
+    assert.deepEqual(await finish(), { changed: [], due: ["soon"] });
+
+    await write("active", [rule("later", ago(0), "1d")]);
+    finish = await f.start([f.first], ["--due", factory]);
+    await f.replace(f.first, "published");
+    assert.deepEqual(await finish(), { changed: [f.first], due: [] });
+
+    await write("paused", [rule("never", null)]);
+    finish = await f.start([f.second], ["--due", factory]);
+    await f.replace(f.second, "published");
+    assert.deepEqual(await finish(), { changed: [f.second], due: [] });
+  });
+
 test("help and invalid usage have distinct stdout, stderr, and exit contracts", () => {
   const help = spawnSync(process.execPath, [script, "--help"], { encoding: "utf8" });
   assert.equal(help.status, 0, help.stderr);
-  assert.match(help.stdout, /Usage: node wait\.mjs --cursor FILE RESULT/);
+  assert.match(help.stdout, /Usage: node wait\.mjs --cursor FILE \[--due FACTORY_FILE\] RESULT/);
   assert.equal(help.stderr, "");
   for (const args of [[], ["--unknown"], ["--cursor"], ["--cursor", "same", "same"]]) {
     const result = spawnSync(process.execPath, [script, ...args], { encoding: "utf8" });

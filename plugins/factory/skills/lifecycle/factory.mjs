@@ -180,6 +180,20 @@ async function writeFactory(file, values, operator) {
   if (values["rex-session"] !== undefined) rootPatch.rex_session = nullable(values["rex-session"]);
   if (values.rules !== undefined) rootPatch.rules = json(values.rules, "rules", Array.isArray);
   if (values.limits !== undefined) rootPatch.limits = json(values.limits, "limits", isObject);
+  if (values.ignored !== undefined) rootPatch.ignored = json(values.ignored, "ignored", Array.isArray);
+  if (values.rule === undefined) {
+    if (values.ran || values["rule-worker"] !== undefined) throw new Error("--ran and --rule-worker need --rule ID.");
+  } else {
+    const changes = {};
+    if (values.ran) changes.last_run_at = rootPatch.updated_at;
+    if (values["rule-worker"] !== undefined) {
+      changes.worker = values["rule-worker"] === "null" ? null : json(values["rule-worker"], "rule-worker", isObject);
+    }
+    if (!Object.keys(changes).length) throw new Error("--rule needs --ran or --rule-worker.");
+    const rules = rootPatch.rules ?? current.rules;
+    if (!rules.some((rule) => rule.id === values.rule)) throw new Error(`Unknown rule: ${values.rule}`);
+    rootPatch.rules = rules.map((rule) => (rule.id === values.rule ? { ...rule, ...changes } : rule));
+  }
 
   let tasks = Array.isArray(current.tasks) ? current.tasks : [];
   const directory = archiveDirectory(file);
@@ -357,6 +371,10 @@ async function main() {
         "updated-at": { type: "string" },
         task: { type: "string" },
         restore: { type: "boolean" },
+        ignored: { type: "string" },
+        rule: { type: "string" },
+        ran: { type: "boolean" },
+        "rule-worker": { type: "string" },
         ...Object.fromEntries(taskOptions.map((option) => [option, { type: "string" }])),
       },
       allowPositionals: true,
@@ -390,7 +408,13 @@ Run options:
   --run-goal VALUE      Factory goal
   --run-status VALUE    active, paused, blocked, or finished (default active on create)
   --rex-session VALUE   Rex session the factory started in, or null
-  --rules JSON          Replace the discovery rules array
+  --rules JSON          Replace the rules array. A rule: {id, description, enabled, kind?, query?,
+                        every?, prompt?, last_run_at?, worker?}. kind: search (needs query) or backlog.
+                        every (30m, 6h, 1d) makes the rule run on a schedule while the factory runs
+  --rule ID --ran       Stamp the rule's last_run_at now. Do it before dispatching the run, and after
+                        every due wake, even when nothing was found
+  --rule ID --rule-worker JSON  Set the rule's worker record (same fields as a task worker), or null
+  --ignored JSON        Replace the skipped-work list: [{url, at, reason}]
   --limits JSON         Merge worker caps, e.g. '{"investigation":2}' (default 3 each)
   --updated-at VALUE    Explicit run timestamp (ISO 8601 with timezone)
 

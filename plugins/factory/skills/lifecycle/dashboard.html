@@ -105,6 +105,7 @@
       .node .name { fill: var(--c); font-size: 14px; font-weight: 600; text-anchor: middle; }
       .node .count { fill: var(--fg); font-size: 40px; font-weight: 600; text-anchor: middle; }
       .node .sub { fill: var(--fg-muted); font-size: 12px; text-anchor: middle; }
+      .node.source .box { stroke-dasharray: 4 3; }
       .outcome { cursor: pointer; }
       .outcome rect { fill: transparent; }
       .outcome:hover rect, .outcome.selected rect { fill: color-mix(in srgb, var(--resolved) 14%, var(--bg)); }
@@ -130,6 +131,13 @@
       dialog:focus { outline: none; }
       dialog::backdrop { background: rgb(0 0 0 / .5); }
       #move-dialog { width: min(560px, calc(100% - 32px)); }
+      #producers-dialog { width: min(720px, calc(100% - 32px)); }
+      #rule-list, #ignored-list { list-style: none; margin: 0; padding: 0; }
+      #producers-note { margin: 16px 24px 0; }
+      #producers-note:empty { display: none; }
+      #producers-dialog h3.section { margin: 0; padding: 16px 24px 0; border-top: 1px solid var(--border); }
+      #ignored-list li, #ignored-empty { padding: 8px 24px; overflow-wrap: anywhere; }
+      #ignored-empty { margin: 0; }
       body:has(dialog[open]) { overflow: hidden; }
       .detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
         position: sticky; top: 0; z-index: 1; padding: 16px 24px; background: var(--bg-muted);
@@ -220,10 +228,22 @@
         </div>
         <div id="move-body"></div>
       </dialog>
+      <dialog id="producers-dialog" aria-labelledby="producers-title" tabindex="-1">
+        <div class="detail-head">
+          <h2 id="producers-title">Find work</h2>
+          <button id="close-producers" class="close-button" type="button" tabindex="-1"
+            aria-label="Close find work" title="Close find work">&times;</button>
+        </div>
+        <p id="producers-note" class="muted"></p>
+        <ul id="rule-list"></ul>
+        <h3 class="section">Skipped</h3>
+        <ul id="ignored-list"></ul>
+        <p id="ignored-empty" class="muted" hidden>Nothing skipped.</p>
+      </dialog>
     </main>
     <noscript>Enable JavaScript to read the factory.</noscript>
     <script type="module">
-      import { states, outcomes, artifactName, githubURL, validate, countByState, hopsSince, entered, cyclesOf, operatorStates, operatorOutcomes } from "./factory-data.mjs";
+      import { states, outcomes, artifactName, githubURL, validate, countByState, hopsSince, entered, cyclesOf, operatorStates, operatorOutcomes, nextRun, nextDue } from "./factory-data.mjs";
 
       const SVG = "http://www.w3.org/2000/svg";
       const NODE = { w: 160, h: 110 };
@@ -239,6 +259,7 @@
         blocked: { x: 565, y: 410, title: "Blocked" },
       };
       const centre = (state) => ({ x: places[state].x + NODE.w / 2, y: places[state].y + NODE.h / 2 });
+      const SOURCE = { x: 20, y: 20, w: 160, h: 90 };
       const SHORTCUT = "M310,170 C310,40 1060,40 1060,170";
       const blockedSlots = { initial: 595, investigation: 625, implementation: 665, review: 695 };
       const flowRoutes = {
@@ -275,7 +296,7 @@
       const flow = document.getElementById("flow");
       const dialog = document.getElementById("detail");
       const moveDialog = document.getElementById("move-dialog");
-
+      const producers = document.getElementById("producers-dialog");
       function element(tag, value, className) {
         const node = document.createElement(tag);
         if (value != null) node.textContent = value;
@@ -314,6 +335,14 @@
         draw();
       }
 
+      const producersOpen = () => location.hash === "#producers";
+
+      function chooseProducers() {
+        const next = producersOpen() ? "" : "#producers";
+        history.replaceState(null, "", `${location.pathname}${location.search}${next}`);
+        draw();
+      }
+
       function buildFlow() {
         const defs = svg("defs");
         const marker = svg("marker", { id: "arrow", markerWidth: 8, markerHeight: 8, refX: 7, refY: 4, orient: "auto-start-reverse" });
@@ -333,6 +362,7 @@
         edge("review>implementation", flowRoutes["review>implementation"]);
         edge("review>resolved", flowRoutes["review>resolved"]);
         edge("shortcut", SHORTCUT, "shortcut");
+        edge("source>initial", `M${SOURCE.x + SOURCE.w / 2},${SOURCE.y + SOURCE.h} L${SOURCE.x + SOURCE.w / 2},${places.initial.y - 2}`);
         for (const state of Object.keys(blockedSlots)) {
           const node = edge(`${state}>blocked`, flowRoutes[`${state}>blocked`], "dashed");
           node.setAttribute("marker-start", "url(#arrow)");
@@ -345,6 +375,24 @@
         }
 
         const nodes = svg("g", { id: "nodes" });
+        const source = svg("g", {
+          class: "node source pop", tabindex: 0, role: "button", style: "--c: var(--accent); --i: 0",
+        });
+        source.dataset.source = "producers";
+        source.append(
+          svg("rect", { class: "box", x: SOURCE.x, y: SOURCE.y, width: SOURCE.w, height: SOURCE.h, rx: 6 }),
+          svg("text", { class: "name", x: SOURCE.x + SOURCE.w / 2, y: SOURCE.y + 26 }, "Find work"),
+          svg("text", { class: "count", x: SOURCE.x + SOURCE.w / 2, y: SOURCE.y + 64 }, "0"),
+          svg("text", { class: "sub", x: SOURCE.x + SOURCE.w / 2, y: SOURCE.y + 82 }, ""),
+        );
+        source.addEventListener("click", chooseProducers);
+        source.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            chooseProducers();
+          }
+        });
+        nodes.append(source);
         states.forEach((state, index) => {
           const place = places[state];
           const group = svg("g", {
@@ -424,14 +472,28 @@
         }
         const counts = countByState(snapshot.tasks);
         Object.assign(targets, counts);
+        const enabled = snapshot.rules.filter((rule) => rule.enabled);
         for (const edge of flow.querySelectorAll(".edge")) {
-          const [from] = edge.dataset.edge.split(">");
-          const source = edge.dataset.edge === "shortcut" ? counts.investigation + counts.implementation + counts.initial
-            : counts[from];
+          const key = edge.dataset.edge;
+          const [from] = key.split(">");
+          const source = key === "shortcut" ? counts.investigation + counts.implementation + counts.initial
+            : key === "source>initial" ? enabled.length : counts[from];
           edge.classList.toggle("idle", !source);
         }
+        drawSource(enabled);
         tween();
         renderDetail(chosen);
+        renderProducers(producersOpen());
+      }
+
+      function drawSource(enabled) {
+        const group = flow.querySelector(".source");
+        const due = nextDue(snapshot);
+        group.classList.toggle("selected", producersOpen());
+        group.querySelector(".count").textContent = String(enabled.length);
+        group.querySelector(".sub").textContent = due === null ? "on request"
+          : due <= Date.now() ? "due now" : `next in ${span(Math.ceil((due - Date.now()) / 1000))}`;
+        group.setAttribute("aria-label", `Find work: ${enabled.length} enabled ${enabled.length === 1 ? "rule" : "rules"}`);
       }
 
       function tween() {
@@ -510,7 +572,10 @@
       }
 
       function age(time) {
-        const seconds = Math.max(0, Math.floor((Date.now() - Date.parse(time)) / 1000));
+        return span(Math.max(0, Math.floor((Date.now() - Date.parse(time)) / 1000)));
+      }
+
+      function span(seconds) {
         if (seconds < 60) return `${seconds}s`;
         const minutes = Math.floor(seconds / 60);
         if (minutes < 60) return `${minutes}m`;
@@ -838,6 +903,66 @@
         }
       }
 
+      function ruleRow(rule) {
+        const node = element("li", null, "task-row");
+        node.dataset.ruleId = rule.id;
+        const heading = element("div", null, "row-head");
+        const chips = element("span", null, "chips");
+        chips.append(element("span", rule.kind ?? "rule", "chip"),
+          element("span", rule.enabled ? "enabled" : "disabled", "chip"));
+        heading.append(element("h3", rule.id), chips);
+        node.append(heading, element("p", rule.description));
+        if (rule.query) {
+          const query = element("p", "Search: ");
+          query.append(element("code", rule.query));
+          node.append(query);
+        }
+        if (rule.prompt) node.append(element("p", `Prompt: ${rule.prompt}`));
+        const due = nextRun(rule);
+        const when = !rule.every ? "No schedule: runs on start or when asked."
+          : [`Every ${rule.every}`, rule.last_run_at ? `last run ${age(rule.last_run_at)} ago` : "never run",
+            ...(due === null ? ["disabled"] : [due <= Date.now() ? "due now"
+              : `next in ${span(Math.ceil((due - Date.now()) / 1000))}`])].join(", ");
+        node.append(element("p", when, "muted"));
+        if (rule.worker) {
+          const item = element("p");
+          const worker = rule.worker;
+          item.append(element("span", null, `dot ${worker.status}`),
+            `Worker: ${[worker.status, worker.mode].filter(Boolean).join(", ")} `);
+          for (const field of ["brief", "result"]) {
+            if (!worker[field]) continue;
+            const query = new URLSearchParams({ file: selection, name: artifactName(worker[field], field) });
+            item.append(link(field, `/api/artifact?${query}`), " ");
+          }
+          node.append(item);
+        }
+        return node;
+      }
+
+      function renderProducers(open) {
+        if (!open) {
+          producers.close();
+          return;
+        }
+        const manual = element("li", null, "task-row");
+        manual.append(element("h3", "User links"),
+          element("p", "Send an issue or PR link to the factory session. Links you send do not use the rules or the skipped list.", "muted"));
+        document.getElementById("rule-list").replaceChildren(...snapshot.rules.map(ruleRow), manual);
+        document.getElementById("producers-note").textContent = snapshot.status === "active" ? ""
+          : `Scheduled rules do not run while the factory is ${snapshot.status}.`;
+        const ignored = snapshot.ignored ?? [];
+        document.getElementById("ignored-list").replaceChildren(...ignored.map((item) => {
+          const entry = element("li");
+          entry.append(reference(item.url), ` ${item.at.slice(0, 10)}: ${item.reason}`);
+          return entry;
+        }));
+        document.getElementById("ignored-empty").hidden = ignored.length > 0;
+        if (!producers.open) {
+          producers.showModal();
+          producers.focus();
+        }
+      }
+
       async function requestJSON(path, options = {}) {
         const response = await fetch(path, { ...options, cache: "no-store" });
         const data = await response.json();
@@ -986,6 +1111,12 @@
       closeOnBackdrop(dialog, () => choose(null));
       document.getElementById("close-move").addEventListener("click", () => moveDialog.close());
       closeOnBackdrop(moveDialog, () => moveDialog.close());
+      document.getElementById("close-producers").addEventListener("click", () => choose(null));
+      producers.addEventListener("cancel", (event) => {
+        event.preventDefault();
+        choose(null);
+      });
+      closeOnBackdrop(producers, () => choose(null));
 
       buildFlow();
       refresh();

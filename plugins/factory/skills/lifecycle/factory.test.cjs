@@ -379,3 +379,83 @@ test("hopsSince lists history moves after a time, oldest first, with null for cr
     initial: 1, investigation: 0, implementation: 1, review: 1, blocked: 1, resolved: 1,
   });
 });
+
+const search = { id: "bugs", description: "Open bugs.", kind: "search", query: "is:issue is:open label:bug",
+  every: "30m", enabled: true, last_run_at: null };
+
+test("rules need a known kind, a query for search, and a valid interval", async (t) => {
+  const f = await started(t);
+  const rules = (rule) => ["--rules", JSON.stringify([{ ...search, ...rule }])];
+  f.fails(/Rule bugs query/, ...rules({ query: null }));
+  f.fails(/Rule bugs kind/, ...rules({ kind: "other" }));
+  f.fails(/every must look like/, ...rules({ every: "30 minutes" }));
+  f.fails(/every must look like/, ...rules({ every: "0m" }));
+  f.fails(/Rule bugs worker\.status/, ...rules({ worker: { status: "gone" } }));
+  f.ok("--rules", JSON.stringify([{ id: "old", description: "Legacy.", query: null, enabled: true, last_run_at: null }]));
+  f.ok(...rules({ worker: { status: "closed", mode: "one-shot", result: "owner.repo-bugs-result.json" } }));
+  assert.equal((await f.read()).rules[0].every, "30m");
+});
+
+test("--rule stamps the run time and records or clears the rule worker", async (t) => {
+  const f = await started(t);
+  f.ok("--rules", JSON.stringify([search, { ...search, id: "other" }]));
+  const before = await f.read();
+  f.fails(/need --rule ID/, "--ran");
+  f.fails(/need --rule ID/, "--rule-worker", "null");
+  f.fails(/needs --ran or --rule-worker/, "--rule", "bugs");
+  f.fails(/Unknown rule: nope/, "--rule", "nope", "--ran");
+  f.fails(/Rule bugs worker\.status/, "--rule", "bugs", "--rule-worker", '{"status":"gone"}');
+  assert.deepEqual(await f.read(), before, "A refused write must not change the factory.");
+
+  f.ok("--rule", "bugs", "--ran", "--updated-at", "2026-05-01T12:00:00Z");
+  let data = await f.read();
+  assert.equal(data.updated_at, "2026-05-01T12:00:00Z");
+  assert.deepEqual(data.rules.map((rule) => rule.last_run_at), ["2026-05-01T12:00:00Z", null]);
+
+  const worker = { status: "running", mode: "one-shot", session: "7f4c2a90-1d3e-4b5a-9c8d-2e6f0a1b3c4d" };
+  f.ok("--rule", "bugs", "--rule-worker", JSON.stringify(worker));
+  data = await f.read();
+  assert.deepEqual(data.rules[0].worker, worker);
+  assert.equal(data.rules[0].last_run_at, "2026-05-01T12:00:00Z", "A worker update must keep the run time.");
+  assert.equal(data.rules[1].worker, undefined);
+  f.ok("--rule", "bugs", "--rule-worker", "null");
+  assert.equal((await f.read()).rules[0].worker, null);
+});
+
+test("--ignored replaces the skipped list and accepts only GitHub links", async (t) => {
+  const f = await started(t);
+  const entry = { url: issue(7), at: "2026-05-01T12:00:00Z", reason: "The user chose to skip it." };
+  f.ok("--ignored", JSON.stringify([entry]));
+  assert.deepEqual((await f.read()).ignored, [entry]);
+  f.fails(/GitHub issue or pull request URL/, "--ignored", JSON.stringify([{ ...entry, url: "https://example.com/1" }]));
+  f.fails(/ignored\.reason/, "--ignored", JSON.stringify([{ ...entry, reason: "" }]));
+  f.ok("--ignored", "[]");
+  assert.deepEqual((await f.read()).ignored, []);
+});
+
+test("schedule helpers say what is due, only for an active factory", async () => {
+  const { intervalMs, nextRun, dueRules, nextDue } = await import("./factory-data.mjs");
+  assert.deepEqual(["30m", "6h", "1d", "9999m"].map(intervalMs), [1_800_000, 21_600_000, 86_400_000, 599_940_000]);
+  for (const bad of ["", "0m", "5", "5s", "10000m", "1.5h", " 5m"]) assert.throws(() => intervalMs(bad), /every must look like/, bad);
+
+  const at = Date.parse("2026-05-01T12:00:00Z");
+  const rule = (id, extra) => ({ id, enabled: true, last_run_at: null, ...extra });
+  const rules = [
+    rule("never", { every: "1h" }),
+    rule("ran", { every: "1h", last_run_at: "2026-05-01T11:30:00Z" }),
+    rule("overdue", { every: "10m", last_run_at: "2026-05-01T11:00:00Z" }),
+    rule("off", { every: "1m", enabled: false }),
+    rule("manual", {}),
+  ];
+  assert.deepEqual(rules.map(nextRun), [0, at + 1_800_000, Date.parse("2026-05-01T11:10:00Z"), null, null]);
+  const data = (status) => ({ status, rules });
+  assert.deepEqual(dueRules(data("active"), at), ["never", "overdue"]);
+  assert.equal(nextDue(data("active")), 0);
+  assert.deepEqual(dueRules({ status: "active", rules: rules.slice(1, 2) }, at), []);
+  assert.equal(nextDue({ status: "active", rules: rules.slice(1, 2) }), at + 1_800_000);
+  assert.equal(nextDue({ status: "active", rules: rules.slice(3) }), null);
+  for (const status of ["paused", "blocked", "finished"]) {
+    assert.deepEqual(dueRules(data(status), at), [], status);
+    assert.equal(nextDue(data(status)), null, status);
+  }
+});

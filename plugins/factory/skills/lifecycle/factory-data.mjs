@@ -17,6 +17,8 @@ const workerRoles = ["investigation", "implementation", "review"];
 const workerModes = ["one-shot", "continuous"];
 const workerStatuses = ["running", "idle", "closed", "unknown"];
 const issueStates = ["investigation", "implementation", "review"];
+export const ruleKinds = ["search", "backlog"];
+const everyUnits = { m: 60_000, h: 3_600_000, d: 86_400_000 };
 
 function isObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -106,8 +108,7 @@ export function checkTransition(task, to, operator = false) {
   }
 }
 
-function validateWorker(role, worker, at) {
-  const field = `${at} workers.${role}`;
+function validateWorker(field, worker) {
   if (!isObject(worker)) throw new Error(`${field} must be an object or null.`);
   oneOf(worker.status, workerStatuses, `${field}.status`);
   if (worker.mode != null) oneOf(worker.mode, workerModes, `${field}.mode`);
@@ -217,7 +218,7 @@ function validateTask(task, seen) {
   if (!isObject(task.workers)) throw new Error(`${at} workers must be an object.`);
   for (const [role, worker] of Object.entries(task.workers)) {
     oneOf(role, workerRoles, `${at} worker role`);
-    if (worker != null) validateWorker(role, worker, at);
+    if (worker != null) validateWorker(`${at} workers.${role}`, worker);
   }
   if (task.worktree != null) {
     if (!isObject(task.worktree)) throw new Error(`${at} worktree must be an object or null.`);
@@ -241,6 +242,44 @@ export function validateArchive(data, project, day) {
   for (const task of data.tasks) validateTask(task, { ids, issue: new Set(), pr: new Set() });
 }
 
+export function intervalMs(every) {
+  const match = /^([1-9]\d{0,3})([mhd])$/.exec(every);
+  if (!match) throw new Error(`every must look like 30m, 6h, or 1d (up to 9999 units), not ${JSON.stringify(every)}.`);
+  return Number(match[1]) * everyUnits[match[2]];
+}
+
+// Epoch ms when the rule is next due; 0 means due now; null means it has no schedule.
+export function nextRun(rule) {
+  if (!rule.enabled || !rule.every) return null;
+  return rule.last_run_at == null ? 0 : Date.parse(rule.last_run_at) + intervalMs(rule.every);
+}
+
+export function dueRules(data, now = Date.now()) {
+  if (data.status !== "active") return [];
+  return data.rules.filter((rule) => (nextRun(rule) ?? Infinity) <= now).map((rule) => rule.id);
+}
+
+export function nextDue(data) {
+  if (data.status !== "active") return null;
+  const times = data.rules.map(nextRun).filter((time) => time !== null);
+  return times.length ? Math.min(...times) : null;
+}
+
+function validateRule(rule) {
+  if (!isObject(rule)) throw new Error("Each rule must be a JSON object.");
+  text(rule.id, "rule.id");
+  const at = `Rule ${rule.id}`;
+  text(rule.description, `${at} description`);
+  nullableText(rule.query, `${at} query`);
+  if (typeof rule.enabled !== "boolean") throw new Error(`${at} enabled must be a boolean.`);
+  if (rule.last_run_at != null) timestamp(rule.last_run_at, `${at} last_run_at`);
+  if (rule.kind !== undefined) oneOf(rule.kind, ruleKinds, `${at} kind`);
+  if (rule.kind === "search") text(rule.query, `${at} query`);
+  if (rule.every != null) intervalMs(rule.every);
+  nullableText(rule.prompt, `${at} prompt`);
+  if (rule.worker != null) validateWorker(`${at} worker`, rule.worker);
+}
+
 export function validate(data) {
   if (!isObject(data)) throw new Error("Factory must be a JSON object.");
   if (data.format !== format) throw new Error(`format must be "${format}".`);
@@ -251,14 +290,18 @@ export function validate(data) {
   if (!Array.isArray(data.rules)) throw new Error("rules must be an array.");
   const ruleIds = new Set();
   for (const rule of data.rules) {
-    if (!isObject(rule)) throw new Error("Each rule must be a JSON object.");
-    text(rule.id, "rule.id");
+    validateRule(rule);
     if (ruleIds.has(rule.id)) throw new Error(`Duplicate rule ID: ${rule.id}`);
     ruleIds.add(rule.id);
-    text(rule.description, `Rule ${rule.id} description`);
-    nullableText(rule.query, `Rule ${rule.id} query`);
-    if (typeof rule.enabled !== "boolean") throw new Error(`Rule ${rule.id} enabled must be a boolean.`);
-    if (rule.last_run_at != null) timestamp(rule.last_run_at, `Rule ${rule.id} last_run_at`);
+  }
+  if (data.ignored !== undefined) {
+    if (!Array.isArray(data.ignored)) throw new Error("ignored must be an array.");
+    for (const item of data.ignored) {
+      if (!isObject(item)) throw new Error("Each ignored entry must be a JSON object.");
+      githubURL(item.url, "ignored.url");
+      timestamp(item.at, "ignored.at");
+      text(item.reason, "ignored.reason");
+    }
   }
   if (!isObject(data.limits)) throw new Error("limits must be an object.");
   for (const [role, limit] of Object.entries(data.limits)) {

@@ -179,7 +179,8 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
       } else if (url.pathname === "/api/artifact") {
         const data = await loadFactory(url.searchParams.get("file"));
         const name = url.searchParams.get("name");
-        const referenced = data.tasks.some((task) => Object.values(task.workers)
+        const referenced = [...data.tasks.map((task) => Object.values(task.workers)),
+          data.rules.map((rule) => rule.worker)].some((workers) => workers
           .some((worker) => worker && (worker.brief === name || worker.result === name)));
         if (!name || !referenced) {
           throw new HttpError(403, "Artifact is not referenced by the selected factory.");

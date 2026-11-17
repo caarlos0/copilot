@@ -10,9 +10,33 @@
     {
       "id": "new-bugs",
       "description": "Open bugs without an assignee.",
+      "kind": "search",
       "query": "repo:owner/repo is:issue is:open label:bug no:assignee",
+      "every": "30m",
       "enabled": true,
       "last_run_at": "2026-05-01T11:30:00Z"
+    },
+    {
+      "id": "find-more",
+      "description": "Look for new work in recent failures and TODOs.",
+      "kind": "backlog",
+      "prompt": "Prefer flaky tests and failing CI over feature ideas.",
+      "every": "1d",
+      "enabled": true,
+      "last_run_at": "2026-05-01T06:00:00Z",
+      "worker": {
+        "status": "closed",
+        "mode": "one-shot",
+        "session": "7f4c2a90-1d3e-4b5a-9c8d-2e6f0a1b3c4d",
+        "result": "owner.repo-find-more-result.json"
+      }
+    }
+  ],
+  "ignored": [
+    {
+      "url": "https://github.com/owner/repo/issues/2",
+      "at": "2026-04-30T10:00:00Z",
+      "reason": "Archived duplicate; the user chose to skip it."
     }
   ],
   "limits": { "investigation": 3, "implementation": 3 },

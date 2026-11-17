@@ -144,11 +144,20 @@ Review workers use `cross-model-review`, not the local `review` wrapper.
 Review depth follows the shared spend budget. A clean precision result is not
 a GitHub approval, and `review` state can have no optional model reviewer.
 Do not start a second Lever delivery coordinator, cloud runner, schedule,
-backlog refill, or autopilot merely because factory is running.
+or autopilot merely because factory is running.
+
+The producer ("Find work") is not a task state. It feeds `initial` from three
+sources: user links, `search` rules, and `backlog` rules (a one-shot read-only
+worker using `keep-the-pool-full`). A rule with `every` runs on a schedule only
+while the factory is active and running; `wait.mjs --due FACTORY_FILE` wakes the
+factory when one is due. The factory stamps `--rule ID --ran` before it
+dispatches. The `ignored` list holds skipped archive matches. The dashboard
+shows rules and skipped work read-only.
 
 The skill bundles its own copy of the coordinator's `wait.mjs` and tests for
 result notifications; it must not depend on files in the coordination plugin.
-Keep the waiter copies behaviorally aligned.
+The factory copy adds `--due`. Without it, keep the two copies behaviorally
+aligned.
 `serve.mjs` repeats the small state-directory confinement code of the coordinator
 server on purpose: the two plugins load independently.
 

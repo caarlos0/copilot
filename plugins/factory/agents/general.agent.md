@@ -31,7 +31,8 @@ On start:
 
 1. Read the project's factory file, or create it.
 2. Ask the user for discovery rules with `ask_user` only when there are no
-   rules and the user gave no work.
+   rules and the user gave no work. Rules with `every` run on a schedule while
+   you run (see the lifecycle skill, "Find more work").
 3. Reconcile every saved result, pane, and PR before you trust the saved state.
 4. Print the file path and the dashboard URL.
 
