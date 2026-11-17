@@ -76,8 +76,6 @@
       button:hover:not(:disabled) { background: var(--btn-hover); }
       .action-primary { color: #fff; background: var(--btn-primary); border-color: rgb(31 35 40 / .15); }
       .action-primary:hover:not(:disabled) { background: var(--btn-primary-hover); }
-      .action-positive { color: var(--success); }
-      .action-positive:hover:not(:disabled) { color: #fff; background: var(--btn-primary); }
       .action-danger { color: var(--danger); }
       .action-danger:hover:not(:disabled) { color: #fff; background: var(--btn-danger-hover); }
       select { width: 480px; max-width: 100%; padding: 5px 12px; background: var(--bg); }
@@ -659,7 +657,7 @@
         const actions = element("span", null, "row-actions");
         actions.append(links);
         if (operatorStates(task).length) {
-          const move = element("button", "Move", "move action-positive");
+          const move = element("button", "Move", "move");
           move.type = "button";
           move.addEventListener("click", () => openMove(task));
           actions.append(move);
