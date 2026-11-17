@@ -580,7 +580,8 @@ syntax-highlighted evidence details. A task's **Move** button opens a second
 popup that saves an allowed return state or a direct move to `resolved`,
 with a required operator comment. Cmd+Enter or Ctrl+Enter saves it.
 Resolving also requires a non-merge outcome.
-The task list stays on the state it showed. It shows acknowledgement status
+The task list stays on the state it showed. Departing rows fade out unless
+reduced motion is enabled. It shows acknowledgement status
 without claiming that a worker stopped or restarted. Close a popup with its
 button, Escape, or a click outside it. The move popup retains its draft and
 original revision during refresh; on conflict, reload the task,

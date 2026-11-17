@@ -656,6 +656,7 @@
 
       function taskRow(task, expanded) {
         const node = element("li", null, "task-row");
+        node.dataset.taskId = task.id;
         node.style.setProperty("--c", `var(--${task.state})`);
         const cycles = cyclesOf(task);
         const heading = element("div", null, "row-head");
@@ -763,10 +764,25 @@
         title.append(element("span", String(tasks.length), "counter"));
         const signature = JSON.stringify([selection, state, tasks]);
         if (list.dataset.signature !== signature) {
-          list.replaceChildren(...tasks.map((task) => taskRow(task, expanded)));
+          const rows = tasks.map((task) => taskRow(task, expanded));
+          if (!reduced && dialog.dataset.state === state) {
+            [...list.children].forEach((row, index) => {
+              if (tasks.some((task) => task.id === row.dataset.taskId)) return;
+              rows.splice(index, 0, row);
+              if (row.inert) return;
+              row.inert = true;
+              row.animate({ opacity: [1, 0] }, {
+                duration: 220, easing: "ease-out", fill: "forwards",
+              }).onfinish = () => {
+                row.remove();
+                document.getElementById("detail-empty").hidden = list.children.length > 0;
+              };
+            });
+          }
+          list.replaceChildren(...rows);
           list.dataset.signature = signature;
         }
-        document.getElementById("detail-empty").hidden = tasks.length > 0;
+        document.getElementById("detail-empty").hidden = list.children.length > 0;
         if (dialog.dataset.state !== state) document.getElementById("detail-status").textContent = "";
         dialog.dataset.state = state;
         if (!dialog.open) {

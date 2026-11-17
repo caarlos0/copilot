@@ -274,7 +274,7 @@ test("the page script parses, never renders data as HTML, and finds its elements
 });
 
 // Model only the DOM operations used by the task list; HTTP and the page script are real.
-async function dashboard(t) {
+async function dashboard(t, { reducedMotion = true } = {}) {
   const { url, directory } = await server(t);
   const elements = new Map();
   const document = {
@@ -293,10 +293,20 @@ async function dashboard(t) {
       this.hidden = false;
       this.className = "";
     }
-    append(...children) { this.children.push(...children); }
+    append(...children) {
+      for (const child of children) if (child instanceof Element) child.parentNode = this;
+      this.children.push(...children);
+    }
     replaceChildren(...children) {
-      this.children = children;
+      for (const child of this.children) if (child instanceof Element) child.parentNode = null;
+      this.children = [];
+      this.append(...children);
       if (this.tag === "select") this.value = children[0]?.value ?? "";
+    }
+    remove() {
+      if (!this.parentNode) return;
+      this.parentNode.children = this.parentNode.children.filter((child) => child !== this);
+      this.parentNode = null;
     }
     get textContent() { return this.children.map((child) => typeof child === "string" ? child : child.textContent).join(""); }
     set textContent(value) { this.children = [String(value)]; }
@@ -334,7 +344,7 @@ async function dashboard(t) {
     document, location, URL, URLSearchParams,
     history: { replaceState: (_, __, value) => { location.href = new URL(value, location).href; } },
     window: { addEventListener() {} },
-    matchMedia: () => ({ matches: true }),
+    matchMedia: () => ({ matches: reducedMotion }),
     setTimeout() {}, clearTimeout() {},
     fetch: (path, options = {}) => get(url, path, {
       ...options,
@@ -352,7 +362,7 @@ async function dashboard(t) {
 }
 
 test("state selection opens a modal list that can close and reopen", async (t) => {
-  const ui = await dashboard(t);
+  const ui = await dashboard(t, { reducedMotion: false });
   ui.run("choose('blocked')");
   assert.equal(ui.get("detail").tag, "dialog");
   assert.equal(ui.get("detail").open, true);
@@ -466,6 +476,58 @@ test("the move popup closes on its close button and backdrop without saving", as
   assert.equal(ui.get("move-dialog").open, false);
   assert.equal(ui.get("detail").open, true);
   assert.equal(await readFile(file, "utf8"), original);
+});
+
+test("a saved move fades out before its row is removed, even during refresh", async (t) => {
+  const ui = await dashboard(t, { reducedMotion: false });
+  ui.run("choose('blocked')");
+  const list = ui.get("task-list");
+  const row = list.children[0];
+  const animation = {};
+  let fades = 0;
+  row.animate = (frames) => {
+    fades += 1;
+    assert.deepEqual(Array.from(frames.opacity), [1, 0]);
+    return animation;
+  };
+  await row.querySelector(".move").fire("click");
+  const form = ui.get("move-body").querySelector("form");
+  form.querySelector("select").value = "initial";
+  form.querySelector("textarea").value = "This is now unblocked.";
+  await form.fire("submit");
+  assert.equal(ui.get("move-dialog").open, false);
+  assert.equal(fades, 1, "A successful move must start the row's fade.");
+  assert.equal(list.children[0], row, "Keep the row until the fade finishes.");
+  assert.equal(row.inert, true, "The departing row must not accept another move.");
+  assert.equal(ui.get("detail-empty").hidden, true);
+  const file = join(ui.directory, factoryFile);
+  assert.equal(JSON.parse(await readFile(file, "utf8")).tasks.find((task) => task.id === "issue-5").state, "initial");
+  await ui.run("refresh()");
+  assert.equal(list.children[0], row, "Refresh must not cut the fade short.");
+  assert.equal(fades, 1);
+  animation.onfinish();
+  assert.equal(list.children.length, 0);
+  assert.equal(ui.get("detail-empty").hidden, false);
+  assert.equal(ui.get("detail").dataset.state, "blocked");
+});
+
+test("a rejected move does not fade the row", async (t) => {
+  const ui = await dashboard(t, { reducedMotion: false });
+  ui.run("choose('blocked')");
+  const row = ui.get("task-list").children[0];
+  let faded = false;
+  row.animate = () => { faded = true; return {}; };
+  await row.querySelector(".move").fire("click");
+  const form = ui.get("move-body").querySelector("form");
+  form.querySelector("select").value = "initial";
+  form.querySelector("textarea").value = "This is now unblocked.";
+  const { update } = await import("./factory.mjs");
+  await update(join(ui.directory, factoryFile), { task: "issue-5", "next-action": "Changed while editing" });
+  await form.fire("submit");
+  assert.match(form.querySelector(".save-error").textContent, /changed since it was read/);
+  assert.equal(faded, false);
+  assert.equal(ui.get("task-list").children[0], row);
+  assert.equal(ui.get("move-dialog").open, true);
 });
 
 test("the popup can resolve an initial task with an outcome and comment", async (t) => {
