@@ -690,6 +690,12 @@
         clear.hidden = false;
       }
 
+      function closeMove() {
+        const comment = moveDialog.querySelector("textarea")?.value;
+        if (comment && !window.confirm("Discard your unsaved comment?")) return;
+        moveDialog.close();
+      }
+
       function openMove(task) {
         const title = document.getElementById("move-title");
         title.textContent = `Move: ${task.title}`;
@@ -1196,8 +1202,12 @@
         choose(null);
       });
       closeOnBackdrop(dialog, () => choose(null));
-      document.getElementById("close-move").addEventListener("click", () => moveDialog.close());
-      closeOnBackdrop(moveDialog, () => moveDialog.close());
+      document.getElementById("close-move").addEventListener("click", closeMove);
+      moveDialog.addEventListener("cancel", (event) => {
+        event.preventDefault();
+        closeMove();
+      });
+      closeOnBackdrop(moveDialog, closeMove);
       document.getElementById("close-producers").addEventListener("click", () => choose(null));
       producers.addEventListener("cancel", (event) => {
         event.preventDefault();

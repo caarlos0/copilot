@@ -278,7 +278,7 @@ test("the page script parses, never renders data as HTML, and finds its elements
 });
 
 // Model only the DOM operations used by the task list; HTTP and the page script are real.
-async function dashboard(t, { reducedMotion = true } = {}) {
+async function dashboard(t, { reducedMotion = true, confirm = () => true } = {}) {
   const { url, directory } = await server(t);
   const elements = new Map();
   const document = {
@@ -328,7 +328,11 @@ async function dashboard(t, { reducedMotion = true } = {}) {
     get options() { return this.children.filter((child) => child.tag === "option"); }
     setAttribute(name, value) { this[name === "class" ? "className" : name] = value; }
     addEventListener(name, callback) { this.listeners.set(name, callback); }
-    async fire(name, event = {}) { await this.listeners.get(name)?.({ target: this, preventDefault() {}, ...event }); }
+    async fire(name, event = {}) {
+      const dispatched = { target: this, ...event, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; } };
+      await this.listeners.get(name)?.(dispatched);
+      return dispatched;
+    }
     getBoundingClientRect() { return { left: 100, right: 900, top: 100, bottom: 700 }; }
     focus() { document.activeElement = this; }
     requestSubmit() { this.submitted = this.fire("submit"); }
@@ -359,7 +363,7 @@ async function dashboard(t, { reducedMotion = true } = {}) {
     ...await import("./factory-data.mjs"),
     document, location, URL, URLSearchParams,
     history: { replaceState: (_, __, value) => { location.href = new URL(value, location).href; } },
-    window: { addEventListener() {} },
+    window: { addEventListener() {}, confirm },
     matchMedia: () => ({ matches: reducedMotion }),
     performance: { now: () => 0 },
     requestAnimationFrame: (callback) => callback(2000),
@@ -682,19 +686,48 @@ test("Move opens a separate popup whose draft survives refresh and conflict", as
   assert.match(ui.get("detail-status").textContent, /to Initial\. Comment saved; awaiting factory acknowledgement/);
 });
 
-test("the move popup closes on its close button and backdrop without saving", async (t) => {
-  const ui = await dashboard(t);
+test("the move popup confirms before discarding a draft through Esc, close, or backdrop", async (t) => {
+  const confirmations = [];
+  let answer = false;
+  const ui = await dashboard(t, { confirm: (message) => { confirmations.push(message); return answer; } });
   const file = join(ui.directory, factoryFile);
   const original = await readFile(file, "utf8");
   ui.run("choose('blocked')");
-  await ui.get("task-list").querySelector(".move").fire("click");
-  await ui.get("close-move").fire("click");
-  assert.equal(ui.get("move-dialog").open, false);
-  await ui.get("task-list").querySelector(".move").fire("click");
   const outside = { clientX: 950, clientY: 400 };
-  await ui.get("move-dialog").fire("pointerdown", outside);
-  await ui.get("move-dialog").fire("click", outside);
-  assert.equal(ui.get("move-dialog").open, false);
+  const dismiss = [
+    async () => {
+      const event = await ui.get("move-dialog").fire("cancel");
+      assert.equal(event.defaultPrevented, true, "Esc must suppress the dialog's default close.");
+    },
+    async () => ui.get("close-move").fire("click"),
+    async () => {
+      await ui.get("move-dialog").fire("pointerdown", outside);
+      await ui.get("move-dialog").fire("click", outside);
+    },
+  ];
+  for (const close of dismiss) {
+    await ui.get("task-list").querySelector(".move").fire("click");
+    const comment = ui.get("move-body").querySelector("textarea");
+    comment.value = "Keep this draft";
+    await close();
+    assert.equal(ui.get("move-dialog").open, true, "Declining must keep the popup open.");
+    assert.equal(comment.value, "Keep this draft");
+    assert.equal(confirmations.at(-1), "Discard your unsaved comment?");
+
+    answer = true;
+    await close();
+    assert.equal(ui.get("move-dialog").open, false, "Accepting must close the popup.");
+    answer = false;
+  }
+  assert.equal(confirmations.length, dismiss.length * 2);
+
+  for (const close of dismiss) {
+    await ui.get("task-list").querySelector(".move").fire("click");
+    const confirmationCount = confirmations.length;
+    await close();
+    assert.equal(ui.get("move-dialog").open, false, "An empty comment must close without confirmation.");
+    assert.equal(confirmations.length, confirmationCount);
+  }
   assert.equal(ui.get("detail").open, true);
   assert.equal(await readFile(file, "utf8"), original);
 });
