@@ -654,6 +654,27 @@ test("flow edges and token routes use only straight horizontal and vertical segm
   }
 });
 
+test("the flow stops its continuous animations while every task is resolved", async (t) => {
+  const ui = await dashboard(t);
+  const calm = () => ui.get("flow").className.split(" ").includes("calm");
+  const write = (tasks) => writeFile(join(ui.directory, factoryFile), JSON.stringify({ ...example, tasks }));
+  const resolved = example.tasks.filter((task) => task.state === "resolved");
+  assert.equal(calm(), false, "The example has open tasks.");
+
+  await write(resolved);
+  await ui.run("refresh()");
+  assert.equal(calm(), true);
+
+  await write(example.tasks);
+  await ui.run("refresh()");
+  assert.equal(calm(), false, "Any open task resumes the animations.");
+
+  await write([]);
+  await ui.run("refresh()");
+  assert.equal(calm(), true, "A factory with no tasks is idle.");
+  assert.match(html, /#flow\.calm \.edge, #flow\.calm \.ring \{ animation: none; \}/);
+});
+
 test("global filters update state totals, resolution outcomes, and every opened list", async (t) => {
   const ui = await dashboard(t);
   const filter = ui.get("global-filter");

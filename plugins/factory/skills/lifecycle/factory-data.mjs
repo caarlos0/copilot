@@ -407,6 +407,8 @@ export function countByState(tasks) {
   return counts;
 }
 
+export const isIdle = (tasks) => tasks.every((task) => task.state === "resolved");
+
 export function hopsSince(tasks, since) {
   const cutoff = Date.parse(since);
   return tasks.flatMap((task) => task.history.flatMap((item, index) =>
