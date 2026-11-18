@@ -2026,3 +2026,47 @@ test("a card shows the worker summary for its state, else the newest, and folds 
   task.workers = {};
   assert.equal(card(task).querySelector(".summary"), null, "No summary, no block.");
 });
+
+test("the palette button opens the palette, but not over another dialog", async (t) => {
+  const ui = await dashboard(t);
+  await ui.get("open-palette").fire("click");
+  assert.equal(ui.get("palette-dialog").open, true);
+  assert.equal(ui.get("palette-list").children.length, 5);
+  ui.get("palette-dialog").open = false;
+  ui.get("move-dialog").open = true;
+  await ui.get("open-palette").fire("click");
+  assert.equal(ui.get("palette-dialog").open, false);
+});
+
+test("the page works on a phone: viewport, safe areas, touch sizes and contained overflow", () => {
+  assert.match(html, /<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">/);
+  assert.match(html, /<div id="flow-wrap">\s*<svg id="flow"/);
+  assert.match(html, /\n {6}#open-palette \{ display: none; \}/, "The palette button is hidden on desktop.");
+
+  const blocks = (query) => {
+    const found = [];
+    for (let start = html.indexOf(`@media ${query} {`); start !== -1; start = html.indexOf(`@media ${query} {`, start + 1)) {
+      let depth = 0;
+      let index = html.indexOf("{", start);
+      for (; index < html.length; index += 1) {
+        if (html[index] === "{") depth += 1;
+        if (html[index] === "}" && --depth === 0) break;
+      }
+      found.push(html.slice(start, index + 1));
+    }
+    assert.notEqual(found.length, 0, query);
+    return found.join("\n");
+  };
+  const narrow = blocks("(max-width: 700px)");
+  const touch = blocks("(max-width: 700px), (pointer: coarse)");
+  assert.match(touch, /#open-palette \{ display: inline-block; \}/);
+  assert.match(touch, /button, select, input, textarea \{ min-height: 44px; font-size: 16px; \}/);
+  assert.match(touch, /\.icon-button \{ width: 44px; height: 44px; \}/);
+  assert.match(narrow, /env\(safe-area-inset-top\)/);
+  assert.match(narrow, /env\(safe-area-inset-bottom\)/);
+  assert.match(narrow, /#flow-wrap \{ overflow-x: auto;/);
+  assert.match(narrow, /dialog, #move-dialog, #settings-dialog \{ width: 100%;/);
+
+  const widths = [...(narrow + touch).matchAll(/(?<![-\w])(?:width|min-width): (\d+)px/g)].map((match) => Number(match[1]));
+  assert.deepEqual(widths.filter((width) => width > 430), [900], "Only the flowchart, inside its own scroller, is wider.");
+});
