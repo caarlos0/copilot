@@ -466,8 +466,6 @@ A rule has `id`, `description`, `enabled`, `kind` (`search` or `backlog`; see
 `query` (required for `search`), `prompt`, `every` (`30m`, `6h`, `1d`),
 `last_run_at`, and `worker`. An older rule with only a `query` and no `kind`
 is a search rule; it follows the same start, request, and queue-drain rules.
-The dashboard shows the rules, skipped items, and next due time under "Find
-work".
 
 1. If the factory has no `search` or `backlog` rules and the user gave no work,
    use `ask_user` to ask which work to find. Offer examples such as open bugs, a
@@ -532,9 +530,8 @@ every dashboard `budget.updated` event, and never exceed it. Reconcile stale
 worker only when the count stays within the budget. The per-role `limits` still
 apply on top. Lowering the budget below the running count never stops a worker:
 start no new worker until the count falls under it. Change it with
-`factory.mjs --budget '{"max_parallel_workers":N}'`; the operator can also edit it
-in the dashboard settings dialog (cog beside the factory name), together with
-`limits` and the `lever` ceilings. Reread `limits` after every dashboard
+`factory.mjs --budget '{"max_parallel_workers":N}'`; the operator can also edit
+it in the dashboard settings. Reread `limits` after every dashboard
 `limits.updated` event. The budget is a worker count, not the Lever spend budget.
 
 ### Self-improve
@@ -944,10 +941,7 @@ the IDs follow immediately, in the same turn.
 
 ## Receive worker events
 
-Idle time is the gap between a worker finishing and you acting on it. Watching
-files made it long: the waiter woke on any file change, including your own
-writes, then needed a reread to learn what happened, and could miss a change.
-The broker closes the gap. Workers and `factory.mjs` append typed events to one
+Workers and `factory.mjs` append typed events to one
 durable log (`<owner.repo>-factory-events.jsonl`, mode 0600, beside the factory
 file). `broker.mjs wait` wakes within milliseconds of an append and prints
 exactly what happened. The factory file stays the source of truth for task
@@ -1200,46 +1194,17 @@ node serve.mjs
 Bun can run it too. No package install is needed. It binds to `127.0.0.1`,
 uses port 8766 (`--port PORT` to change it), and prints its URL. It lists the
 factories of both `~/.local/state/copilot-factory/` and the legacy
-`~/.local/state/copilot-coordinator/`, whichever exist (the new one wins on a
-name clash); `--directory PATH` uses only that directory. Do not stop another
-process to take a port. Share the
-printed HTTP URL, not a `file://` link. Do not open the browser for the user.
+`~/.local/state/copilot-coordinator/` (the new one wins on a name clash);
+`--directory PATH` uses only that directory. Do not stop another process to
+take a port. Share the printed HTTP URL, not a `file://` link. Do not open the
+browser for the user.
 
-The page draws the flow as a flowchart with a task count per state. Below
-Resolved, each resolution outcome has its own count and opens a filtered task
-list. The Resolved total opens all resolved tasks. The dashed "Find work" node above
-Initial feeds it. It shows the count of enabled rules and the next due time, and
-opens a read-only popup with each rule (kind, query or prompt, schedule, last
-run, worker and its result), the user-links source, and the skipped list. A
-separate Self-improve section lists `improve` rules the same way; they are not
-counted in the node or its next due time.
-Click a state to open
-a task list docked on the right edge, beside the flowchart, which shrinks or scrolls
-while it is open, with links (opened in a new tab), time in state, blocker or
-resolution, the full history, and expandable worker, head, cycle, merge, and
-syntax-highlighted evidence details. A task's **Move** button (**Unblock** on a
-blocked task) opens a second
-popup that saves an allowed return state or a direct move to `resolved`,
-with a required operator comment. On a blocked task the popup preselects the
-state the task was blocked from (else the first open state), shows the blocker
-reason, the state it came from and the last three history notes,
-lists the blocker `options` as one-click choices with the recommended one marked, and keeps the
-free comment field. Choosing an option copies its label verbatim into the
-comment (and selects its `state`, when allowed); the operator can edit it.
-Cmd+Enter or Ctrl+Enter saves it.
-Resolving also requires a non-merge outcome.
-The task list stays on the state it showed. Departing rows fade out over 300 ms unless
-reduced motion is enabled. A saved move shows no success message. Rows show
-acknowledgement status without claiming that a worker stopped or restarted. Close the task list with
-its button or Escape; it stays open while you click other states. Close a popup
-with its button, Escape, or a click outside it. The move popup retains its draft and
-original revision during refresh; on conflict, reload the task,
-review the destination, and save again. It rereads the file every 30
-seconds and keeps the last good snapshot when a read fails. It lists only
-`*-factory.json` files; the old board lists the old formats. It shows saved
-state, not live worker status. The server accepts writes only from its own
-origin, with JSON, through the shared writer. Do not expose it on a public
-interface. Do not add a polling schedule just for the dashboard.
+The page shows the flow with a task count per state, task lists, the read-only
+"Find work" panel, Move and Unblock, settings, and a Cmd+K palette (see
+`AGENTS.md`). It rereads the file every 30 seconds and shows saved state, not
+live worker status. The server accepts writes only from its own origin, with
+JSON, through the shared writer. Do not expose it on a public interface. Do not
+add a polling schedule just for the dashboard.
 
 Use one shared server for all factories. Before you reuse a listener, check
 that it is this server. Do not run it in a worker pane. Stop only a server you

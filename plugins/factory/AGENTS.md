@@ -198,8 +198,8 @@ implementation worker also emits `pr.merged`, a hint: the factory verifies the
 merge on GitHub, resolves the task, and releases its panes and worktree, and
 `reconcile.mjs` stays the backstop for a missed event. The factory JSON stays the
 only task tracker and the result files stay evidence; events are only
-notifications and the worker-to-factory channel. This exists to cut idle time:
-the factory must re-arm `wait` immediately after handling events. A failed
+notifications and the worker-to-factory channel. The factory must re-arm
+`wait` immediately after handling events. A failed
 emit never fails a state write; `reconcile.mjs` catches whatever an event
 missed.
 
