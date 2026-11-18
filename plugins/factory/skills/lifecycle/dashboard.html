@@ -161,7 +161,9 @@
       }
       @keyframes task-flash { from { background: color-mix(in srgb, var(--accent) 25%, transparent); } }
       #title-row { display: flex; align-items: center; gap: 8px; }
-      #open-settings { width: 32px; height: 32px; padding: 0; font-size: 18px; line-height: 28px; }
+      .icon-button { display: inline-flex; flex: none; align-items: center; justify-content: center;
+        width: 32px; height: 32px; padding: 0; line-height: 1; }
+      .icon-button svg { display: block; }
       .settings-form h3 { margin: 24px 0 4px; padding-top: 16px; border-top: 1px solid var(--border); font-size: 14px; }
       .settings-form h3:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
       .settings-form input { display: block; width: 100%; margin-top: 4px; padding: 5px 12px; background: var(--bg); font-weight: 400; }
@@ -179,8 +181,7 @@
         position: sticky; top: 0; z-index: 1; padding: 16px 24px; background: var(--bg-muted);
         border-bottom: 1px solid var(--border); }
       .detail-head h2 { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-      .close-button { flex: none; width: 32px; height: 32px; padding: 0; font-size: 24px;
-        line-height: 28px; color: var(--fg-muted); background: transparent; border-color: transparent; }
+      .close-button { font-size: 24px; color: var(--fg-muted); background: transparent; border-color: transparent; }
       .move-form .controls { justify-content: flex-end; }
       #detail-empty { margin: 16px 24px; }
       .global-filter { display: flex; flex: 1; align-items: center; gap: 8px; max-width: 560px; min-width: 200px; }
@@ -295,7 +296,7 @@
       <dialog id="move-dialog" aria-labelledby="move-title">
         <div class="detail-head">
           <h2 id="move-title"></h2>
-          <button id="close-move" class="close-button" type="button" tabindex="-1"
+          <button id="close-move" class="icon-button close-button" type="button" tabindex="-1"
             aria-label="Cancel move" title="Cancel move">&times;</button>
         </div>
         <div id="move-body"></div>
@@ -304,7 +305,7 @@
         <div class="detail-head">
           <input id="palette-input" type="text" autocomplete="off" placeholder="Go to task" aria-label="Go to task"
             role="combobox" aria-expanded="true" aria-autocomplete="list" aria-controls="palette-list">
-          <button id="close-palette" class="close-button" type="button" tabindex="-1"
+          <button id="close-palette" class="icon-button close-button" type="button" tabindex="-1"
             aria-label="Close palette" title="Close palette">&times;</button>
         </div>
         <ul id="palette-list" role="listbox" aria-label="Tasks"></ul>
@@ -313,7 +314,7 @@
       <dialog id="settings-dialog" aria-labelledby="settings-title">
         <div class="detail-head">
           <h2 id="settings-title">Settings</h2>
-          <button id="close-settings" class="close-button" type="button" tabindex="-1"
+          <button id="close-settings" class="icon-button close-button" type="button" tabindex="-1"
             aria-label="Cancel settings change" title="Cancel settings change">&times;</button>
         </div>
         <div id="settings-body"></div>
@@ -322,7 +323,7 @@
     <aside id="detail" aria-labelledby="detail-title" tabindex="-1" hidden>
       <div class="detail-head">
         <h2 id="detail-title"></h2>
-        <button id="close-detail" class="close-button" type="button"
+        <button id="close-detail" class="icon-button close-button" type="button"
           aria-label="Close task list" title="Close task list">&times;</button>
       </div>
       <div id="task-view">
