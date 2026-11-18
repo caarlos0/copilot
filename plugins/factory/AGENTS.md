@@ -52,9 +52,11 @@ root `rex_session` field. Only the factory manages Rex panes. Workers run
 commands with their own shell tool and never create, close, or type into Rex
 windows, tabs, splits, or panes; the launch instructions carry this rule, and
 release closes verified stray windows. The `REX_*` variables stay set for
-workers. Implementation worktrees come from the local default branch: launch
-plain `wt NAME` in the main checkout, never `wt NAME --main`, which uses
-`origin/<default>` and loses unpushed local commits.
+workers. Implementation worktrees come from the local default branch:
+`skills/lifecycle/worktree.mjs create NAME` in the main checkout branches from
+local `HEAD`, never from `origin`, so unpushed local commits are kept. The helper
+reads `worktreePathTemplate` from `$COPILOT_HOME/settings.json` and prints the
+path and branch that the factory records. It needs no other tool.
 
 `hooks.json` ships one `sessionStart` hook that gives every session the Rex
 terminal context (`rex __internal session-start`). It runs on every session
@@ -84,7 +86,7 @@ hydrate a task before work starts: check the claim, find related PRs, add
 context, and set a verdict. Every task that needs work goes `initial` to
 `investigation` to `implementation`; a task with an existing PR may go straight
 to `review`. The investigation worker is one-shot and read-only, runs in
-the primary checkout, and never uses `wt`, a worktree, or a branch. It never
+the primary checkout, and never uses `worktree.mjs`, a worktree, or a branch. It never
 edits product files, commits, pushes, opens a PR, or fixes. Its brief says "do
 not change anything" and forbids writes outside the result path and `$TMPDIR`.
 A clear, small task still gets a quick read-only investigation that confirms
@@ -256,8 +258,8 @@ server on purpose: the two plugins load independently.
 `reconcile.mjs` is a read-only sweep that prints JSON findings: complete results
 newer than their task, open issue-less task branches ahead of the default
 branch, clean worktrees of merged tasks whose HEAD is in the default branch
-(`merged-worktree`: remove with `wt NAME --delete`, only if the run created it;
-never `wt --cleanup`), open Rex windows of resolved tasks, finished rule workers
+(`merged-worktree`: remove with `worktree.mjs delete NAME`, only if the run created it;
+`delete` refuses a dirty or unmerged tree), open Rex windows of resolved tasks, finished rule workers
 whose window is open or whose status is still `running` (`rule-worker-done`),
 `running` workers whose window is not in the live Rex session
 (`worker-missing`, plus `rex-session-missing` once when the session is gone;

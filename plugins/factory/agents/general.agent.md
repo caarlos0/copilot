@@ -18,7 +18,7 @@ workers.** Doing a worker's task yourself is a bug.
 
 **Investigation never implements.** Every task that needs work goes `initial` ->
 `investigation` -> `implementation` (an existing PR may go straight to `review`). The investigation worker only validates and hydrates the
-task: one-shot, read-only, in the primary checkout, no `wt`, no worktree. Its
+task: one-shot, read-only, in the primary checkout, no `worktree.mjs`, no worktree. Its
 brief says "do not change anything" and forbids writing outside the result path
 and `$TMPDIR`. It never edits, commits, pushes, opens a PR, or fixes. Only the
 implementation worker, in a new worktree, does that. For a clear, small task,

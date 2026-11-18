@@ -138,10 +138,9 @@ Only the factory manages Rex panes. Workers inherit `REX_SESSION`,
 a rule, a worker runs ordinary commands in new Rex windows and leaves them
 behind. Workers run every command with their own shell tool. They never create
 a Rex window, tab, split, or pane, and never close, type into, or rename one.
-Do not unset the `REX_*` variables for workers: `wt` reads them only for
-`--tab` and `--split`, which workers must not use, but the `rex` CLI still
-reaches the default server without them. Unsetting only hides the problem
-and breaks legitimate Rex tooling. The startup rule and the release check below
+Do not unset the `REX_*` variables for workers: the `rex` CLI still reaches the
+default server without them, so unsetting only hides the problem and breaks
+legitimate Rex tooling. The startup rule and the release check below
 are the controls.
 
 ## Keep the factory file
@@ -299,7 +298,7 @@ leave work behind. Treat each finding as unfinished work:
   the candidates, clear the record with `--rule ID --rule-worker null`, and
   close the window (see "Find more work").
 - `merged-worktree`: a `merged` task's worktree is clean and its HEAD is in the
-  default branch. If `created_by_run` is true, remove it with `wt NAME --delete`
+  default branch. If `created_by_run` is true, remove it with `worktree.mjs delete NAME`
   as in "Release panes". Leave a reused worktree (`false`).
 - `worker-missing`: a worker (a task role or a rule worker) has status `running`,
   but its window is not in the live Rex session. It carries the role, window,
@@ -822,7 +821,7 @@ or a branch, or fixes anything. It writes only its result path and `$TMPDIR`.
 Its brief carries the hard line from "Brief the workers". If the worker finds
 that the fix is small, it says so in the result and still does not make it: the
 fix is the implementation worker's job. Record the worker with
-`mode: "one-shot"`, no worktree, and no `wt`. `factory.mjs` refuses an
+`mode: "one-shot"`, no worktree, and no `worktree.mjs`. `factory.mjs` refuses an
 investigation worker with `mode: "continuous"` or a `worktree`, and refuses a
 worktree on a task in `investigation`.
 
@@ -846,17 +845,23 @@ investigation result with `verdict: implement`. It is the only worker that
 edits, commits, or pushes. Use a new worktree for every task:
 
 ```sh
-wt fix-login -- copilot --agent coding:caarlos0 --model claude-sonnet-5.5 --name 'Fix login redirect' --yolo --sandbox -i 'Read /abs/brief.md and do it.'
+WT=$(node /abs/path/to/worktree.mjs create fix-login)   # run in the main checkout
+rex window new -c "$(echo "$WT" | jq -r .path)" -- copilot --agent coding:caarlos0 --model claude-sonnet-5.5 --name 'Fix login redirect' --yolo --sandbox -i 'Read /abs/brief.md and do it.'
 ```
 
-Run `wt` inside the new tab, without `--tab` or `--split`, and without
-`--main`. Open the tab with its working directory set to the project's main
-checkout (`rex window new -c MAIN_CHECKOUT ...`). Plain `wt NAME` there branches
-from the current local `HEAD`; `--main` branches from `origin/<default>`, which
-drops local commits that are not pushed yet. Check that the main checkout is on
-the default branch before you launch. For a task that
-already has a PR, use `wt --pr N`: it may reuse a worktree, so record
-`created_by_run` as false. Keep `--sandbox`: `--yolo` skips tool permission
+`worktree.mjs` (next to this file) is a dependency-free helper. It prints JSON
+`{path, branch, created_by_run}`; record the worktree with `factory.mjs
+--worktree` from that JSON, never from a path you computed. The path comes from
+the `worktreePathTemplate` setting in `$COPILOT_HOME/settings.json` (default
+`~/.copilot`), or `~/Developer/worktrees/{repo}/{branch}` when it is unset.
+Run it in the project's main checkout: it branches from the current local
+`HEAD`, never from `origin`, so local commits that are not pushed yet are kept.
+`--base REF` picks another start point. Check that the main checkout is on the
+default branch before you launch. If a worktree for the branch exists, it is
+reused and `created_by_run` is false. For a task that already has a PR, use
+`worktree.mjs create NAME --pr N`; record `created_by_run` from its output.
+`worktree.mjs create NAME -- CMD...` runs CMD in the worktree instead, for use
+inside a Rex window you opened yourself. Keep `--sandbox`: `--yolo` skips tool permission
 prompts, not sandbox restrictions. Omit `--autopilot` unless the user asks.
 
 It reproduces the problem, makes the smallest complete change, validates it,
@@ -989,7 +994,7 @@ window. Run `reconcile.mjs` at startup and handle each `worker-missing`:
    planned relaunch to `next_action`, before any launch.
 4. Count the relaunch against `budget.max_parallel_workers` and `limits`. Leave
    the rest `unknown` and launch them as slots free up.
-5. Reuse the existing worktree. Never run `wt` to create another; keep
+5. Reuse the existing worktree. Never run `worktree.mjs create` for another; keep
    `created_by_run` unchanged.
 6. Relaunch as in "Launch rules" with the same brief plus one line: "You were
    restarted: check git status and your result file, then continue." Investigation
@@ -1139,7 +1144,7 @@ steps in order, in the same turn:
 2. Mirror the worker's final result (`merged: true`) with `factory.mjs`.
 3. Write `resolved` with outcome `merged` and `details.merge_commit`.
 4. Close the worker and review panes (see "Release panes").
-5. Plan and remove an eligible worktree with `wt NAME --delete`, under the
+5. Plan and remove an eligible worktree with `worktree.mjs delete NAME`, under the
    rules in "Release panes".
 6. Re-arm the waiter.
 
@@ -1205,8 +1210,10 @@ written and the panes are closed, or the reason they stay is recorded. The
   Report each stray as a worker rule violation.
 
 Remove a worktree only as a separate action: one created by this run, with
-complete work and nothing uncommitted or unpushed. Use `wt NAME --delete`. If
-it asks for confirmation, leave it to the user. Never run `wt --cleanup`.
+complete work and nothing uncommitted. Use `worktree.mjs delete NAME` (never
+`--force`). It never asks: it removes a clean worktree whose tip is in the
+default branch or in a remote branch, and otherwise exits 2 with
+`removed: false` and a `reason`; then leave the worktree alone.
 Never delete a reused worktree or one with pending work. The `merged-worktree`
 finding from `reconcile.mjs` flags a merged task's worktree that is ready for
 this.
