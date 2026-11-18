@@ -661,6 +661,84 @@ test("a row without references has no links line", async (t) => {
   assert.equal(row.children[0].className, "row-head");
 });
 
+test("history steps carry relative gaps, loop and operator markers", async (t) => {
+  const ui = await dashboard(t);
+  const history = [
+    { state: "initial", at: "2026-05-01T10:00:00Z", note: null },
+    { state: "implementation", at: "2026-05-01T10:02:00Z", note: "Started." },
+    { state: "review", at: "2026-05-01T17:30:00Z", note: "PR opened." },
+    { state: "implementation", at: "2026-05-01T17:31:00Z", note: "Changes requested." },
+    { state: "blocked", at: "2026-05-01T17:31:00Z", note: "Need a decision.", source: "dashboard", feedback_id: "f1" },
+    { state: "implementation", at: "2026-05-04T17:31:00Z", note: "Resumed." },
+  ];
+  const steps = JSON.parse(ui.run(`JSON.stringify(historySteps(${JSON.stringify(history)}))`));
+  assert.deepEqual(steps.map((step) => step.state), history.map((item) => item.state));
+  assert.deepEqual(steps.map((step) => step.gap), [null, "+2m", "+7h 28m", "+1m", "+0s", "+3d"]);
+  assert.deepEqual(steps.map((step) => step.back), [null, null, null, "rework", null, "unblocked"]);
+  assert.deepEqual(steps.map((step) => step.operator), [false, false, false, false, true, false]);
+  assert.equal(steps[0].note, null);
+});
+
+test("history renders one flow step per entry, even for a single entry", async (t) => {
+  const ui = await dashboard(t);
+  for (const id of ["issue-12", "issue-7"]) {
+    const task = example.tasks.find((item) => item.id === id);
+    const row = ui.run(`taskRow(${JSON.stringify(task)}, new Set())`);
+    const history = row.children.find((child) => child.tag === "ol");
+    assert.equal(history.children.length, task.history.length, id);
+    assert.deepEqual(history.querySelectorAll(".history-state").map((node) => node.textContent),
+      task.history.map((item) => item.state));
+    assert.equal(row.querySelector("h4").textContent, `History (${task.history.length})`);
+    assert.equal(history.querySelectorAll(".history-gap").length, task.history.length - 1);
+  }
+  const loop = ui.run(`taskRow(${JSON.stringify(example.tasks.find((item) => item.id === "issue-7"))}, new Set())`);
+  assert.equal(loop.querySelectorAll(".history-gap").filter((gap) => gap.textContent.includes("↩ rework")).length, 1);
+});
+
+test("history marks operator moves and keeps their note visible", async (t) => {
+  const ui = await dashboard(t);
+  const task = structuredClone(example.tasks.find((item) => item.id === "issue-9"));
+  task.history.push({ state: "blocked", at: "2026-05-02T00:00:00Z", note: "Wait for the vendor.", source: "dashboard", feedback_id: "f1" });
+  task.state = "blocked";
+  const row = ui.run(`taskRow(${JSON.stringify(task)}, new Set())`);
+  const nodes = row.querySelectorAll(".history-node");
+  assert.equal(nodes.length, 4);
+  assert.equal(nodes.filter((node) => node.className.split(" ").includes("operator")).length, 1);
+  assert.equal(nodes.at(-1).querySelector(".history-badge").textContent, "operator");
+  assert.equal(nodes.at(-1).querySelector(".history-note").textContent, "Wait for the vendor.");
+  assert.match(nodes.at(-1).title, /Wait for the vendor\./);
+});
+
+test("long histories fold older steps and keep them reachable across refreshes", async (t) => {
+  const ui = await dashboard(t);
+  const task = structuredClone(example.tasks.find((item) => item.id === "issue-7"));
+  while (task.history.length < 25) {
+    const at = new Date(Date.parse(task.history.at(-1).at) + 60_000).toISOString();
+    task.history.push({ state: task.history.length % 2 ? "implementation" : "review", at, note: `Step ${task.history.length}.` });
+  }
+  task.state = task.history.at(-1).state;
+  const row = ui.run(`taskRow(${JSON.stringify(task)}, new Set())`);
+  assert.equal(row.querySelector("h4").textContent, "History (25)");
+  assert.deepEqual(row.querySelectorAll("ol").map((list) => list.children.length), [17, 8]);
+  assert.equal(row.querySelectorAll(".history-node").length, 25);
+  const folded = row.children.find((child) => child.className === "history-earlier");
+  assert.equal(folded.open, false);
+  assert.equal(folded.querySelector("summary").textContent, "Earlier steps (17)");
+  assert.equal(folded.dataset.taskId, `${task.id}:history`);
+  const reopened = ui.run(`taskRow(${JSON.stringify(task)}, new Set(["${task.id}:history"]))`);
+  assert.equal(reopened.children.find((child) => child.className === "history-earlier").open, true);
+});
+
+test("rows omit the Next line when there is no next action", async (t) => {
+  const ui = await dashboard(t);
+  const base = example.tasks.find((item) => item.id === "issue-9");
+  const lines = (next) => ui.run(`taskRow(${JSON.stringify({ ...base, next_action: next })}, new Set())`)
+    .children.filter((child) => child.tag === "p" && child.textContent.startsWith("Next:"));
+  assert.equal(lines("Ship it.").length, 1);
+  for (const next of ["None", "none.", "", "  ", null]) assert.equal(lines(next).length, 0, String(next));
+  assert.equal(lines("None. The PR is merged.").length, 1);
+});
+
 test("resolved sublists count each outcome and open only matching tasks", async (t) => {
   const ui = await dashboard(t, { reducedMotion: false });
   const data = structuredClone(example);
