@@ -192,8 +192,8 @@
       .move-form .controls { justify-content: flex-end; }
       #detail-empty { margin: 16px 24px; }
       .global-filter { display: flex; flex: 1; align-items: center; gap: 8px; max-width: 560px; min-width: 200px; }
-      .global-filter input { flex: 1; min-width: 0; }
-      #global-filter-count { margin: 0; white-space: nowrap; }
+      .global-filter input { flex: none; width: 280px; max-width: 100%; }
+      #global-filter-count { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       #detail-filter-count { margin: 8px 24px; }
       .counter { display: inline-block; min-width: 20px; margin-left: 8px; padding: 0 6px; border-radius: 2em;
         background: color-mix(in srgb, var(--neutral) 20%, transparent); font-size: 12px; font-weight: 500;
@@ -273,7 +273,6 @@
       <div class="global-filter">
         <input id="global-filter" type="search" autocomplete="off" placeholder="Filter tasks (press /)"
           aria-label="Filter tasks" aria-describedby="global-filter-count">
-        <button id="clear-filter" type="button" hidden>Clear</button>
         <p id="global-filter-count" class="muted" role="status" hidden></p>
       </div>
       <div class="refresh">
@@ -821,17 +820,14 @@
 
       function renderFilterStatus(matchingCount) {
         const status = document.getElementById("global-filter-count");
-        const clear = document.getElementById("clear-filter");
         const query = filterQuery();
         if (!snapshot || !query) {
           status.textContent = "";
           status.hidden = true;
-          clear.hidden = true;
           return;
         }
         status.textContent = `${matchingCount} of ${snapshot.tasks.length} tasks match.`;
         status.hidden = false;
-        clear.hidden = false;
       }
 
       function closeMove() {
@@ -1731,10 +1727,6 @@
       document.getElementById("refresh").addEventListener("click", refresh);
       document.getElementById("open-settings").addEventListener("click", openSettings);
       document.getElementById("global-filter").addEventListener("input", draw);
-      document.getElementById("clear-filter").addEventListener("click", () => {
-        document.getElementById("global-filter").value = "";
-        draw();
-      });
       window.addEventListener("hashchange", draw);
       const closeChoice = () => choose(null);
       document.getElementById("close-detail").addEventListener("click", closeChoice);

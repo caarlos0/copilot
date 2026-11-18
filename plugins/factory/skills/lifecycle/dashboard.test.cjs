@@ -695,7 +695,6 @@ test("global task filters search any field, combine terms, and survive refresh a
   await filter.fire("input");
   assert.deepEqual(rows().map((row) => row.dataset.taskId), ["issue-7"]);
   assert.equal(ui.get("global-filter-count").textContent, `1 of ${example.tasks.length} tasks match.`);
-  assert.equal(ui.get("clear-filter").hidden, false);
   assert.equal(ui.get("detail-filter-count").hidden, false);
   assert.equal(ui.get("detail-filter-count").textContent, "1 of 1 tasks match the global filter.");
 
@@ -718,10 +717,9 @@ test("global task filters search any field, combine terms, and survive refresh a
   assert.deepEqual(rows().map((row) => row.dataset.taskId), ["issue-9"]);
   assert.equal(ui.get("move-dialog").open, true);
 
-  await ui.get("clear-filter").fire("click");
-  assert.equal(filter.value, "");
+  filter.value = "";
+  await filter.fire("input");
   assert.equal(ui.get("global-filter-count").hidden, true);
-  assert.equal(ui.get("clear-filter").hidden, true);
   assert.equal(rows().length, example.tasks.filter((task) => task.state === "implementation").length);
 });
 
@@ -790,7 +788,8 @@ test("global filters update state totals, resolution outcomes, and every opened 
   await merged.fire("click");
   assert.deepEqual(ui.get("task-list").children.map((row) => row.dataset.taskId), ["issue-3"]);
 
-  await ui.get("clear-filter").fire("click");
+  ui.get("global-filter").value = "";
+  await ui.get("global-filter").fire("input");
   assert.equal(nodeCount("review"), 1);
   assert.equal(nodeCount("resolved"), 1);
   assert.equal(outcomeCount("merged"), 1);
