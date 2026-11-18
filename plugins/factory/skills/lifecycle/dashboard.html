@@ -436,16 +436,55 @@
       // Backticked text wins; otherwise a UUID, a block:/window:/pane: ID, a hex SHA with a digit and a letter, a path or a file name.
       const CODE = /`([^`\n]+)`|\b(?:(?:block|window|session|pane):)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b|\b(?:block|window|pane):[\w-]+|\b(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}\b|(?<![\w/.:~<-])(?:~|\.{1,2})?(?:\/[\w@.+-]*[\w@+-])+\/?|\b[\w.-]+\.(?:mjs|cjs|js|json|jsonl|md|html|yml|yaml|sh)\b/g;
 
+      // A GitHub URL, `owner/repo#N`, or `#N`; plain `#N` and hashes need a GitHub `owner/repo` project.
+      const REFS = /https:\/\/github\.com\/[^\s<>()`]*[^\s<>()`.,;:!?'"]|(?<![\w./-])([\w.-]+\/[\w.-]+)#(\d+)\b|(?<![\w#&])#(\d+)\b/g;
+      const SHA = /^(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}$/;
+
+      function githubLink(label, href) {
+        const node = link(label, href);
+        node.target = "_blank";
+        node.rel = "noopener noreferrer";
+        node.addEventListener("click", (event) => event.stopPropagation());
+        return node;
+      }
+
+      const projectRepo = () => /^[\w.-]+\/[\w.-]+$/.test(snapshot?.project ?? "") ? snapshot.project : null;
+
+      function linkify(text) {
+        const repo = projectRepo();
+        const parts = [];
+        let last = 0;
+        for (const match of text.matchAll(REFS)) {
+          const target = match[1] ?? repo;
+          const href = match[0].startsWith("https:") ? match[0] : target && `https://github.com/${target}/issues/${match[2] ?? match[3]}`;
+          if (!href) continue;
+          if (match.index > last) parts.push(text.slice(last, match.index));
+          parts.push(githubLink(match[0], href));
+          last = match.index + match[0].length;
+        }
+        if (last < text.length) parts.push(text.slice(last));
+        return parts;
+      }
+
+      function chip(text) {
+        const node = element("code");
+        const repo = SHA.test(text) ? projectRepo() : null;
+        const linked = repo ? [githubLink(text, `https://github.com/${repo}/commit/${text}`)] : linkify(text);
+        if (linked.length === 1 && typeof linked[0] !== "string") node.append(linked[0]);
+        else node.textContent = text;
+        return node;
+      }
+
       function codeParts(text) {
         const value = String(text);
         const parts = [];
         let last = 0;
         for (const match of value.matchAll(CODE)) {
-          if (match.index > last) parts.push(value.slice(last, match.index));
-          parts.push(element("code", match[1] ?? match[0]));
+          if (match.index > last) parts.push(...linkify(value.slice(last, match.index)));
+          parts.push(chip(match[1] ?? match[0]));
           last = match.index + match[0].length;
         }
-        if (last < value.length) parts.push(value.slice(last));
+        if (last < value.length) parts.push(...linkify(value.slice(last)));
         return parts;
       }
 

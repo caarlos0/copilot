@@ -1757,11 +1757,53 @@ test("code-like text renders as inline code, escaped, once, and without touching
   }
   assert.deepEqual(parts("run `npm test -- -x` and `abc1234`"),
     ["run ", { code: "npm test -- -x", tag: "code" }, " and ", { code: "abc1234", tag: "code" }]);
-  for (const plain of ["defaced", "1234567", "and/or", "https://github.com/o/r/pull/1", "plain words, e.g. this."]) {
+  for (const plain of ["defaced", "1234567", "and/or", "plain words, e.g. this."]) {
     assert.deepEqual(parts(plain), [plain]);
   }
   assert.deepEqual(parts("<b>x</b> abc1234"), ["<b>x</b> ", { code: "abc1234", tag: "code" }]);
   assert.deepEqual(parts(`${uuid} ${uuid}`).filter((part) => part.code).length, 2);
+});
+
+test("commit hashes, #N, owner/repo#N and GitHub URLs become safe links", async (t) => {
+  const ui = await dashboard(t);
+  const parts = (text) => JSON.parse(ui.run(`JSON.stringify(codeParts(${JSON.stringify(text)}).map((part) => {
+    if (typeof part === "string") return part;
+    const anchor = part.tag === "a" ? part : part.children[0];
+    return { tag: part.tag, text: part.textContent, ...(anchor?.tag === "a" ? { href: anchor.href, target: anchor.target, rel: anchor.rel } : {}) };
+  }))`));
+  const link = (text, href) => ({ tag: "a", text, href, target: "_blank", rel: "noopener noreferrer" });
+  ui.run('snapshot.project = "github/runtime"');
+  assert.deepEqual(parts("Fixed by `76b60939`, see PR #40789 and other/repo#9."), [
+    "Fixed by ", { tag: "code", text: "76b60939", href: "https://github.com/github/runtime/commit/76b60939", target: "_blank", rel: "noopener noreferrer" },
+    ", see PR ", link("#40789", "https://github.com/github/runtime/issues/40789"), " and ",
+    link("other/repo#9", "https://github.com/other/repo/issues/9"), ".",
+  ]);
+  assert.deepEqual(parts("abc1234 and https://github.com/o/r/pull/1."), [
+    { tag: "code", text: "abc1234", href: "https://github.com/github/runtime/commit/abc1234", target: "_blank", rel: "noopener noreferrer" },
+    " and ", link("https://github.com/o/r/pull/1", "https://github.com/o/r/pull/1"), ".",
+  ]);
+  assert.deepEqual(parts("deadbeef C#1 a&#12"), ["deadbeef C#1 a&#12"]);
+  assert.deepEqual(parts("<b>#5</b>"), ["<b>", link("#5", "https://github.com/github/runtime/issues/5"), "</b>"]);
+  assert.deepEqual(parts("`run #5 now`"), [{ tag: "code", text: "run #5 now" }]);
+  ui.run('snapshot.project = "not a repo"');
+  assert.deepEqual(parts("abc1234 #5 other/repo#9"), [
+    { tag: "code", text: "abc1234" }, " #5 ", link("other/repo#9", "https://github.com/other/repo/issues/9"),
+  ]);
+});
+
+test("a link inside a suggested answer does not pick the answer", async (t) => {
+  const ui = await dashboard(t);
+  const data = structuredClone(example);
+  data.tasks.find((item) => item.id === "issue-5").blocker.options = [{ label: "Merge #7" }];
+  await writeFile(join(ui.directory, factoryFile), JSON.stringify(data));
+  await ui.run("refresh()");
+  ui.run("choose('blocked')");
+  await ui.get("task-list").querySelector(".move").fire("click");
+  const anchor = ui.get("move-body").querySelector(".option").querySelector("a");
+  assert.equal(anchor.href, "https://github.com/owner/repo/issues/7");
+  let stopped = false;
+  await anchor.fire("click", { stopPropagation: () => { stopped = true; } });
+  assert.ok(stopped);
 });
 
 test("rows wrap UUIDs, SHAs, panes, paths and backticked text in code and keep links", async (t) => {
