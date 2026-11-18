@@ -604,6 +604,15 @@ test("hopsSince lists history moves after a time, oldest first, with null for cr
   });
 });
 
+test("isIdle is true only when every task is resolved", async () => {
+  const { isIdle } = await import("./factory-data.mjs");
+  const task = (state) => ({ state });
+  assert.equal(isIdle([]), true);
+  assert.equal(isIdle([task("resolved"), task("resolved")]), true);
+  assert.equal(isIdle([task("resolved"), task("blocked")]), false);
+  assert.equal(isIdle([task("resolved"), task("initial")]), false);
+});
+
 const search = { id: "bugs", description: "Open bugs.", kind: "search", query: "is:issue is:open label:bug",
   every: "30m", enabled: true, last_run_at: null };
 
