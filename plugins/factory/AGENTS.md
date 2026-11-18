@@ -68,7 +68,7 @@ and `rex` and `jq` exist. Keep `--feature-session-naming=false`: the factory
 never renames a Rex session. The user-level dotfiles hook does the same, so
 with both installed the context appears twice; remove one.
 
-`hooks.json` also ships one `agentStop` hook, `skills/lifecycle/stop-hook.mjs`.
+`hooks.json` also ships one `agentStop` hook, `hooks/stop-hook.mjs`.
 It blocks the end of a coordinator turn (`decision: "block"` with a `reason` the
 model reads as its next prompt) when the run is not `finished` and either no
 waiter is armed (the same check as `broker.mjs armed`) or `reconcile.mjs`
@@ -111,7 +111,7 @@ rule, the `task`, `read_agent`, `write_agent` and `run_dynamic_workflow` tools;
 commands `gh pr merge`, `git merge` without `--ff-only`, `rex new`, `rex session
 new|create|rename`, a `copilot` launch with `--autopilot` or without `--model
 claude-sonnet-5.5`. Rules are one table in `guard.mjs`,
-tested in `guard.test.cjs`. The hook matches the command text only, so it
+tested in `hooks/guard.test.cjs`. The hook matches the command text only, so it
 catches model slips, not a deliberate bypass (`sh -c` is unwrapped; a launcher
 script is not). It allows every other call and any call it cannot parse. The
 script path comes from `PLUGIN_ROOT`; if no root variable is set, the hook
@@ -356,5 +356,5 @@ or scheduled rule remains actionable.
 
 Run `node --test plugins/factory/skills/lifecycle/*.test.cjs` from the
 repository root for factory data, writer, migration, server, dashboard, and
-result notification changes. Run `node --test plugins/factory/*.test.cjs` for
+result notification changes. Run `node --test plugins/factory/hooks/*.test.cjs` for
 the session, stop, and guard hooks.

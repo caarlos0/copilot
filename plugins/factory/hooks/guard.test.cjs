@@ -5,8 +5,8 @@ const { tmpdir } = require("node:os");
 const { join } = require("node:path");
 const { after, test } = require("node:test");
 
-const hooks = require("./hooks.json");
-const guard = join(__dirname, "hooks", "guard.mjs");
+const hooks = require("../hooks.json");
+const guard = join(__dirname, "guard.mjs");
 
 const home = mkdtempSync(join(tmpdir(), "guard-home-"));
 const scratch = mkdtempSync(join(tmpdir(), "guard-tmp-"));
@@ -136,7 +136,7 @@ const merge = { toolName: "bash", toolArgs: { command: "gh pr merge 1" }, cwd: h
 
 test("hooks.json gates the guard on FACTORY_COORDINATOR=1", () => {
   assert.ok(entry.timeoutSec > 0 && entry.timeoutSec <= 30);
-  const root = { PLUGIN_ROOT: __dirname };
+  const root = { PLUGIN_ROOT: join(__dirname, "..") };
   for (const gate of [{}, { FACTORY_COORDINATOR: "0" }, { FACTORY_COORDINATOR: "" }]) {
     const out = hook({ ...root, ...gate }, merge);
     assert.equal(out.status, 0);

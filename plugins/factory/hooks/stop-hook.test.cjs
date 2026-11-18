@@ -5,7 +5,7 @@ const { tmpdir } = require("node:os");
 const { join } = require("node:path");
 const { test } = require("node:test");
 
-const hooks = require("./hooks.json");
+const hooks = require("../hooks.json");
 const [entry] = hooks.hooks.agentStop;
 
 async function fixture(t) {
@@ -24,7 +24,7 @@ async function fixture(t) {
       const result = spawnSync("/bin/bash", ["-c", entry.bash], {
         encoding: "utf8",
         input: JSON.stringify(input),
-        env: { PATH: process.env.PATH, PLUGIN_ROOT: __dirname, FACTORY_COORDINATOR: "1", FACTORY_FILE: file, ...env },
+        env: { PATH: process.env.PATH, PLUGIN_ROOT: join(__dirname, ".."), FACTORY_COORDINATOR: "1", FACTORY_FILE: file, ...env },
       });
       assert.equal(result.status, 0, result.stderr);
       return result.stdout.trim() === "" ? null : JSON.parse(result.stdout);

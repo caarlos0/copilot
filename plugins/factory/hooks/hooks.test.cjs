@@ -5,7 +5,7 @@ const { tmpdir } = require("node:os");
 const { join } = require("node:path");
 const { test } = require("node:test");
 
-const hooks = require("./hooks.json");
+const hooks = require("../hooks.json");
 const [entry] = hooks.hooks.sessionStart;
 const jq = spawnSync("sh", ["-c", "command -v jq"], { encoding: "utf8" }).stdout.trim();
 const needsJq = { skip: jq ? false : "jq is not installed" };
