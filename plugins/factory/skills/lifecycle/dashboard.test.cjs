@@ -1164,3 +1164,63 @@ test("the worker write boundary is present in the skill and plugin rules", () =>
     assert.match(text, /read\s+`plugins\/factory\/AGENTS\.md`\s+before\s+(its|the)\s+first\s+edit/i, file);
   }
 });
+
+test("code-like text renders as inline code, escaped, once, and without touching links", async (t) => {
+  const ui = await dashboard(t);
+  const parts = (text) => JSON.parse(ui.run(`JSON.stringify(codeParts(${JSON.stringify(text)})
+    .map((part) => typeof part === "string" ? part : { code: part.textContent, tag: part.tag }))`));
+  const uuid = "01a1ec42-3b1e-7470-b269-912f7f7bd4fd";
+  const sha = "be66032a1b2c3d4e5f60718293a4b5c6d7e8f901";
+  for (const value of [uuid, `block:${uuid}`, `window:${uuid}`, "be66032", sha, "~/.copilot/state/x.json", "/tmp/a/b", "dashboard.test.cjs"]) {
+    assert.deepEqual(parts(`see ${value} now`), ["see ", { code: value, tag: "code" }, " now"], value);
+  }
+  assert.deepEqual(parts("run `npm test -- -x` and `abc1234`"),
+    ["run ", { code: "npm test -- -x", tag: "code" }, " and ", { code: "abc1234", tag: "code" }]);
+  for (const plain of ["defaced", "1234567", "and/or", "https://github.com/o/r/pull/1", "plain words, e.g. this."]) {
+    assert.deepEqual(parts(plain), [plain]);
+  }
+  assert.deepEqual(parts("<b>x</b> abc1234"), ["<b>x</b> ", { code: "abc1234", tag: "code" }]);
+  assert.deepEqual(parts(`${uuid} ${uuid}`).filter((part) => part.code).length, 2);
+});
+
+test("rows wrap UUIDs, SHAs, panes, paths and backticked text in code and keep links", async (t) => {
+  const ui = await dashboard(t);
+  const pane = "block:01a1ec42-3b1e-7470-b269-912f7f7bd4fd";
+  const task = structuredClone(example.tasks.find((item) => item.id === "issue-5"));
+  task.blocker.reason = "Run `npm test` after be66032 lands in /tmp/work/tree.";
+  task.next_action = "Check `a.json`.";
+  task.worktree = { path: "/tmp/work/tree", branch: "x" };
+  task.workers = { implementation: { status: "running", name: "Fix 9a8b7c6", pane, brief: "brief.md", result: "result.json" } };
+  task.history.at(-1).note = "Merged as 0123abc.";
+  const row = ui.run(`taskRow(${JSON.stringify(task)}, new Set())`);
+  const codes = row.querySelectorAll("code").map((node) => node.textContent);
+  for (const expected of ["npm test", "be66032", "/tmp/work/tree", "a.json", "9a8b7c6", pane, "0123abc"]) {
+    assert.ok(codes.includes(expected), `${expected} in ${JSON.stringify(codes)}`);
+  }
+  assert.ok(codes.every((value) => !value.includes("`")));
+  const worker = row.querySelector(".workers").querySelector("li");
+  assert.ok(worker.querySelectorAll("code").some((node) => node.textContent === pane));
+  assert.ok(worker.querySelectorAll("a").length >= 1, "Artifact links stay links.");
+  assert.equal(row.querySelector(".blocker-options").querySelectorAll("li").length, task.blocker.options.length);
+});
+
+test("the unblock popup wraps backticked option labels in code inside the button", async (t) => {
+  const ui = await dashboard(t);
+  const data = structuredClone(example);
+  data.tasks.find((item) => item.id === "issue-5").blocker.options = [{ label: "Run `gh auth login` first" }];
+  await writeFile(join(ui.directory, factoryFile), JSON.stringify(data));
+  await ui.run("refresh()");
+  ui.run("choose('blocked')");
+  await ui.get("task-list").querySelector(".move").fire("click");
+  const choice = ui.get("move-body").querySelector(".option");
+  assert.equal(choice.querySelector("code").textContent, "gh auth login");
+  assert.equal(choice.textContent, "Run gh auth login first");
+});
+
+test("code uses the GitHub inline code style in both color schemes", () => {
+  assert.match(html, /--code-bg: rgba\(175, 184, 193, \.2\)/);
+  assert.match(html, /--code-bg: rgba\(110, 118, 129, \.4\)/);
+  const rule = html.match(/\n\s*code \{([^}]*)\}/)[1];
+  for (const part of [/font-family: var\(--mono\)/, /font-size: 85%/, /padding: \.2em \.4em/, /border-radius: 6px/,
+    /background: var\(--code-bg\)/, /overflow-wrap: anywhere/]) assert.match(rule, part);
+});

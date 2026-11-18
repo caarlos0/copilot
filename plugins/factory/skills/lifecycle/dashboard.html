@@ -13,6 +13,7 @@
         --fg-muted: #59636e;
         --bg: #fff;
         --bg-muted: #f6f8fa;
+        --code-bg: rgba(175, 184, 193, .2);
         --border: #d1d9e0;
         --border-emphasis: #818b98;
         --btn-bg: #f6f8fa;
@@ -45,6 +46,7 @@
           --fg-muted: #9198a1;
           --bg: #0d1117;
           --bg-muted: #151b23;
+          --code-bg: rgba(110, 118, 129, .4);
           --border: #3d444d;
           --border-emphasis: #656c76;
           --btn-bg: #212830;
@@ -90,7 +92,9 @@
       a { color: var(--accent); text-decoration: none; }
       a:hover { text-decoration: underline; }
       label { display: block; margin-bottom: 4px; font-weight: 600; }
-      code, pre { font-family: var(--mono); font-size: 12px; }
+      code { font-family: var(--mono); font-size: 85%; padding: .2em .4em; border-radius: 6px; background: var(--code-bg);
+        white-space: break-spaces; overflow-wrap: anywhere; }
+      pre { font-family: var(--mono); font-size: 12px; }
       button, select, textarea, input { font: inherit; line-height: 20px; color: var(--fg); border: 1px solid var(--border); border-radius: 6px; }
       button { padding: 5px 16px; font-weight: 500; background: var(--btn-bg); cursor: pointer; }
       button:hover:not(:disabled) { background: var(--btn-hover); }
@@ -385,6 +389,28 @@
         const node = document.createElement(tag);
         if (value != null) node.textContent = value;
         if (className) node.className = className;
+        return node;
+      }
+
+      // Backticked text wins; otherwise a UUID, a block:/window:/pane: ID, a hex SHA with a digit and a letter, a path or a file name.
+      const CODE = /`([^`\n]+)`|\b(?:(?:block|window|session|pane):)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b|\b(?:block|window|pane):[\w-]+|\b(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}\b|(?<![\w/.:~<-])(?:~|\.{1,2})?(?:\/[\w@.+-]*[\w@+-])+\/?|\b[\w.-]+\.(?:mjs|cjs|js|json|jsonl|md|html|yml|yaml|sh)\b/g;
+
+      function codeParts(text) {
+        const value = String(text);
+        const parts = [];
+        let last = 0;
+        for (const match of value.matchAll(CODE)) {
+          if (match.index > last) parts.push(value.slice(last, match.index));
+          parts.push(element("code", match[1] ?? match[0]));
+          last = match.index + match[0].length;
+        }
+        if (last < value.length) parts.push(value.slice(last));
+        return parts;
+      }
+
+      function rich(tag, text, className) {
+        const node = element(tag, null, className);
+        node.append(...codeParts(text));
         return node;
       }
 
@@ -769,7 +795,7 @@
 
       function openMove(task) {
         const title = document.getElementById("move-title");
-        title.textContent = `${task.state === "blocked" ? "Unblock" : "Move"}: ${task.title}`;
+        title.replaceChildren(...codeParts(`${task.state === "blocked" ? "Unblock" : "Move"}: ${task.title}`));
         document.getElementById("move-body").replaceChildren(moveForm(task));
         moveDialog.showModal();
         moveDialog.querySelector("select").focus();
@@ -822,7 +848,7 @@
           options.hidden = !suggested.length;
           options.replaceChildren(...(suggested.length ? [element("p", "Suggested answers. Pick one, then edit or write your own below.", "muted")] : []),
             ...suggested.map((option) => {
-              const choice = element("button", option.label, "option");
+              const choice = rich("button", option.label, "option");
               choice.type = "button";
               choice.setAttribute("aria-pressed", "false");
               if (option.recommended) choice.append(element("span", "Recommended", "tag"));
@@ -977,7 +1003,7 @@
         head.append(element("span", step.state, "history-state"), " ", element("span", step.time, "history-time"));
         if (step.operator) head.append(element("span", "operator", "history-badge"));
         box.append(head);
-        if (step.note) box.append(element("p", step.note, "history-note"));
+        if (step.note) box.append(rich("p", step.note, "history-note"));
         entry.append(box);
         return entry;
       }
@@ -1008,7 +1034,7 @@
         node.style.setProperty("--c", `var(--${task.state})`);
         const cycles = cyclesOf(task);
         const heading = element("div", null, "row-head");
-        heading.append(element("h3", task.title));
+        heading.append(rich("h3", task.title));
         if (operatorStates(task).length) {
           const move = element("button", task.state === "blocked" ? "Unblock" : "Move", "move");
           move.type = "button";
@@ -1035,30 +1061,32 @@
         }
         node.append(chips);
         if (task.blocker) {
-          node.append(element("p", `Blocked in ${task.blocker.from}: ${task.blocker.reason}`));
+          node.append(rich("p", `Blocked in ${task.blocker.from}: ${task.blocker.reason}`));
           if (task.blocker.options) {
             const choices = element("ul", null, "blocker-options");
             for (const option of task.blocker.options) {
-              choices.append(element("li", `${option.label}${option.recommended ? " (recommended)" : ""}`));
+              choices.append(rich("li", `${option.label}${option.recommended ? " (recommended)" : ""}`));
             }
             node.append(choices);
           }
         }
         if (task.resolution) {
-          node.append(element("p", `Resolved: ${task.resolution.outcome}${task.resolution.note ? `. ${task.resolution.note}` : ""}`));
+          node.append(rich("p", `Resolved: ${task.resolution.outcome}${task.resolution.note ? `. ${task.resolution.note}` : ""}`));
         }
         if (task.feedback) {
           const feedback = task.history.find((item) => item.feedback_id === task.feedback.id);
-          node.append(element("p", feedback.note, "feedback-note"),
+          node.append(rich("p", feedback.note, "feedback-note"),
             element("p", task.feedback.acknowledged_id === task.feedback.id
               ? "Factory acknowledged this direction." : "Awaiting factory acknowledgement.", "muted"));
         }
-        if (!/^(none\.?)?$/i.test(task.next_action?.trim() ?? "")) node.append(element("p", `Next: ${task.next_action}`));
+        if (!/^(none\.?)?$/i.test(task.next_action?.trim() ?? "")) node.append(rich("p", `Next: ${task.next_action}`));
         node.append(element("h4", `History (${task.history.length})`), ...historyFlow(task, expanded));
         const more = element("details");
         more.dataset.taskId = `${task.id}:details`;
         more.open = expanded.has(more.dataset.taskId);
-        more.append(element("summary", "Task details"), element("p", `${snapshot.project} / ${task.id}`, "muted"));
+        const identity = element("p", null, "muted");
+        identity.append(element("code", snapshot.project), " / ", element("code", task.id));
+        more.append(element("summary", "Task details"), identity);
         if (task.pr && task.state !== "resolved") {
           const merge = element("p");
           if (task.merge) {
@@ -1077,13 +1105,17 @@
           for (const [role, worker] of workers) {
             const item = element("li");
             const dot = element("span", null, `dot ${worker.status}`);
-            item.append(dot, `${role}: ${worker.status}${worker.name ? `, ${worker.name}` : ""}${worker.pane ? `, ${worker.pane}` : ""} `);
+            item.append(dot, ...codeParts(`${role}: ${worker.status}${worker.name ? `, ${worker.name}` : ""}${worker.pane ? `, ${worker.pane}` : ""} `));
             appendArtifacts(item, worker);
             list.append(item);
           }
           more.append(list);
         }
-        if (task.worktree) more.append(element("p", `Worktree: ${task.worktree.path}`, "muted"));
+        if (task.worktree) {
+          const worktree = element("p", "Worktree: ", "muted");
+          worktree.append(element("code", task.worktree.path));
+          more.append(worktree);
+        }
 
         if (task.details && Object.keys(task.details).length) {
           const details = element("details");
@@ -1168,13 +1200,13 @@
         chips.append(element("span", rule.kind ?? "rule", "chip"),
           element("span", rule.enabled ? "enabled" : "disabled", "chip"));
         heading.append(element("h3", rule.id), chips);
-        node.append(heading, element("p", rule.description));
+        node.append(heading, rich("p", rule.description));
         if (rule.query) {
           const query = element("p", "Search: ");
           query.append(element("code", rule.query));
           node.append(query);
         }
-        if (rule.prompt) node.append(element("p", `Prompt: ${rule.prompt}`));
+        if (rule.prompt) node.append(rich("p", `Prompt: ${rule.prompt}`));
         const due = nextRun(rule);
         const when = !rule.every ? "No schedule: runs on start or when asked."
           : [`Every ${rule.every}`, rule.last_run_at ? `last run ${age(rule.last_run_at)} ago` : "never run",
@@ -1208,7 +1240,7 @@
         const ignored = snapshot.ignored ?? [];
         document.getElementById("ignored-list").replaceChildren(...ignored.map((item) => {
           const entry = element("li");
-          entry.append(reference(item.url), ` ${item.at.slice(0, 10)}: ${item.reason}`);
+          entry.append(reference(item.url), ...codeParts(` ${item.at.slice(0, 10)}: ${item.reason}`));
           return entry;
         }));
         document.getElementById("ignored-empty").hidden = ignored.length > 0;
@@ -1265,7 +1297,7 @@
         renderFactories();
         document.getElementById("skipped").hidden = !data.errors.length;
         document.getElementById("skipped-files").replaceChildren(
-          ...data.errors.map((error) => element("li", `${error.file}: ${error.error}`)),
+          ...data.errors.map((error) => rich("li", `${error.file}: ${error.error}`)),
         );
         document.getElementById("discovery-error").hidden = true;
         return data;
