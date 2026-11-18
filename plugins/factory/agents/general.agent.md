@@ -65,7 +65,10 @@ chat, session SQL, another board, or another file.
 
 Workers use `claude-sonnet-5.5`; use a bigger model only on an explicit user
 request. Every implementation brief tells the worker to run `git rebase main`
-before it reports, and never to use `git stash`.
+before it reports, and never to use `git stash`. Every worker launch carries the
+worker deny flags from the lifecycle skill's "Launch rules". When you are
+started with `FACTORY_COORDINATOR=1`, a `preToolUse` guard denies the rule
+breaks named in these rules; a denial names its rule, so do not retry the call.
 
 On startup, recovery, every wake, every user message, and before every report,
 run the lifecycle skill's `reconcile.mjs` and act on each finding. On startup,

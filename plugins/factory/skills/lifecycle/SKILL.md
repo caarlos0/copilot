@@ -972,6 +972,27 @@ Every worker launch (implementation, investigation, review, backlog, and
 improve) uses `--model claude-sonnet-5.5`. Use a bigger model only on an
 explicit user request: two opus sessions caused 32% of spend.
 
+Every worker launch also carries the worker deny flags, one constant for all
+roles. Append them to the `copilot` command, before `-i`:
+
+```text
+--deny-tool='shell(git stash)' --deny-tool='shell(rex window:*)' --deny-tool='shell(rex block:*)' --deny-tool='shell(rex session:*)' --deny-tool='shell(rex new:*)' --deny-tool='shell(rex run:*)' --deny-tool='shell(rex split:*)' --deny-tool='shell(rex send:*)' --deny-tool='shell(rex send-key:*)' --deny-tool='shell(rex kill:*)' --deny-tool='shell(rex do:*)' --deny-tool='shell(rex api:*)' --deny-tool='shell(rex focus:*)' --deny-tool='shell(rex zoom:*)' --deny-tool='shell(rex move:*)' --deny-tool='shell(rex swap:*)' --deny-tool='shell(rex resize:*)'
+```
+
+Deny rules win over every allow, including `--yolo`. They match the command
+text only: `sh -c 'git stash'` is not caught. A worker may still run `rex whoami`, `rex ls`, and `rex capture`. Keep
+the same list in `plugins/factory/AGENTS.md`.
+
+Start the coordinator with `FACTORY_COORDINATOR=1` in its environment. The
+plugin's `preToolUse` hook (`hooks/guard.mjs`) is silent without it. With it,
+the hook denies the subagent and workflow tools, edits outside the state
+directories, the session directory, and `$TMPDIR`, and these commands: `gh pr
+merge`, `git merge` without `--ff-only`, `rex new` and `rex session
+new|create|rename`, a `copilot` launch with `--autopilot` or without `--model
+claude-sonnet-5.5`. The hook sees only the command line,
+so a launcher script hides what it runs: the script must enforce the same
+flags itself.
+
 Open the tab in the factory's session with the task title as its label. Verify
 the visible label. Pass the first message in the launch command with
 `-i`/`--interactive`: `copilot ... --model claude-sonnet-5.5 -i 'Read <absolute brief path> and do it.'`.

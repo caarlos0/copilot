@@ -58,7 +58,7 @@ local `HEAD`, never from `origin`, so unpushed local commits are kept. The helpe
 reads `worktreePathTemplate` from `$COPILOT_HOME/settings.json` and prints the
 path and branch that the factory records. It needs no other tool.
 
-`hooks.json` ships one `sessionStart` hook that gives every session the Rex
+`hooks.json` ships a `sessionStart` hook that gives every session the Rex
 terminal context (`rex __internal session-start`). It runs on every session
 start where the plugin is enabled, and it is silent unless `REX_SESSION` is set
 and `rex` and `jq` exist. Keep `--feature-session-naming=false`: the factory
@@ -88,6 +88,31 @@ Workers start with their brief in the launch command
 workers. The planned role with `unknown` status is in the factory file before
 launch, and the pane and window IDs are written right after it. The short gap
 between them cannot be removed.
+
+Every worker launch carries the same deny flags (the worker deny constant;
+keep it identical to the one in the lifecycle skill's "Launch rules"). They
+block `git stash` and every Rex pane, window, block, and session command, and
+they win over `--yolo`:
+
+```text
+--deny-tool='shell(git stash)' --deny-tool='shell(rex window:*)' --deny-tool='shell(rex block:*)' --deny-tool='shell(rex session:*)' --deny-tool='shell(rex new:*)' --deny-tool='shell(rex run:*)' --deny-tool='shell(rex split:*)' --deny-tool='shell(rex send:*)' --deny-tool='shell(rex send-key:*)' --deny-tool='shell(rex kill:*)' --deny-tool='shell(rex do:*)' --deny-tool='shell(rex api:*)' --deny-tool='shell(rex focus:*)' --deny-tool='shell(rex zoom:*)' --deny-tool='shell(rex move:*)' --deny-tool='shell(rex swap:*)' --deny-tool='shell(rex resize:*)'
+```
+
+`hooks.json` also ships a `preToolUse` guard (`hooks/guard.mjs`) for the
+coordinator. It runs only when the coordinator is started with
+`FACTORY_COORDINATOR=1`, and it exits at once without it. The launcher of the
+coordinator must set the variable. The hook denies, with a reason that names the
+rule, the `task`, `read_agent`, `write_agent` and `run_dynamic_workflow` tools;
+`edit`, `create` and `apply_patch` outside `~/.local/state/copilot-coordinator`,
+`~/.local/state/copilot-factory`, the session directory and `$TMPDIR`; and bash
+commands `gh pr merge`, `git merge` without `--ff-only`, `rex new`, `rex session
+new|create|rename`, a `copilot` launch with `--autopilot` or without `--model
+claude-sonnet-5.5`. Rules are one table in `guard.mjs`,
+tested in `guard.test.cjs`. The hook matches the command text only, so it
+catches model slips, not a deliberate bypass (`sh -c` is unwrapped; a launcher
+script is not). It allows every other call and any call it cannot parse. The
+script path comes from `PLUGIN_ROOT`; if no root variable is set, the hook
+allows the call and prints a warning on stderr.
 
 Every brief sets a write boundary. The worker's assigned worktree is the only
 writable root; the result path and `$TMPDIR` are the only other writable
@@ -309,4 +334,4 @@ or scheduled rule remains actionable.
 Run `node --test plugins/factory/skills/lifecycle/*.test.cjs` from the
 repository root for factory data, writer, migration, server, dashboard, and
 result notification changes. Run `node --test plugins/factory/*.test.cjs` for
-the session and stop hooks.
+the session, stop, and guard hooks.

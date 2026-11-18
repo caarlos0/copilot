@@ -1746,6 +1746,18 @@ test("the worker write boundary is present in the skill and plugin rules", () =>
   }
 });
 
+test("the worker deny flags are one identical constant in the skill and plugin rules", () => {
+  const constants = [join(__dirname, "SKILL.md"), join(__dirname, "..", "..", "AGENTS.md")].map((file) => {
+    const lines = readFileSync(file, "utf8").split("\n").filter((line) => line.startsWith("--deny-tool="));
+    assert.equal(lines.length, 1, file);
+    return lines[0];
+  });
+  assert.equal(constants[0], constants[1]);
+  for (const rule of ["shell(git stash)", "shell(rex window:*)", "shell(rex session:*)", "shell(rex block:*)"]) {
+    assert.ok(constants[0].includes(`--deny-tool='${rule}'`), rule);
+  }
+});
+
 test("code-like text renders as inline code, escaped, once, and without touching links", async (t) => {
   const ui = await dashboard(t);
   const parts = (text) => JSON.parse(ui.run(`JSON.stringify(codeParts(${JSON.stringify(text)})
