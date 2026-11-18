@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { readFile, readdir, realpath, stat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
@@ -84,22 +85,37 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
     throw new HttpError(404, `${value} is not in the state directory.`);
   }
 
-  async function loadFactory(file) {
+  // Parsed and validated factories by real path. The tag changes on every write
+  // (mtime, size and inode: the writers replace the file atomically).
+  const parsed = new Map();
+
+  async function factoryTag(file) {
     if (!file || !factoryFile.test(file) || file.includes("/")) {
       throw new HttpError(400, "Select a <owner.repo>-factory.json file.");
     }
-    const data = JSON.parse(await readFile(await localFile(file), "utf8"));
+    const target = await localFile(file);
+    const { mtimeNs, size, ino } = await stat(target, { bigint: true });
+    return { file, target, tag: `"${[mtimeNs, size, ino].map((value) => value.toString(36)).join("-")}"` };
+  }
+
+  async function readFactory({ file, target, tag }) {
+    const cached = parsed.get(target);
+    if (cached?.tag === tag) return cached.data;
+    const data = JSON.parse(await readFile(target, "utf8"));
     try {
       validate(data);
     } catch (error) {
       throw new HttpError(400, `${file}: ${error.message}`);
     }
+    parsed.set(target, { tag, data });
     return data;
   }
 
-  async function listFactories() {
-    const factories = [];
-    const errors = [];
+  async function loadFactory(file) {
+    return readFactory(await factoryTag(file));
+  }
+
+  async function factoryNames() {
     const names = new Set();
     for (const { directory } of directories) {
       for (const entry of await readdir(directory, { withFileTypes: true })) {
@@ -108,11 +124,32 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
         names.add(entry.name);
       }
     }
-    for (const file of names) {
+    return [...names].sort();
+  }
+
+  // The listing tag covers every file, valid or not, so a change to a broken file is seen too.
+  async function listingTags() {
+    const entries = await Promise.all((await factoryNames()).map(async (file) => {
       try {
-        const data = await loadFactory(file);
+        return await factoryTag(file);
+      } catch (error) {
+        return { file, error };
+      }
+    }));
+    const tag = createHash("sha1").update(JSON.stringify(entries.map((entry) =>
+      [entry.file, entry.tag ?? entry.error.message]))).digest("base64url");
+    return { entries, tag: `"${tag}"` };
+  }
+
+  async function listFactories(entries) {
+    const factories = [];
+    const errors = [];
+    for (const entry of entries) {
+      try {
+        if (entry.error) throw entry.error;
+        const data = await readFactory(entry);
         factories.push({
-          file,
+          file: entry.file,
           id: data.id,
           project: data.project,
           goal: data.goal,
@@ -122,7 +159,7 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
           counts: countByState(data.tasks),
         });
       } catch (error) {
-        errors.push({ file, error: error.message });
+        errors.push({ file: entry.file, error: error.message });
       }
     }
     factories.sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at) ||
@@ -131,13 +168,25 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
     return { directories: directories.map(({ directory }) => directory), factories, errors };
   }
 
-  function send(response, status, body, type = "application/json; charset=utf-8") {
+  function send(response, status, body, type = "application/json; charset=utf-8", headers = {}) {
     response.writeHead(status, {
       "Content-Type": type,
       "Cache-Control": "no-store",
       "X-Content-Type-Options": "nosniff",
+      ...headers,
     });
     response.end(typeof body === "object" && !Buffer.isBuffer(body) ? JSON.stringify(body) : body);
+  }
+
+  // The body is built only when the browser's tag is stale.
+  async function sendTagged(request, response, tag, body) {
+    const seen = request.headers["if-none-match"]?.split(",").map((value) => value.trim().replace(/^W\//, ""));
+    if (seen?.includes(tag) || seen?.includes("*")) {
+      response.writeHead(304, { "Cache-Control": "no-store", ETag: tag, "X-Content-Type-Options": "nosniff" });
+      response.end();
+    } else {
+      send(response, 200, await body(), undefined, { ETag: tag });
+    }
   }
 
   async function readJSONBody(request) {
@@ -238,9 +287,11 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
       } else if (url.pathname === "/factory-data.mjs") {
         send(response, 200, await readFile(join(assets, "factory-data.mjs")), "text/javascript; charset=utf-8");
       } else if (url.pathname === "/api/factories") {
-        send(response, 200, await listFactories());
+        const { entries, tag } = await listingTags();
+        await sendTagged(request, response, tag, () => listFactories(entries));
       } else if (url.pathname === "/api/factory") {
-        send(response, 200, await loadFactory(url.searchParams.get("file")));
+        const entry = await factoryTag(url.searchParams.get("file"));
+        await sendTagged(request, response, entry.tag, () => readFactory(entry));
       } else if (url.pathname === "/api/artifact") {
         const data = await loadFactory(url.searchParams.get("file"));
         const name = url.searchParams.get("name");

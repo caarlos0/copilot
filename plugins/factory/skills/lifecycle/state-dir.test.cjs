@@ -124,3 +124,26 @@ test("the dashboard serves and writes a factory that lives in the legacy directo
   assert.equal(written.tasks.find((task) => task.id === "issue-5").state, "initial");
   await assert.rejects(readFile(join(state(directory, "copilot-factory"), factoryFile)), { code: "ENOENT" });
 });
+
+test("the cached factory follows the file when it moves between directories", async (t) => {
+  const directory = await home(t, "copilot-coordinator", "copilot-factory");
+  const legacy = join(state(directory, "copilot-coordinator"), factoryFile);
+  const current = join(state(directory, "copilot-factory"), factoryFile);
+  await writeFile(legacy, withProject("legacy/repo"));
+  const url = await dashboard(t, directory);
+  const path = `/api/factory?file=${factoryFile}`;
+  const first = await fetch(new URL(path, url));
+  const tag = first.headers.get("etag");
+  assert.equal((await first.json()).project, "legacy/repo");
+  assert.equal((await fetch(new URL(path, url), { headers: { "If-None-Match": tag } })).status, 304);
+
+  await writeFile(current, withProject("new/repo"));
+  const moved = await fetch(new URL(path, url), { headers: { "If-None-Match": tag } });
+  assert.equal(moved.status, 200);
+  assert.notEqual(moved.headers.get("etag"), tag);
+  assert.equal((await moved.json()).project, "new/repo");
+
+  await rm(current);
+  const back = await fetch(new URL(path, url));
+  assert.equal((await back.json()).project, "legacy/repo");
+});

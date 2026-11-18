@@ -89,7 +89,10 @@ schema and is shared by the writer,
 factory file may live in either directory, even when both exist. The new
 directory wins, then the legacy one; a file in neither is created in the new
 directory. `serve.mjs` lists and serves the factories of both directories
-(deduped by name, the new one wins) and writes the file where it lives;
+(deduped by name, the new one wins) and writes the file where it lives; it
+caches each parsed file and sends an `ETag` (mtime, size, inode) on
+`/api/factory` and `/api/factories`, answering `If-None-Match` with 304, and the
+dashboard skips load and redraw on a 304;
 `migrate.mjs` reads each handoff the same way and writes the factory file to
 the new directory. The lock, events log, waiter PID, archive, and sessions file
 sit beside the factory file, so they follow it. An explicit `--directory` means

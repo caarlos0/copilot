@@ -100,6 +100,59 @@ test("serves one validated factory and rejects other files", async (t) => {
   assert.equal((await get(url, "/api/factory?file=bad.repo-factory.json")).status, 400);
 });
 
+test("an unchanged factory answers 304 without a body, and a write brings a new tag", async (t) => {
+  const { url } = await server(t);
+  const path = `/api/factory?file=${factoryFile}`;
+  const first = await get(url, path);
+  const tag = first.headers.get("etag");
+  assert.match(tag, /^"[\w-]+"$/);
+  assert.equal(first.headers.get("cache-control"), "no-store");
+  assert.equal((await first.json()).project, "owner/repo");
+
+  const same = await get(url, path, { headers: { "If-None-Match": tag } });
+  assert.equal(same.status, 304);
+  assert.equal(same.headers.get("etag"), tag);
+  assert.equal(same.headers.get("cache-control"), "no-store");
+  assert.equal(await same.text(), "");
+
+  assert.equal((await get(url, path, { headers: { "If-None-Match": '"other", ' + tag } })).status, 304);
+  assert.equal((await get(url, path, { headers: { "If-None-Match": '"other"' } })).status, 200);
+
+  assert.equal((await move(url, unblocked)).status, 200);
+  const changed = await get(url, path, { headers: { "If-None-Match": tag } });
+  assert.equal(changed.status, 200);
+  assert.notEqual(changed.headers.get("etag"), tag);
+  assert.equal((await changed.json()).tasks.find((task) => task.id === "issue-5").state, "initial");
+});
+
+test("the listing answers 304 until any file changes, and a broken file never poisons the cache", async (t) => {
+  const { url, directory } = await server(t);
+  const listed = () => get(url, "/api/factories");
+  const conditional = (tag) => get(url, "/api/factories", { headers: { "If-None-Match": tag } });
+  const first = await listed();
+  const tag = first.headers.get("etag");
+  assert.ok(tag);
+  assert.equal((await conditional(tag)).status, 304);
+
+  await writeFile(join(directory, "broken.repo-factory.json"), "{bad");
+  const broken = await conditional(tag);
+  assert.equal(broken.status, 200);
+  const brokenTag = broken.headers.get("etag");
+  assert.deepEqual((await broken.json()).errors.map((item) => item.file), ["broken.repo-factory.json"]);
+  assert.equal((await conditional(brokenTag)).status, 304);
+  assert.equal((await get(url, "/api/factory?file=broken.repo-factory.json")).status, 400);
+
+  await writeFile(join(directory, "broken.repo-factory.json"), JSON.stringify({ ...example, project: "fixed/repo" }));
+  const fixed = await conditional(brokenTag);
+  assert.equal(fixed.status, 200);
+  const listing = await fixed.json();
+  assert.deepEqual(listing.errors, []);
+  assert.deepEqual(listing.factories.map((item) => item.project).sort(), ["fixed/repo", "owner/repo"]);
+  const served = await get(url, "/api/factory?file=broken.repo-factory.json");
+  assert.equal(served.status, 200);
+  assert.equal((await served.json()).project, "fixed/repo");
+});
+
 test("serves only artifacts that the selected factory references, inside the state directory", async (t) => {
   const { url } = await server(t);
   const artifact = (name) => get(url, `/api/artifact?file=${factoryFile}&name=${encodeURIComponent(name)}`);
@@ -386,6 +439,41 @@ test("accepts only GET on loopback host names", async (t) => {
       (response) => { response.resume(); resolve(response.statusCode); }).on("error", reject);
   });
   assert.equal(status, 403);
+});
+
+test("a 304 skips load and redraw but still updates the freshness label", async (t) => {
+  const answers = [];
+  const ui = await dashboard(t, {
+    fetchRequest: async (path, _, request) => {
+      const response = await request();
+      answers.push([path.split("?")[0], response.status]);
+      return response;
+    },
+  });
+  ui.run("let loads = 0; const original = load; load = (...args) => { loads += 1; return original(...args); }");
+  answers.length = 0;
+  ui.run("lastRead = Date.now() - 20000; freshness()");
+  assert.equal(ui.get("freshness").textContent, "refreshed 20s ago");
+
+  await ui.run("refresh()");
+  assert.deepEqual(answers, [["/api/factories", 304], ["/api/factory", 304]]);
+  assert.equal(ui.run("loads"), 0);
+  assert.equal(ui.get("freshness").textContent, "refreshed just now");
+  assert.equal(ui.get("factories").children.length, 1, "the sidebar keeps its last listing");
+
+  const data = structuredClone(example);
+  data.tasks.find((task) => task.id === "issue-5").title = "Changed title";
+  await writeFile(join(ui.directory, factoryFile), JSON.stringify(data));
+  answers.length = 0;
+  await ui.run("refresh()");
+  assert.deepEqual(answers, [["/api/factories", 200], ["/api/factory", 200]]);
+  assert.equal(ui.run("loads"), 1);
+  assert.equal(ui.run("snapshot.tasks.find((task) => task.id === 'issue-5').title"), "Changed title");
+
+  answers.length = 0;
+  await ui.run("refresh()");
+  assert.deepEqual(answers, [["/api/factories", 304], ["/api/factory", 304]]);
+  assert.equal(ui.run("loads"), 1);
 });
 
 test("the page script parses, never renders data as HTML, and finds its elements", () => {

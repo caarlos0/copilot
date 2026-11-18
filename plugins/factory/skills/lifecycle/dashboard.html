@@ -1639,10 +1639,18 @@
         }
       }
 
-      async function requestJSON(path, options = {}) {
-        const response = await fetch(path, { ...options, cache: "no-store" });
+      // With `conditional`, the server's tag for this URL is kept and sent back; an
+      // unchanged answer (304) returns `notModified`. The caller drops the tag with
+      // `etags.delete(path)` when it does not apply the data it got.
+      const notModified = Symbol("not modified");
+      const etags = new Map();
+      async function requestJSON(path, { conditional, ...options } = {}) {
+        const headers = { ...options.headers, ...(conditional && etags.has(path) ? { "If-None-Match": etags.get(path) } : {}) };
+        const response = await fetch(path, { ...options, headers, cache: "no-store" });
+        if (conditional && response.status === 304) return notModified;
         const data = await response.json();
         if (!response.ok) throw new Error(data.error ?? `HTTP ${response.status}`);
+        if (conditional && response.headers.get("ETag")) etags.set(path, response.headers.get("ETag"));
         return data;
       }
 
@@ -1681,8 +1689,14 @@
           : [element("p", "No valid factories found", "muted")]));
       }
 
+      let listing = null;
       async function discover() {
-        const data = await requestJSON("/api/factories");
+        const fetched = await requestJSON("/api/factories", { conditional: true });
+        if (fetched === notModified) {
+          document.getElementById("discovery-error").hidden = true;
+          return listing;
+        }
+        const data = listing = fetched;
         listed = [...data.factories].sort((a, b) => a.file.localeCompare(b.file));
         // The first sighting is the baseline: only later changes count as updates.
         for (const item of listed) {
@@ -1753,16 +1767,16 @@
         refreshing = true;
         clearTimeout(refreshTimer);
         try {
-          let listing = null;
+          let found = null;
           try {
-            listing = await discover();
+            found = await discover();
           } catch (cause) {
             const error = document.getElementById("discovery-error");
             error.textContent = `Could not list factories: ${cause.message}`;
             error.hidden = false;
           }
-          if (!selection && listing?.factories.length) {
-            selection = listing.factories[0].file;
+          if (!selection && found?.factories.length) {
+            selection = found.factories[0].file;
             const url = new URL(location.href);
             url.searchParams.set("file", selection);
             history.replaceState(null, "", url);
@@ -1770,14 +1784,28 @@
           }
           const current = selection;
           if (current) {
+            const path = `/api/factory?${new URLSearchParams({ file: current })}`;
             try {
               const version = mutation;
-              const data = await requestJSON(`/api/factory?${new URLSearchParams({ file: current })}`);
-              validate(data);
-              if (current === selection && version === mutation) {
-                load(data, current);
+              const data = await requestJSON(path, { conditional: true });
+              if (data === notModified) {
+                if (current === selection && version === mutation && lastSource === current) {
+                  lastRead = Date.now();
+                  document.getElementById("error").hidden = true;
+                  refreshElapsedLabels(document.getElementById("task-list"));
+                } else {
+                  etags.delete(path);
+                }
+              } else {
+                validate(data);
+                if (current === selection && version === mutation) {
+                  load(data, current);
+                } else {
+                  etags.delete(path);
+                }
               }
             } catch (cause) {
+              etags.delete(path);
               if (current === selection) showError(cause);
             }
           }
@@ -1805,6 +1833,7 @@
         history.replaceState(null, "", url);
         renderDetail(null);
         snapshot = lastSource = null;
+        etags.clear();
         renderFilterStatus(0);
         freshness();
         return refresh();
