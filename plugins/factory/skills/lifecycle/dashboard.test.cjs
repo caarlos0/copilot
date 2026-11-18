@@ -2121,7 +2121,14 @@ test("the palette button opens the palette, but not over another dialog", async 
 test("the page works on a phone: viewport, safe areas, touch sizes and contained overflow", () => {
   assert.match(html, /<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">/);
   assert.match(html, /<div id="flow-wrap">\s*<svg id="flow"/);
-  assert.match(html, /\n {6}#open-palette \{ display: none; \}/, "The palette button is hidden on desktop.");
+  assert.match(html, /\n {6}#open-palette, #refresh \{ display: inline-flex;/, "Both buttons show on desktop.");
+  for (const id of ["open-palette", "refresh"]) {
+    const [, button] = html.match(new RegExp(`(<button id="${id}"[\\s\\S]*?</button>)`));
+    assert.match(button, /<svg [^>]*aria-hidden="true"/, `${id} has an icon.`);
+    assert.match(button, /<span class="label">/, `${id} keeps its text on desktop.`);
+    const name = id === "refresh" ? "Refresh now" : "Go to task";
+    assert.match(button, new RegExp(`aria-label="${name}" title="${name}"`));
+  }
 
   const blocks = (query) => {
     const found = [];
@@ -2139,7 +2146,10 @@ test("the page works on a phone: viewport, safe areas, touch sizes and contained
   };
   const narrow = blocks("(max-width: 700px)");
   const touch = blocks("(max-width: 700px), (pointer: coarse)");
-  assert.match(touch, /#open-palette \{ display: inline-block; \}/);
+  assert.match(narrow, /#freshness \{ display: none; \}/, "The refreshed label is hidden on a phone.");
+  assert.match(narrow, /#open-palette, #refresh \{[^}]*width: 44px;/, "Icon-only buttons are 44px wide.");
+  assert.match(narrow, /#open-palette \.label, #refresh \.label \{ display: none; \}/, "The button text is hidden on a phone.");
+  assert.doesNotMatch(touch, /\.label/, "Touch screens wider than a phone keep the text.");
   assert.match(touch, /button, select, input, textarea \{ min-height: 44px; font-size: 16px; \}/);
   assert.match(touch, /\.icon-button \{ width: 44px; height: 44px; \}/);
   assert.match(narrow, /env\(safe-area-inset-top\)/);

@@ -204,7 +204,9 @@ flowchart shrinks while it is open) and can move a task back or directly
 to `resolved` with an operator comment. Manual resolution requires a non-merge
 outcome; it does not merge or close GitHub items. Cmd+K or Ctrl+K opens a task
 palette (`rankTasks` in `factory-data.mjs`) that docks the chosen task's list and
-focuses its row; the shortcut is ignored while another dialog is open. Resolved tasks with pending
+focuses its row; the shortcut is ignored while another dialog is open. The header
+shows "Go to task" and "Refresh now" with an icon and text; at 700px wide or less
+they are icon-only 44px buttons and the "refreshed Xs ago" label is hidden. Resolved tasks with pending
 feedback are not archived. Archived tasks go to
 `<owner.repo>-factory-archive/YYYY-MM-DD.json`, are never deleted, and come
 back only through `factory.mjs --restore` after the user agrees. Task

@@ -270,10 +270,10 @@
         .refresh { margin-left: 0; }
       }
       @media (max-width: 600px) { main { padding: 16px; } .detail-head, .task-row { padding: 16px; } }
-      #open-palette { display: none; }
-      /* Phones and touch screens: 44px targets, 16px inputs (iOS zooms smaller ones), a button for Cmd+K. */
+      #open-palette, #refresh { display: inline-flex; align-items: center; gap: 8px; }
+      #open-palette svg, #refresh svg { flex: none; }
+      /* Phones and touch screens: 44px targets and 16px inputs (iOS zooms smaller ones). */
       @media (max-width: 700px), (pointer: coarse) {
-        #open-palette { display: inline-block; }
         button, select, input, textarea { min-height: 44px; font-size: 16px; }
         .icon-button { width: 44px; height: 44px; }
         #open-settings { height: auto; min-height: 44px; }
@@ -288,11 +288,11 @@
           max(16px, env(safe-area-inset-left)); }
         .brand { flex: 1 1 auto; }
         .refresh { display: contents; }
-        #open-palette { order: 1; }
+        #open-palette, #refresh { order: 1; justify-content: center; width: 44px; padding: 0; }
+        #open-palette .label, #refresh .label { display: none; }
         .global-filter { flex: 1 1 100%; order: 2; max-width: none; flex-wrap: wrap; }
         .global-filter input { flex: 1 1 100%; width: 100%; }
-        #freshness { flex: 1 1 0; order: 3; min-width: 0; }
-        #refresh { order: 4; }
+        #freshness { display: none; }
         .layout { padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
         main { min-width: 0; padding-top: 16px; }
         #title-row { flex-wrap: wrap; }
@@ -333,8 +333,20 @@
       </div>
       <div class="refresh">
         <span id="freshness" class="muted"></span>
-        <button id="open-palette" type="button" aria-haspopup="dialog">Go to task</button>
-        <button id="refresh" type="button">Refresh now</button>
+        <button id="open-palette" type="button" aria-haspopup="dialog" aria-label="Go to task" title="Go to task">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"
+            stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/>
+          </svg>
+          <span class="label">Go to task</span>
+        </button>
+        <button id="refresh" type="button" aria-label="Refresh now" title="Refresh now">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"
+            stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2v3h-3"/>
+          </svg>
+          <span class="label">Refresh now</span>
+        </button>
       </div>
     </header>
     <div class="layout">
