@@ -572,7 +572,11 @@ async function dashboard(t, { reducedMotion = true, confirm = () => true, now = 
       });
     }
   }
-  for (const [, tag, id] of html.matchAll(/<(\w+)[^>]*\bid="([^"]+)"/g)) elements.set(id, new Element(tag));
+  for (const [markup, tag, id] of html.matchAll(/<(\w+)[^>]*\bid="([^"]+)"[^>]*>/g)) {
+    const node = new Element(tag);
+    node.hidden = /\shidden(?=[\s>])/.test(markup);
+    elements.set(id, node);
+  }
   elements.get("flow-wrap").clientWidth = phoneWidth;
   const resizeListeners = [];
   elements.get("detail").append(...["detail-title", "close-detail", "task-list", "detail-empty"]
@@ -2165,4 +2169,54 @@ test("the page works on a phone: viewport, safe areas, touch sizes and contained
 
   const widths = [...(narrow + touch).matchAll(/(?<![-\w])(?:width|min-width): (\d+)px/g)].map((match) => Number(match[1]));
   assert.deepEqual(widths.filter((width) => width > 430), [], "Nothing on a phone is wider than the screen.");
+});
+
+test("on a phone the project switcher is a dropdown beside a settings button, and desktop keeps the sidebar", () => {
+  const narrow = html.slice(html.indexOf("@media (max-width: 700px) {\n        .bar"));
+  assert.match(html, /\n {6}#project-bar \{ display: none; \}/, "The switcher is hidden on desktop.");
+  assert.match(narrow, /\.brand, #title-pill, #factories \{ display: none; \}/, "The title, the other dropdown and the sidebar are hidden.");
+  assert.match(narrow, /#project-bar \{ display: flex;/);
+  assert.match(html, /<div id="project-bar">\s*<div id="project-switch">\s*<button id="project-toggle"[^>]*aria-expanded="false"[^>]*aria-controls="project-menu"[^>]*aria-label="Switch project"/);
+  assert.match(html, /<nav id="project-menu"[^>]*hidden><\/nav>\s*<\/div>\s*<button id="bar-settings"[^>]*aria-label="Settings"/, "The settings button follows the dropdown.");
+});
+
+test("the project dropdown lists the sorted factories, switches on a pick, and closes on Escape or an outside click", async (t) => {
+  const ui = await dashboard(t);
+  await writeFile(join(ui.directory, "other.repo-factory.json"),
+    JSON.stringify({ ...example, id: "other-factory", project: "other/repo", updated_at: "2026-05-01T12:00:00Z" }));
+  await ui.run("refresh()");
+  const toggle = ui.get("project-toggle");
+  const menu = ui.get("project-menu");
+  const names = () => menu.querySelectorAll(".name").map((name) => name.textContent);
+  assert.equal(ui.get("project-name").textContent, "owner/repo");
+  assert.equal(toggle["aria-label"], "Switch project, current: owner/repo");
+  assert.deepEqual(names(), ["other/repo", "owner/repo"], "The menu keeps the sidebar order.");
+  assert.equal(menu.hidden, true);
+
+  const inside = { closest: (selector) => selector === "#project-switch" ? menu : null };
+  await toggle.fire("click");
+  await ui.document.listeners.get("click")({ target: inside });
+  assert.equal(menu.hidden, false);
+  assert.equal(toggle["aria-expanded"], "true");
+  assert.equal(menu.querySelectorAll("button")[1]["aria-current"], "true");
+  assert.equal(menu.querySelectorAll("kbd").length, 0, "A phone has no digit shortcuts.");
+
+  const escape = ui.press("Escape");
+  assert.equal(escape.defaultPrevented, true);
+  assert.equal(menu.hidden, true);
+  assert.equal(ui.document.activeElement, toggle);
+  assert.equal(toggle["aria-expanded"], "false");
+
+  await toggle.fire("click");
+  await ui.document.listeners.get("click")({ target: { closest: () => null } });
+  assert.equal(menu.hidden, true, "A click outside closes the menu.");
+
+  await toggle.fire("click");
+  await menu.querySelectorAll("button")[0].fire("click");
+  assert.equal(menu.hidden, true);
+  assert.match(ui.run("location.href"), /file=other\.repo-factory\.json/);
+  assert.equal(ui.get("project-name").textContent, "other/repo");
+
+  await ui.get("bar-settings").fire("click");
+  assert.equal(ui.get("settings-dialog").open, true, "The settings button opens the settings dialog.");
 });
