@@ -454,6 +454,19 @@ export function countByState(tasks) {
   return counts;
 }
 
+// Sidebar order: active with open tasks, paused or blocked with open tasks (after the active ones), nothing open, finished.
+function factoryGroup({ status, task_count, counts }) {
+  if (status === "finished") return 3;
+  if (task_count - counts.resolved === 0) return 2;
+  return status === "active" ? 0 : 1;
+}
+
+export function compareFactories(a, b) {
+  return factoryGroup(a) - factoryGroup(b)
+    || a.project.localeCompare(b.project, undefined, { sensitivity: "base" })
+    || a.file.localeCompare(b.file);
+}
+
 // Plain digits 1-9 pick the Nth of `count` sidebar items; -1 when the key is not a hotkey.
 export function digitIndex({ key, metaKey, ctrlKey, altKey, shiftKey }, count) {
   if (metaKey || ctrlKey || altKey || shiftKey || !/^[1-9]$/.test(key)) return -1;

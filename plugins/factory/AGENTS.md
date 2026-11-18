@@ -126,6 +126,9 @@ branches merged into the default branch, Rex panes, PRs, and worker results.
 Repair drift through `factory.mjs`, including local issue-less merges with
 `resolution: merged` and the full merge SHA in `details.merge_commit`.
 
+The dashboard sidebar sorts factories with `compareFactories` in `factory-data.mjs`:
+active with open tasks, then paused or blocked with open tasks, then nothing open,
+then finished; ties go by name without case, then file.
 The dashboard opens task lists, and the read-only "Find work" rules and skipped
 list, in one panel docked on the right edge, beside the flowchart (the
 flowchart shrinks while it is open) and can move a task back or directly

@@ -101,6 +101,29 @@ const withoutBudget = () => {
   return rest;
 };
 
+test("compareFactories sorts by state group, then by name ignoring case, then by file", async () => {
+  const { compareFactories } = await import("./factory-data.mjs");
+  const item = (file, project, status, open, resolved = 0) => ({
+    file, project, status, task_count: open + resolved, counts: { resolved },
+  });
+  const items = [
+    item("1.json", "zeta/done", "finished", 0, 3),
+    item("2.json", "alpha/idle", "active", 0),
+    item("3.json", "Beta/active", "active", 2),
+    item("4.json", "beta/tie", "active", 1),
+    item("5.json", "gamma/paused", "paused", 1),
+    item("6.json", "alpha/blocked", "blocked", 4, 1),
+    item("7.json", "alpha/closed", "active", 0, 2),
+    item("8.json", "beta/active", "active", 1),
+    item("9.json", "aaa/finished-open", "finished", 1),
+    item("a.json", "delta/paused-empty", "paused", 0, 1),
+  ];
+  const order = (list) => list.sort(compareFactories).map((entry) => entry.file);
+  const expected = ["3.json", "8.json", "4.json", "6.json", "5.json", "7.json", "2.json", "a.json", "9.json", "1.json"];
+  assert.deepEqual(order([...items]), expected);
+  assert.deepEqual(order([...items].reverse()), expected);
+});
+
 test("budget validation accepts valid values and an absent budget, and rejects everything else", async (t) => {
   const { validate } = await import("./factory-data.mjs");
   validate(withoutBudget());

@@ -354,7 +354,7 @@
     </div>
     <noscript>Enable JavaScript to read the factory.</noscript>
     <script type="module">
-      import { states, outcomes, transitions, artifactName, githubURL, validate, countByState, entered, byRecency, rankTasks, sortReferences, cyclesOf, operatorStates, operatorOutcomes, unblockState, unblockChoice, stripRecommended, nextRun, nextDue, leverSpends, leverAutonomyCaps, maxParallelWorkers, maxRoleLimit, digitIndex } from "./factory-data.mjs";
+      import { states, outcomes, transitions, artifactName, githubURL, validate, countByState, entered, byRecency, rankTasks, compareFactories, sortReferences, cyclesOf, operatorStates, operatorOutcomes, unblockState, unblockChoice, stripRecommended, nextRun, nextDue, leverSpends, leverAutonomyCaps, maxParallelWorkers, maxRoleLimit, digitIndex } from "./factory-data.mjs";
 
       const SVG = "http://www.w3.org/2000/svg";
       const NODE = { w: 160, h: 110 };
@@ -1619,7 +1619,7 @@
           return listing;
         }
         const data = listing = fetched;
-        listed = [...data.factories].sort((a, b) => a.file.localeCompare(b.file));
+        listed = [...data.factories].sort(compareFactories);
         // The first sighting is the baseline: only later changes count as updates.
         for (const item of listed) {
           if (item.file === selection || !(item.file in seen)) seen[item.file] = item.updated_at;
