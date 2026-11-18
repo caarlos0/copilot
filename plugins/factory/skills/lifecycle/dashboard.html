@@ -79,6 +79,8 @@
       .factory-item:hover:not(:disabled) { background: var(--btn-hover); }
       .factory-item[aria-current="true"] { background: var(--btn-bg); border-color: var(--border); font-weight: 600; }
       .factory-item .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .factory-item kbd { flex: none; font: 11px/10px var(--mono); padding: 3px 5px; color: var(--fg-muted);
+        background: var(--btn-bg); border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 6px; }
       .factory-item .count { color: var(--fg-muted); font-size: 12px; }
       .update-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--accent);
         animation: blink 1.2s ease-in-out infinite; }
@@ -352,7 +354,7 @@
     </div>
     <noscript>Enable JavaScript to read the factory.</noscript>
     <script type="module">
-      import { states, outcomes, artifactName, githubURL, validate, countByState, isIdle, hopsSince, entered, byRecency, rankTasks, cyclesOf, operatorStates, operatorOutcomes, unblockState, unblockChoice, nextRun, nextDue, budgetText, leverSpends, leverAutonomyCaps, maxParallelWorkers, maxRoleLimit } from "./factory-data.mjs";
+      import { states, outcomes, artifactName, githubURL, validate, countByState, isIdle, hopsSince, entered, byRecency, rankTasks, cyclesOf, operatorStates, operatorOutcomes, unblockState, unblockChoice, nextRun, nextDue, budgetText, leverSpends, leverAutonomyCaps, maxParallelWorkers, maxRoleLimit, digitIndex } from "./factory-data.mjs";
 
       const SVG = "http://www.w3.org/2000/svg";
       const NODE = { w: 160, h: 110 };
@@ -415,6 +417,7 @@
       let refreshing = false;
       let pendingRefresh = false;
       let listedChoices = "";
+      let sidebar = [];
       let listed = [];
       const seen = {};
       let mutation = 0;
@@ -953,6 +956,12 @@
           && !event.target.closest("input, textarea, select, [contenteditable]")) {
           event.preventDefault();
           document.getElementById("global-filter").focus();
+        }
+        if (event.defaultPrevented || event.repeat || event.target.closest("input, textarea, select, [contenteditable]")) return;
+        const index = digitIndex(event, sidebar.length);
+        if (index >= 0) {
+          event.preventDefault();
+          select(sidebar[index]);
         }
       }
 
@@ -1576,11 +1585,16 @@
         const signature = JSON.stringify([selection, items]);
         if (signature === listedChoices) return;
         listedChoices = signature;
+        sidebar = items.map((item) => item.file);
         document.getElementById("factories").replaceChildren(...(items.length
-          ? items.map((item) => {
+          ? items.map((item, index) => {
             const button = element("button", null, "factory-item");
             button.type = "button";
             button.setAttribute("aria-current", String(item.file === selection));
+            if (index < 9) {
+              button.setAttribute("aria-keyshortcuts", String(index + 1));
+              button.append(element("kbd", index + 1));
+            }
             button.append(element("span", item.label, "name"));
             if (item.count !== null) button.append(element("span", item.count, "count"));
             if (item.updated) {

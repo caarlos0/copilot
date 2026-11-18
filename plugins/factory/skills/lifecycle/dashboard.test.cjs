@@ -671,6 +671,51 @@ test("the sidebar lists every factory and blinks a dot on one that changed until
   assert.equal(dots().length, 0, "The selected factory never shows a dot.");
 });
 
+test("digits select the Nth sidebar factory and the first nine items show a kbd badge", async (t) => {
+  const ui = await dashboard(t);
+  const other = "other.repo-factory.json";
+  await writeFile(join(ui.directory, other),
+    JSON.stringify({ ...example, id: "other-factory", project: "other/repo", updated_at: "2026-05-01T12:00:00Z" }));
+  await ui.run("refresh()");
+  const items = () => ui.get("factories").querySelectorAll("button");
+  assert.deepEqual(items().map((item) => item.querySelector("kbd").textContent), ["1", "2"]);
+  assert.equal(items()[1]["aria-keyshortcuts"], "2");
+  assert.equal(items()[1]["aria-current"], "true");
+
+  const ignored = async (key, event) => {
+    const before = ui.run("location.href");
+    const dispatched = await ui.press(key, event);
+    assert.equal(ui.run("location.href"), before);
+    assert.equal(dispatched.defaultPrevented, false);
+  };
+  await ignored("3");
+  await ignored("1", { ctrlKey: true });
+  await ignored("1", { target: { closest: () => ({}) } });
+  await ignored("1", { repeat: true });
+  ui.get("move-dialog").open = true;
+  await ignored("1");
+  ui.get("move-dialog").open = false;
+
+  const dispatched = await ui.press("1");
+  assert.equal(dispatched.defaultPrevented, true);
+  assert.match(ui.run("location.href"), /file=other\.repo-factory\.json/);
+  assert.equal(items()[0]["aria-current"], "true");
+});
+
+test("only the first nine sidebar items get a kbd badge", async (t) => {
+  const ui = await dashboard(t);
+  for (let index = 0; index < 10; index += 1) {
+    await writeFile(join(ui.directory, `f${index}.repo-factory.json`),
+      JSON.stringify({ ...example, id: `f${index}`, project: `f${index}/repo` }));
+  }
+  await ui.run("refresh()");
+  const items = ui.get("factories").querySelectorAll("button");
+  assert.equal(items.length, 11);
+  assert.equal(items.filter((item) => item.querySelector("kbd")).length, 9);
+  assert.equal(items[9].querySelector("kbd"), null);
+  assert.equal(items[0].querySelector("kbd").textContent, "1");
+});
+
 test("the dot never animates for reduced motion and the header shows a short refresh label", async (t) => {
   assert.match(html, /prefers-reduced-motion: reduce\) \{[^}]*\.update-dot \{ animation: none; \}/);
   assert.doesNotMatch(html, /Search all fields|<select id="factory"/);

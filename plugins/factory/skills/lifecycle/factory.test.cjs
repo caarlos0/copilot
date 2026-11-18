@@ -724,6 +724,19 @@ test("isIdle is true only when every task is resolved", async () => {
   assert.equal(isIdle([task("resolved"), task("initial")]), false);
 });
 
+test("digitIndex maps plain 1-9 to a sidebar index within the count", async () => {
+  const { digitIndex } = await import("./factory-data.mjs");
+  assert.equal(digitIndex({ key: "1" }, 3), 0);
+  assert.equal(digitIndex({ key: "9" }, 9), 8);
+  assert.equal(digitIndex({ key: "3" }, 2), -1);
+  assert.equal(digitIndex({ key: "0" }, 9), -1);
+  assert.equal(digitIndex({ key: "a" }, 9), -1);
+  assert.equal(digitIndex({ key: "Enter" }, 9), -1);
+  for (const modifier of ["metaKey", "ctrlKey", "altKey", "shiftKey"]) {
+    assert.equal(digitIndex({ key: "1", [modifier]: true }, 9), -1, modifier);
+  }
+});
+
 const search = { id: "bugs", description: "Open bugs.", kind: "search", query: "is:issue is:open label:bug",
   every: "30m", enabled: true, last_run_at: null };
 

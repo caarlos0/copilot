@@ -446,6 +446,13 @@ export function countByState(tasks) {
 
 export const isIdle = (tasks) => tasks.every((task) => task.state === "resolved");
 
+// Plain digits 1-9 pick the Nth of `count` sidebar items; -1 when the key is not a hotkey.
+export function digitIndex({ key, metaKey, ctrlKey, altKey, shiftKey }, count) {
+  if (metaKey || ctrlKey || altKey || shiftKey || !/^[1-9]$/.test(key)) return -1;
+  const index = Number(key) - 1;
+  return index < count ? index : -1;
+}
+
 export function hopsSince(tasks, since) {
   const cutoff = Date.parse(since);
   return tasks.flatMap((task) => task.history.flatMap((item, index) =>
