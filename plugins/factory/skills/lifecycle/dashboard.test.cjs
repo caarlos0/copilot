@@ -1620,6 +1620,22 @@ test("palette rows keep the state chip on one line and give the title the free w
   assert.equal(meta.querySelectorAll("a").length, 0);
 });
 
+test("Cmd+K opens the palette from the physical key when event.key is not a letter, and ignores repeats", async (t) => {
+  const ui = await dashboard(t);
+  const palette = ui.get("palette-dialog");
+  assert.equal(ui.press("Dead", { code: "KeyK", metaKey: true }).defaultPrevented, true);
+  assert.equal(palette.open, true);
+  assert.equal(ui.press("Dead", { code: "KeyK", metaKey: true, repeat: true }).defaultPrevented, true);
+  assert.equal(palette.open, true, "A held key must not close the palette.");
+  palette.open = false;
+  assert.equal(ui.press("л", { code: "KeyK", ctrlKey: true }).defaultPrevented, true);
+  assert.equal(palette.open, true);
+  palette.open = false;
+  assert.equal(ui.press("v", { code: "KeyK", metaKey: true }).defaultPrevented, false, "Dvorak Cmd+V is not ours.");
+  assert.equal(ui.press("Dead", { code: "KeyK" }).defaultPrevented, false);
+  assert.equal(palette.open, false);
+});
+
 test("typing in the palette filters tasks and Escape closes it without closing the docked list", async (t) => {
   const ui = await dashboard(t);
   ui.run("choose('blocked')");
