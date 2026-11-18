@@ -119,7 +119,7 @@
       #flow { width: 100%; min-width: 720px; height: auto; max-height: 70vh; display: block; }
       .edge { fill: none; stroke: var(--border-emphasis); stroke-width: 2; stroke-dasharray: 8 6;
         animation: flow 1s linear infinite; transition: opacity .4s; }
-      .edge.idle { opacity: .35; }
+      .edge.idle { opacity: .35; animation: none; }
       .arrow { fill: var(--border-emphasis); }
       @keyframes flow { to { stroke-dashoffset: -28; } }
 

@@ -1063,6 +1063,20 @@ test("resolution counts and sublists update when a task is resolved and reopened
   assert.equal(ui.get("detail-empty").hidden, false);
 });
 
+test("only edges out of populated states keep animating", async (t) => {
+  const ui = await dashboard(t);
+  const counts = {};
+  for (const task of example.tasks) counts[task.state] = (counts[task.state] ?? 0) + 1;
+  const edges = ui.get("flow").querySelectorAll(".edge")
+    .filter((edge) => !["shortcut", "source>initial"].includes(edge.dataset.edge));
+  assert.ok(edges.length > 0);
+  for (const edge of edges) {
+    const from = edge.dataset.edge.split(">")[0];
+    assert.equal(edge.className.includes("idle"), !counts[from], edge.dataset.edge);
+  }
+  assert.match(html, /\.edge\.idle \{[^}]*animation: none;/);
+});
+
 test("Find work lists rules, user links and skipped work without changing task states", async (t) => {
   const ui = await dashboard(t);
   const source = ui.get("flow").querySelector(".source");
