@@ -858,6 +858,10 @@ test("rows show history, open references in a new tab, and highlight evidence", 
     assert.equal(node.target, "_blank", node.href);
     assert.equal(node.rel, "noopener noreferrer", node.href);
   }
+  const section = row.querySelectorAll("details").find((node) => node.dataset.taskId === "issue-9");
+  assert.equal(section.querySelector("pre"), null);
+  section.open = true;
+  await section.fire("toggle");
   const evidence = row.querySelector("pre");
   assert.equal(evidence.textContent, JSON.stringify(example.tasks.find((task) => task.id === "issue-9").details, null, 2));
   assert.equal(evidence.querySelector(".json-key").textContent, '"verdict"');
@@ -868,6 +872,75 @@ test("rows show history, open references in a new tab, and highlight evidence", 
   assert.deepEqual(tokens("key"), ['"note"', '"count"', '"ok"', '"gone"', '"list"']);
   assert.deepEqual(tokens("string"), ['"say \\"a\\": 1"', '"x"']);
   assert.deepEqual(tokens("literal"), ["-2500", "true", "null", "1"]);
+});
+
+test("evidence renders on first open, once, and stays open across a list rebuild", async (t) => {
+  const ui = await dashboard(t);
+  const data = structuredClone(example);
+  data.tasks.find((task) => task.id === "issue-9").details = { notes: "x".repeat(5000), verdict: "implement" };
+  await writeFile(join(ui.directory, factoryFile), JSON.stringify(data));
+  await ui.run("refresh()");
+  ui.run("choose('implementation')");
+  const section = () => ui.get("task-list").querySelectorAll("details").find((node) => node.dataset.taskId === "issue-9");
+  assert.equal(section().querySelector("pre"), null);
+  assert.equal(section().querySelector(".json-key"), null);
+
+  section().open = true;
+  await section().fire("toggle");
+  const pre = section().querySelector("pre");
+  assert.equal(pre.textContent, JSON.stringify(data.tasks.find((task) => task.id === "issue-9").details, null, 2));
+  await section().fire("toggle");
+  assert.equal(section().querySelectorAll("pre").length, 1);
+
+  const row = ui.get("task-list").children.find((node) => node.dataset.taskId === "issue-9");
+  const issue9 = data.tasks.find((task) => task.id === "issue-9");
+  issue9.revision = (issue9.revision ?? 0) + 1;
+  await writeFile(join(ui.directory, factoryFile), JSON.stringify(data));
+  await ui.run("refresh()");
+  assert.notEqual(ui.get("task-list").children.find((node) => node.dataset.taskId === "issue-9"), row);
+  assert.equal(section().open, true);
+  assert.equal(section().querySelectorAll("pre").length, 1);
+});
+
+test("an empty filter returns every task without stringifying, and terms still filter", async (t) => {
+  const ui = await dashboard(t);
+  ui.run("globalThis.stringified = 0; const stringify = JSON.stringify; JSON.stringify = (...args) => { stringified += 1; return stringify(...args); };");
+  assert.equal(ui.run("snapshot.tasks.every((task) => matchesTask(task, ''))"), true);
+  assert.equal(ui.run("stringified"), 0);
+  assert.equal(ui.run("matchesTask(snapshot.tasks.find((task) => task.id === 'issue-9'), 'implement')"), true);
+  assert.equal(ui.run("matchesTask(snapshot.tasks.find((task) => task.id === 'issue-9'), 'details.verdict:implement')"), true);
+  assert.equal(ui.run("matchesTask(snapshot.tasks.find((task) => task.id === 'issue-9'), 'state:review')"), false);
+  assert.equal(ui.run("matchesTask(snapshot.tasks.find((task) => task.id === 'issue-9'), 'no-such-text')"), false);
+});
+
+test("the list rebuilds only when a row's revision, update time or history changes", async (t) => {
+  const ui = await dashboard(t);
+  const data = structuredClone(example);
+  await writeFile(join(ui.directory, factoryFile), JSON.stringify(data));
+  ui.run("choose('implementation')");
+  const first = () => ui.get("task-list").children[0];
+  const row = first();
+  const id = row.dataset.taskId;
+  const task = data.tasks.find((item) => item.id === id);
+  await ui.run("refresh()");
+  assert.equal(first(), row);
+
+  task.revision = (task.revision ?? 0) + 1;
+  await writeFile(join(ui.directory, factoryFile), JSON.stringify(data));
+  await ui.run("refresh()");
+  const afterRevision = first();
+  assert.notEqual(afterRevision, row);
+
+  task.updated_at = "2026-05-02T00:00:00Z";
+  await writeFile(join(ui.directory, factoryFile), JSON.stringify(data));
+  await ui.run("refresh()");
+  const afterUpdate = first();
+  assert.notEqual(afterUpdate, afterRevision);
+
+  task.history.push({ ...task.history.at(-1) });
+  await writeFile(join(ui.directory, factoryFile), JSON.stringify(data));
+  await ui.run("refresh()");
+  assert.notEqual(first(), afterUpdate);
 });
 
 test("a row puts the title and Move button on one line and the links on their own wrapping line", async (t) => {

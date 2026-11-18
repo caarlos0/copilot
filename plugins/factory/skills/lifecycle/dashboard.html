@@ -822,8 +822,9 @@
       }
 
       function matchesTask(task, query) {
-        const allFields = JSON.stringify(task).toLowerCase();
         const terms = query.match(/(?:[^\s"]+|"[^"]*")+/g) ?? [];
+        if (!terms.length) return true;
+        let allFields;
         return terms.every((term) => {
           const field = /^([\w.-]+):(.+)$/u.exec(term);
           if (field && Object.keys(task).some((key) => key.toLowerCase() === field[1].split(".")[0].toLowerCase())) {
@@ -831,6 +832,7 @@
             return valuesAtPath(task, field[1].split(".")).some((item) =>
               JSON.stringify(item).toLowerCase().includes(value));
           }
+          allFields ??= JSON.stringify(task).toLowerCase();
           return allFields.includes(term.replace(/^"|"$/g, "").toLowerCase());
         });
       }
@@ -1473,8 +1475,14 @@
         if (task.details && Object.keys(task.details).length) {
           const details = element("details");
           details.dataset.taskId = task.id;
+          // The highlighted JSON is large; build it only once the section is opened.
+          const showJSON = () => {
+            if (details.open && !details.querySelector("pre")) details.append(highlightJSON(task.details));
+          };
+          details.addEventListener("toggle", showJSON);
           details.open = expanded.has(task.id);
-          details.append(element("summary", "Evidence and task details"), highlightJSON(task.details));
+          details.append(element("summary", "Evidence and task details"));
+          showJSON();
           more.append(details);
         }
         node.append(more);
@@ -1508,7 +1516,8 @@
         filterCount.textContent = filter
           ? `${tasks.length} of ${allTasks.length} tasks match the global filter.`
           : "";
-        const signature = JSON.stringify([selection, state, outcome, filter, tasks]);
+        const signature = JSON.stringify([selection, state, outcome, filter,
+          tasks.map((task) => [task.id, task.revision, task.updated_at, task.history.length])]);
         if (list.dataset.signature !== signature) {
           const rows = tasks.map((task) => taskRow(task, expanded));
           if (!reduced && sameList && sameFilter) {
