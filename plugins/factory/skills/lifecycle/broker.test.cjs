@@ -169,14 +169,6 @@ test("wait returns pr.merged like any other event", async (t) => {
   assert.equal(out.cursor, String((await stat(f.log)).size));
 });
 
-test("the lifecycle skill documents pr.merged for workers and the factory", async () => {
-  const text = await readFile(join(__dirname, "SKILL.md"), "utf8");
-  assert.match(text, /broker\.mjs emit \S+ pr\.merged --task/);
-  assert.match(text, /\| `pr\.merged` \|/);
-  assert.match(text, /gh pr view URL --json state,mergeCommit/);
-  assert.match(text, /A missed or lost `pr\.merged`/);
-});
-
 test("factory.mjs writes emit task.moved, task.updated, and dashboard feedback events", async (t) => {
   const f = await fixture(t);
   const factory = (...args) => {

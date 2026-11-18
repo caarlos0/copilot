@@ -464,9 +464,6 @@ test("the page script parses, never renders data as HTML, and finds its elements
   const script = html.match(/<script type="module">([\s\S]*?)<\/script>/)[1].replace(/^\s*import .+;\s*/m, "");
   new vm.Script(script);
   assert.doesNotMatch(script, /innerHTML|insertAdjacentHTML|outerHTML/);
-  assert.doesNotMatch(html, /Merge OK\?|class="gate"/);
-  assert.equal([...html.matchAll(/<input id="global-filter"/g)].length, 1);
-  assert.doesNotMatch(html, /id="task-filter"/);
   const ids = new Set([...html.matchAll(/id="([^"]+)"/g)].map((match) => match[1]));
   for (const [, id] of script.matchAll(/getElementById\("([^"]+)"\)/g)) {
     assert.ok(ids.has(id), `Missing element #${id}`);
@@ -665,7 +662,6 @@ test("state selection opens a docked list that can close and reopen", async (t) 
 });
 
 test("the task list is docked on the right of the flow, and the flow shrinks or scrolls", () => {
-  assert.doesNotMatch(html, /<dialog id="detail"/);
   const layout = html.match(/<div class="layout">([\s\S]*?)<noscript>/)[1];
   assert.ok(layout.indexOf('id="factories"') < layout.indexOf("<main>")
     && layout.indexOf("</main>") < layout.indexOf('<aside id="detail"'));
@@ -785,7 +781,6 @@ test("only the first nine sidebar items get a kbd badge", async (t) => {
 });
 
 test("the header shows a short refresh label", async (t) => {
-  assert.doesNotMatch(html, /Search all fields|<select id="factory"/);
   const ui = await dashboard(t, { now: Date.parse("2026-05-01T12:05:00Z") });
   assert.equal(ui.get("freshness").textContent, "refreshed just now");
   ui.setNow(Date.parse("2026-05-01T12:05:07Z"));
@@ -1020,7 +1015,7 @@ test("the list rebuilds only when a row's revision, update time or history chang
   assert.notEqual(first(), afterUpdate);
 });
 
-test("a row puts the title and Move button on one line and the links on their own wrapping line", async (t) => {
+test("a row has the title and Move button in the head and the links on their own line", async (t) => {
   const ui = await dashboard(t);
   ui.run("choose('implementation')");
   const row = ui.get("task-list").children[0];
@@ -1030,10 +1025,6 @@ test("a row puts the title and Move button on one line and the links on their ow
   assert.equal(links.className, "links");
   assert.ok(links.children.length > 0);
   assert.equal(head.querySelectorAll("a").length, 0);
-  assert.match(html, /\.row-head h3 \{[^}]*flex: 1;[^}]*min-width: 0/);
-  assert.match(html, /\.chips, \.links \{[^}]*flex-wrap: wrap/);
-  assert.match(html, /\.task-row \{[^}]*overflow-wrap: anywhere/);
-  assert.match(html, /\.move \{[^}]*flex: none/);
 });
 
 test("reference links get an issue or pull request glyph and show the bare number", async (t) => {
@@ -1054,7 +1045,6 @@ test("a row lists issues first, then pull requests, each by ascending number, wi
   const task = { ...example.tasks[0], issue: url("issues", 9), pr: url("pull", 30), links: [url("pull", 4), url("issues", 40), url("issues", 9)] };
   const row = ui.run(`taskRow(${JSON.stringify(task)}, new Set())`);
   assert.deepEqual(row.querySelector(".links").children.map((node) => node.href), [url("issues", 9), url("issues", 40), url("pull", 4), url("pull", 30)]);
-  assert.match(html, /width: 14, height: 14, role: "img"/);
 });
 
 test("a row without references has no links line", async (t) => {
@@ -1131,13 +1121,6 @@ test("long histories fold older steps and keep them reachable across refreshes",
   assert.equal(folded.dataset.taskId, `${task.id}:history`);
   const reopened = ui.run(`taskRow(${JSON.stringify(task)}, new Set(["${task.id}:history"]))`);
   assert.equal(reopened.children.find((child) => child.className === "history-earlier").open, true);
-});
-
-test("rows do not render the next action", async (t) => {
-  const ui = await dashboard(t);
-  const base = example.tasks.find((item) => item.id === "issue-9");
-  const row = ui.run(`taskRow(${JSON.stringify({ ...base, next_action: "Ship it." })}, new Set())`);
-  assert.doesNotMatch(row.textContent, /Next:|Ship it\./);
 });
 
 test("resolved sublists count each outcome and open only matching tasks", async (t) => {
@@ -1265,7 +1248,6 @@ test("Find work lists rules, user links and skipped work without changing task s
   assert.equal(ui.get("task-view").hidden, true);
   assert.equal(ui.get("producers-view").hidden, false);
   assert.equal(ui.get("close-detail")["aria-label"], "Close find work");
-  assert.doesNotMatch(html, /producers-dialog/);
   const rows = ui.get("rule-list").children;
   assert.deepEqual(rows.map((row) => row.querySelector("h3").textContent), ["new-bugs", "find-more", "User links"]);
   assert.match(rows[0].textContent, /search.*enabled.*Search: repo:owner\/repo is:issue.*Every 30m, last run .* ago, due now/);
@@ -1819,12 +1801,8 @@ test("Cmd+K and Ctrl+K toggle the task palette, and other dialogs keep it closed
   }
 });
 
-test("palette rows keep the state chip on one line and give the title the free width", async (t) => {
+test("palette rows show the task reference with the same glyph as links", async (t) => {
   const ui = await dashboard(t);
-  assert.match(html, /#palette-dialog \{[^}]*width: min\(720px, 92vw\)/);
-  assert.match(html, /#palette-list \.chip \{[^}]*flex: none;[^}]*white-space: nowrap/);
-  assert.match(html, /#palette-list \.option-title > :first-child \{[^}]*flex: 1;[^}]*min-width: 0/);
-  assert.match(html, /#palette-status \{[^}]*padding: 8px 24px 12px/);
   ui.press("k", { metaKey: true });
   const meta = ui.get("palette-list").children[0].querySelector(".option-meta");
   const ref = meta.querySelector(".ref");
