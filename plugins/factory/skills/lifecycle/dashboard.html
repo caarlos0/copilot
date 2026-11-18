@@ -186,10 +186,6 @@
       .close-button { font-size: 24px; color: var(--fg-muted); background: transparent; border-color: transparent; }
       .move-form .controls { justify-content: flex-end; }
       #detail-empty { margin: 16px 24px; }
-      .global-filter { display: flex; flex: 1; align-items: center; gap: 8px; max-width: 560px; min-width: 200px; }
-      .global-filter input { flex: none; width: 280px; max-width: 100%; }
-      #global-filter-count { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      #detail-filter-count { margin: 8px 24px; }
       .counter { display: inline-block; min-width: 20px; margin-left: 8px; padding: 0 6px; border-radius: 2em;
         background: color-mix(in srgb, var(--neutral) 20%, transparent); font-size: 12px; font-weight: 500;
         line-height: 18px; text-align: center; vertical-align: middle; }
@@ -297,8 +293,6 @@
         .refresh { display: contents; }
         #open-palette, #refresh { order: 1; justify-content: center; width: 44px; padding: 0; }
         #open-palette .label, #refresh .label { display: none; }
-        .global-filter { flex: 1 1 100%; order: 2; max-width: none; flex-wrap: wrap; }
-        .global-filter input { flex: 1 1 100%; width: 100%; }
         .layout { padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
         main { min-width: 0; padding-top: 16px; }
         #title-row { flex-wrap: wrap; }
@@ -317,7 +311,7 @@
         #palette-list { max-height: 40dvh; }
         #palette-list li { padding: 12px 16px; }
         #palette-status { padding-left: 16px; padding-right: 16px; }
-        #producers-note, #detail-filter-count, #detail-empty { margin-left: 16px; margin-right: 16px; }
+        #producers-note, #detail-empty { margin-left: 16px; margin-right: 16px; }
         #producers-view h3.section, #ignored-list li, #ignored-empty { padding-left: 16px; padding-right: 16px; }
         .move-form { padding: 16px; }
         .move-form .controls button { flex: 1 1 auto; }
@@ -350,11 +344,6 @@
       <div class="brand">
         <img id="logo" alt="" width="28" height="28">
         <h1>Factory</h1>
-      </div>
-      <div class="global-filter">
-        <input id="global-filter" type="search" autocomplete="off" placeholder="Filter tasks"
-          aria-label="Filter tasks" aria-describedby="global-filter-count">
-        <p id="global-filter-count" class="muted" role="status" hidden></p>
       </div>
       <div class="refresh">
         <button id="open-palette" type="button" aria-haspopup="dialog" aria-label="Go to task" title="Go to task">
@@ -434,7 +423,6 @@
           aria-label="Close task list" title="Close task list">&times;</button>
       </div>
       <div id="task-view">
-        <p id="detail-filter-count" class="muted" role="status"></p>
         <ul id="task-list"></ul>
         <p id="detail-empty" class="muted" hidden>No tasks in this state.</p>
       </div>
@@ -810,8 +798,7 @@
 
       function draw() {
         if (!snapshot) return;
-        const tasks = filteredTasks();
-        renderFilterStatus(tasks.length);
+        const tasks = snapshot.tasks;
         const chosen = openState();
         const counts = countByState(tasks);
         for (const state of states) {
@@ -840,7 +827,7 @@
         }
         const enabled = snapshot.rules.filter((rule) => rule.enabled && isFinder(rule));
         drawSource(enabled);
-        renderDetail(chosen, tasks);
+        renderDetail(chosen);
       }
 
       function drawSource(enabled) {
@@ -942,49 +929,6 @@
         });
       }
 
-      function valuesAtPath(value, path) {
-        if (!path.length) return [value];
-        if (Array.isArray(value)) return value.flatMap((item) => valuesAtPath(item, path));
-        if (!value || typeof value !== "object") return [];
-        const key = Object.keys(value).find((name) => name.toLowerCase() === path[0].toLowerCase());
-        return key ? valuesAtPath(value[key], path.slice(1)) : [];
-      }
-
-      function matchesTask(task, query) {
-        const terms = query.match(/(?:[^\s"]+|"[^"]*")+/g) ?? [];
-        if (!terms.length) return true;
-        let allFields;
-        return terms.every((term) => {
-          const field = /^([\w.-]+):(.+)$/u.exec(term);
-          if (field && Object.keys(task).some((key) => key.toLowerCase() === field[1].split(".")[0].toLowerCase())) {
-            const value = field[2].replace(/^"|"$/g, "").toLowerCase();
-            return valuesAtPath(task, field[1].split(".")).some((item) =>
-              JSON.stringify(item).toLowerCase().includes(value));
-          }
-          allFields ??= JSON.stringify(task).toLowerCase();
-          return allFields.includes(term.replace(/^"|"$/g, "").toLowerCase());
-        });
-      }
-
-      const filterQuery = () => document.getElementById("global-filter").value.trim();
-
-      function filteredTasks() {
-        const query = filterQuery();
-        return snapshot.tasks.filter((task) => matchesTask(task, query));
-      }
-
-      function renderFilterStatus(matchingCount) {
-        const status = document.getElementById("global-filter-count");
-        const query = filterQuery();
-        if (!snapshot || !query) {
-          status.textContent = "";
-          status.hidden = true;
-          return;
-        }
-        status.textContent = `${matchingCount} of ${snapshot.tasks.length} tasks match.`;
-        status.hidden = false;
-      }
-
       function closeMove() {
         const comment = moveDialog.querySelector("textarea")?.value;
         if (comment && !window.confirm("Discard your unsaved comment?")) return;
@@ -1068,8 +1012,6 @@
         paletteDialog.close();
         if (!task) return;
         const outcome = task.state === "resolved" ? task.resolution.outcome : null;
-        const query = filterQuery();
-        if (query && !matchesTask(task, query)) document.getElementById("global-filter").value = "";
         const docked = openState() === task.state && (!openOutcome() || openOutcome() === outcome);
         setHash(docked ? location.hash : `#${task.state}${outcome ? `/${outcome}` : ""}`);
         const row = [...document.getElementById("task-list").children].find((item) => item.dataset.taskId === id);
@@ -1123,11 +1065,6 @@
         }
         if (popupOpen || paletteDialog.open) return;
         if (event.key === "Escape" && !panel.hidden) closeChoice();
-        if (event.key === "/" && !event.metaKey && !event.ctrlKey && !event.altKey
-          && !event.target.closest("input, textarea, select, [contenteditable]")) {
-          event.preventDefault();
-          document.getElementById("global-filter").focus();
-        }
         if (event.defaultPrevented || event.repeat || event.target.closest("input, textarea, select, [contenteditable]")) return;
         const index = digitIndex(event, sidebar.length);
         if (index >= 0) {
@@ -1677,7 +1614,7 @@
         return node;
       }
 
-      function renderDetail(state, matchingTasks) {
+      function renderDetail(state) {
         const list = document.getElementById("task-list");
         const finder = !state && producersOpen();
         document.getElementById("task-view").hidden = finder;
@@ -1699,25 +1636,17 @@
         setCloseLabel("Close task list");
         const outcome = openOutcome();
         const sameList = panel.dataset.state === state && panel.dataset.outcome === (outcome ?? "");
-        const filter = filterQuery();
-        const sameFilter = list.dataset.filter === filter;
         const expanded = new Set([...list.querySelectorAll("details[open]")].map((node) => node.dataset.taskId));
         const inList = (task) => task.state === state && (!outcome || task.resolution.outcome === outcome);
-        const allTasks = snapshot.tasks.filter(inList);
-        const tasks = byRecency(matchingTasks.filter(inList));
+        const tasks = byRecency(snapshot.tasks.filter(inList));
         const title = document.getElementById("detail-title");
         title.textContent = outcome ? `Resolved: ${outcomeTitles[outcome]}` : places[state].title;
         title.append(element("span", String(tasks.length), "counter"));
-        const filterCount = document.getElementById("detail-filter-count");
-        filterCount.hidden = !filter;
-        filterCount.textContent = filter
-          ? `${tasks.length} of ${allTasks.length} tasks match the global filter.`
-          : "";
-        const signature = JSON.stringify([selection, state, outcome, filter,
+        const signature = JSON.stringify([selection, state, outcome,
           tasks.map((task) => [task.id, task.revision, task.updated_at, task.history.length])]);
         if (list.dataset.signature !== signature) {
           const rows = tasks.map((task) => taskRow(task, expanded));
-          if (!reduced && sameList && sameFilter) {
+          if (!reduced && sameList) {
             [...list.children].forEach((row, index) => {
               if (tasks.some((task) => task.id === row.dataset.taskId)) return;
               rows.splice(index, 0, row);
@@ -1733,13 +1662,11 @@
           }
           list.replaceChildren(...rows);
           list.dataset.signature = signature;
-          list.dataset.filter = filter;
         }
         refreshElapsedLabels(list);
         document.getElementById("detail-empty").hidden = list.children.length > 0;
         let emptyMessage = "No tasks in this state.";
         if (outcome) emptyMessage = "No tasks with this outcome.";
-        if (filter) emptyMessage = "No tasks match this filter.";
         document.getElementById("detail-empty").textContent = emptyMessage;
         panel.dataset.state = state;
         panel.dataset.outcome = outcome ?? "";
@@ -1989,7 +1916,6 @@
         const item = listed.find((entry) => entry.file === file);
         if (item) seen[file] = item.updated_at;
         renderFactories();
-        document.getElementById("global-filter").value = "";
         const url = new URL(location.href);
         url.searchParams.set("file", selection);
         url.hash = "";
@@ -1997,7 +1923,6 @@
         renderDetail(null);
         snapshot = lastSource = null;
         etags.clear();
-        renderFilterStatus(0);
         return refresh();
       }
       document.getElementById("refresh").addEventListener("click", refresh);
@@ -2010,7 +1935,6 @@
       document.addEventListener("click", (event) => {
         if (!projectMenu.hidden && !event.target.closest("#project-switch")) setProjectMenu(false);
       });
-      document.getElementById("global-filter").addEventListener("input", draw);
       window.addEventListener("hashchange", draw);
       const closeChoice = () => choose(null);
       document.getElementById("close-detail").addEventListener("click", closeChoice);

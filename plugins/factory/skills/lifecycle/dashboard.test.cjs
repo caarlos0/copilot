@@ -685,33 +685,6 @@ test("the task list is docked on the right of the flow, and the flow shrinks or 
   assert.equal(layout.split('id="detail"').length, 2, "The panel appears once.");
 });
 
-test("the slash key focuses the filter unless a field, modifier, or popup owns it", async (t) => {
-  const ui = await dashboard(t);
-  const filter = ui.get("global-filter");
-  const other = ui.document.createElement("div");
-  other.focus();
-  const slash = ui.press("/");
-  assert.equal(ui.document.activeElement, filter);
-  assert.equal(slash.defaultPrevented, true, "The slash must not be typed into the filter.");
-
-  const ignored = (event, why) => {
-    other.focus();
-    const pressed = ui.press("/", event);
-    assert.equal(ui.document.activeElement, other, why);
-    assert.equal(pressed.defaultPrevented, false, why);
-  };
-  for (const tag of ["input", "textarea", "select"]) ignored({ target: ui.document.createElement(tag) }, `Slash in ${tag}.`);
-  const editable = ui.document.createElement("div");
-  editable.editable = true;
-  ignored({ target: editable }, "Slash in a contenteditable element.");
-  for (const key of ["ctrlKey", "metaKey", "altKey"]) ignored({ [key]: true }, `Slash with ${key}.`);
-  for (const id of ["move-dialog", "settings-dialog"]) {
-    ui.get(id).open = true;
-    ignored({}, `Slash with ${id} open.`);
-    ui.get(id).open = false;
-  }
-});
-
 test("Escape leaves the task list open while a popup owns the key", async (t) => {
   const ui = await dashboard(t);
   ui.run("choose('blocked')");
@@ -801,45 +774,6 @@ test("the header has no refreshed label and no split title button", () => {
   assert.doesNotMatch(html, /freshness|refreshed/i);
   assert.doesNotMatch(html, /title-pill|id="goal"/);
   assert.match(html, /<button id="refresh"/, "The refresh button stays.");
-});
-
-test("global task filters search any field, combine terms, and survive refresh and move dialogs", async (t) => {
-  const ui = await dashboard(t);
-  ui.run("choose('review')");
-  const filter = ui.get("global-filter");
-  const rows = () => ui.get("task-list").children;
-  assert.equal(ui.get("detail-filter-count").hidden, true);
-  assert.equal(ui.get("detail-filter-count").textContent, "");
-  filter.value = 'history.note:"New head pushed." workers.review.status:running';
-  await filter.fire("input");
-  assert.deepEqual(rows().map((row) => row.dataset.taskId), ["issue-7"]);
-  assert.equal(ui.get("global-filter-count").textContent, `1 of ${example.tasks.length} tasks match.`);
-  assert.equal(ui.get("detail-filter-count").hidden, false);
-  assert.equal(ui.get("detail-filter-count").textContent, "1 of 1 tasks match the global filter.");
-
-  filter.value = "state:review 0123456";
-  await filter.fire("input");
-  assert.deepEqual(rows().map((row) => row.dataset.taskId), ["issue-7"]);
-  filter.value = "id:issue-9";
-  await filter.fire("input");
-  assert.equal(rows().length, 0);
-  assert.equal(ui.get("detail-empty").textContent, "No tasks match this filter.");
-
-  ui.run("choose('implementation')");
-  filter.value = "details.verdict:implement title:Retry";
-  await filter.fire("input");
-  assert.deepEqual(rows().map((row) => row.dataset.taskId), ["issue-9"]);
-  await rows()[0].querySelector(".move").fire("click");
-  await ui.run("refresh()");
-  assert.equal(filter.value, "details.verdict:implement title:Retry");
-  assert.equal(ui.get("global-filter-count").textContent, `1 of ${example.tasks.length} tasks match.`);
-  assert.deepEqual(rows().map((row) => row.dataset.taskId), ["issue-9"]);
-  assert.equal(ui.get("move-dialog").open, true);
-
-  filter.value = "";
-  await filter.fire("input");
-  assert.equal(ui.get("global-filter-count").hidden, true);
-  assert.equal(rows().length, example.tasks.filter((task) => task.state === "implementation").length);
 });
 
 test("flow edges use only straight horizontal and vertical segments", async (t) => {
@@ -983,41 +917,6 @@ for (const width of [0, 390]) test(`hovering or focusing a state lights only its
   assert.deepEqual(lit(), []);
 });
 
-test("global filters update state totals, resolution outcomes, and every opened list", async (t) => {
-  const ui = await dashboard(t);
-  const filter = ui.get("global-filter");
-  const nodeCount = (state) => Number(ui.run(`nodeOf('${state}')`).querySelector(".count").textContent);
-  const outcomeCount = (outcome) => Number(ui.get("flow").querySelectorAll(".outcome")
-    .find((node) => node.dataset.outcome === outcome).querySelector(".outcome-count").textContent);
-
-  filter.value = "id:issue-7";
-  await filter.fire("input");
-  assert.equal(nodeCount("review"), 1);
-  assert.equal(nodeCount("resolved"), 0);
-  assert.equal(outcomeCount("merged"), 0);
-  assert.equal(ui.get("global-filter-count").textContent, `1 of ${example.tasks.length} tasks match.`);
-  ui.run("choose('initial')");
-  assert.equal(ui.get("task-list").children.length, 0);
-  ui.run("choose('review')");
-  assert.deepEqual(ui.get("task-list").children.map((row) => row.dataset.taskId), ["issue-7"]);
-
-  filter.value = "id:issue-3";
-  await filter.fire("input");
-  assert.equal(nodeCount("review"), 0);
-  assert.equal(nodeCount("resolved"), 1);
-  assert.equal(outcomeCount("merged"), 1);
-  const merged = ui.get("flow").querySelectorAll(".outcome").find((node) => node.dataset.outcome === "merged");
-  await merged.fire("click");
-  assert.deepEqual(ui.get("task-list").children.map((row) => row.dataset.taskId), ["issue-3"]);
-
-  ui.get("global-filter").value = "";
-  await ui.get("global-filter").fire("input");
-  assert.equal(nodeCount("review"), 1);
-  assert.equal(nodeCount("resolved"), 1);
-  assert.equal(outcomeCount("merged"), 1);
-  assert.deepEqual(ui.get("task-list").children.map((row) => row.dataset.taskId), ["issue-3"]);
-});
-
 test("rows show history, open references in a new tab, and highlight evidence", async (t) => {
   const ui = await dashboard(t);
   ui.run("choose('implementation')");
@@ -1073,17 +972,6 @@ test("evidence renders on first open, once, and stays open across a list rebuild
   assert.notEqual(ui.get("task-list").children.find((node) => node.dataset.taskId === "issue-9"), row);
   assert.equal(section().open, true);
   assert.equal(section().querySelectorAll("pre").length, 1);
-});
-
-test("an empty filter returns every task without stringifying, and terms still filter", async (t) => {
-  const ui = await dashboard(t);
-  ui.run("globalThis.stringified = 0; const stringify = JSON.stringify; JSON.stringify = (...args) => { stringified += 1; return stringify(...args); };");
-  assert.equal(ui.run("snapshot.tasks.every((task) => matchesTask(task, ''))"), true);
-  assert.equal(ui.run("stringified"), 0);
-  assert.equal(ui.run("matchesTask(snapshot.tasks.find((task) => task.id === 'issue-9'), 'implement')"), true);
-  assert.equal(ui.run("matchesTask(snapshot.tasks.find((task) => task.id === 'issue-9'), 'details.verdict:implement')"), true);
-  assert.equal(ui.run("matchesTask(snapshot.tasks.find((task) => task.id === 'issue-9'), 'state:review')"), false);
-  assert.equal(ui.run("matchesTask(snapshot.tasks.find((task) => task.id === 'issue-9'), 'no-such-text')"), false);
 });
 
 test("the list rebuilds only when a row's revision, update time or history changes", async (t) => {
@@ -1268,7 +1156,7 @@ test("resolved sublists count each outcome and open only matching tasks", async 
   assert.equal(ui.get("task-list").children.length, 7);
   await duplicate.fire("click");
   await ui.get("close-detail").fire("click");
-  assert.equal(ui.get("detail").hidden, true, "Close must close the filtered list, not clear its filter.");
+  assert.equal(ui.get("detail").hidden, true, "Close must close the list.");
   assert.equal(ui.run("location.hash"), "");
 });
 
@@ -2042,28 +1930,6 @@ test("palette arrows wrap and Enter docks the task's list and focuses its row", 
   await ui.get("palette-list").children[0].fire("click");
   assert.equal(ui.run("location.hash"), "#blocked");
   assert.equal(ui.get("task-list").children[0].dataset.taskId, "issue-5");
-});
-
-test("opening a task from the palette clears a global filter that hides it", async (t) => {
-  const ui = await dashboard(t);
-  ui.get("global-filter").value = "retry";
-  await ui.get("global-filter").fire("input");
-  ui.press("k", { metaKey: true });
-  ui.get("palette-input").value = "issue-5";
-  await ui.get("palette-input").fire("input");
-  await ui.get("palette-input").fire("keydown", { key: "Enter" });
-  assert.equal(ui.get("global-filter").value, "");
-  assert.equal(ui.get("task-list").children[0].dataset.taskId, "issue-5");
-
-  ui.run("choose('resolved')");
-  ui.get("global-filter").value = "typo";
-  await ui.get("global-filter").fire("input");
-  ui.press("k", { metaKey: true });
-  ui.get("palette-input").value = "issue-3";
-  await ui.get("palette-input").fire("input");
-  await ui.get("palette-input").fire("keydown", { key: "Enter" });
-  assert.equal(ui.get("global-filter").value, "typo", "A matching filter stays.");
-  assert.equal(ui.run("location.hash"), "#resolved", "A list that already shows the task stays as it is.");
 });
 
 test("a card shows the worker summary for its state, else the newest, and folds a long one", async (t) => {
