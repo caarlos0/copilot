@@ -59,8 +59,9 @@ and does not edit. Every brief tells the worker to read
 
 The investigation step never implements. Its only job is to validate and
 hydrate a task before work starts: check the claim, find related PRs, add
-context, and set a verdict. Every task goes `initial` to `investigation` to
-`implementation`. The investigation worker is one-shot and read-only, runs in
+context, and set a verdict. Every task that needs work goes `initial` to
+`investigation` to `implementation`; a task with an existing PR may go straight
+to `review`. The investigation worker is one-shot and read-only, runs in
 the primary checkout, and never uses `wt`, a worktree, or a branch. It never
 edits product files, commits, pushes, opens a PR, or fixes. Its brief says "do
 not change anything" and forbids writes outside the result path and `$TMPDIR`.

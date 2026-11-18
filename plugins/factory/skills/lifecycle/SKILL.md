@@ -57,8 +57,9 @@ initial -> investigation -> implementation <-> review -> resolved
 ```
 
 Investigation never implements. It only validates and hydrates a task before
-work starts. Every task, including implementation work the user specified,
-goes `initial` -> `investigation` -> `implementation`. Only an implementation
+work starts. Every task that needs work, including implementation work the user
+specified, goes `initial` -> `investigation` -> `implementation`. Only a task
+with an existing PR may go straight to `review`. Only an implementation
 worker, in its own worktree, changes anything. Never run implementation work
 under an `investigation` worker record. See "Investigation worker".
 
