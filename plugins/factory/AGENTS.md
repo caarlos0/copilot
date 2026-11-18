@@ -56,6 +56,13 @@ workers. Implementation worktrees come from the local default branch: launch
 plain `wt NAME` in the main checkout, never `wt NAME --main`, which uses
 `origin/<default>` and loses unpushed local commits.
 
+`hooks.json` ships one `sessionStart` hook that gives every session the Rex
+terminal context (`rex __internal session-start`). It runs on every session
+start where the plugin is enabled, and it is silent unless `REX_SESSION` is set
+and `rex` and `jq` exist. Keep `--feature-session-naming=false`: the factory
+never renames a Rex session. The user-level dotfiles hook does the same, so
+with both installed the context appears twice; remove one.
+
 Workers start with their brief in the launch command
 (`copilot ... --model claude-sonnet-5.5 -i 'Read <brief> and do it.'`), so there is no fixed sleep and no
 `rex send` for the first message; `rex send` is only for follow-ups to idle
@@ -264,4 +271,5 @@ or scheduled rule remains actionable.
 
 Run `node --test plugins/factory/skills/lifecycle/*.test.cjs` from the
 repository root for factory data, writer, migration, server, dashboard, and
-result notification changes.
+result notification changes. Run `node --test plugins/factory/*.test.cjs` for
+the session hook.
