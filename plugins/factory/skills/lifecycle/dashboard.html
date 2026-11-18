@@ -183,11 +183,10 @@
       .settings-form label { margin-top: 12px; }
       .settings-form p.muted { margin: 4px 0 12px; }
       .settings-form .controls { margin-top: 24px; }
-      #producers-dialog { width: min(720px, calc(100% - 32px)); }
       #rule-list, #improve-list, #ignored-list { list-style: none; margin: 0; padding: 0; }
       #producers-note { margin: 16px 24px 0; }
       #producers-note:empty { display: none; }
-      #producers-dialog h3.section { margin: 0; padding: 16px 24px 0; border-top: 1px solid var(--border); }
+      #producers-view h3.section { margin: 0; padding: 16px 24px 0; border-top: 1px solid var(--border); }
       #ignored-list li, #ignored-empty { padding: 8px 24px; overflow-wrap: anywhere; }
       #ignored-empty { margin: 0; }
       body:has(dialog[open]) { overflow: hidden; }
@@ -334,20 +333,6 @@
         </div>
         <div id="settings-body"></div>
       </dialog>
-      <dialog id="producers-dialog" aria-labelledby="producers-title" tabindex="-1">
-        <div class="detail-head">
-          <h2 id="producers-title">Find work</h2>
-          <button id="close-producers" class="close-button" type="button" tabindex="-1"
-            aria-label="Close find work" title="Close find work">&times;</button>
-        </div>
-        <p id="producers-note" class="muted"></p>
-        <ul id="rule-list"></ul>
-        <h3 id="improve-heading" class="section">Self-improve</h3>
-        <ul id="improve-list"></ul>
-        <h3 class="section">Skipped</h3>
-        <ul id="ignored-list"></ul>
-        <p id="ignored-empty" class="muted" hidden>Nothing skipped.</p>
-      </dialog>
     </main>
     <aside id="detail" aria-labelledby="detail-title" tabindex="-1" hidden>
       <div class="detail-head">
@@ -355,9 +340,20 @@
         <button id="close-detail" class="close-button" type="button"
           aria-label="Close task list" title="Close task list">&times;</button>
       </div>
-      <p id="detail-filter-count" class="muted" role="status"></p>
-      <ul id="task-list"></ul>
-      <p id="detail-empty" class="muted" hidden>No tasks in this state.</p>
+      <div id="task-view">
+        <p id="detail-filter-count" class="muted" role="status"></p>
+        <ul id="task-list"></ul>
+        <p id="detail-empty" class="muted" hidden>No tasks in this state.</p>
+      </div>
+      <div id="producers-view" hidden>
+        <p id="producers-note" class="muted"></p>
+        <ul id="rule-list"></ul>
+        <h3 id="improve-heading" class="section">Self-improve</h3>
+        <ul id="improve-list"></ul>
+        <h3 class="section">Skipped</h3>
+        <ul id="ignored-list"></ul>
+        <p id="ignored-empty" class="muted" hidden>Nothing skipped.</p>
+      </div>
     </aside>
     </div>
     <noscript>Enable JavaScript to read the factory.</noscript>
@@ -446,7 +442,6 @@
       const moveDialog = document.getElementById("move-dialog");
       const settingsDialog = document.getElementById("settings-dialog");
       const paletteDialog = document.getElementById("palette-dialog");
-      const producers = document.getElementById("producers-dialog");
       function element(tag, value, className) {
         const node = document.createElement(tag);
         if (value != null) node.textContent = value;
@@ -645,7 +640,6 @@
         drawSource(enabled);
         tween();
         renderDetail(chosen, tasks);
-        renderProducers(producersOpen());
       }
 
       function drawSource(enabled) {
@@ -978,7 +972,7 @@
       }
 
       function onGlobalKey(event) {
-        const popupOpen = moveDialog.open || settingsDialog.open || producers.open;
+        const popupOpen = moveDialog.open || settingsDialog.open;
         if ((event.metaKey || event.ctrlKey) && isKKey(event)) {
           if (event.repeat) {
             event.preventDefault();
@@ -1520,15 +1514,24 @@
 
       function renderDetail(state, matchingTasks) {
         const list = document.getElementById("task-list");
+        const finder = !state && producersOpen();
+        document.getElementById("task-view").hidden = finder;
+        document.getElementById("producers-view").hidden = !finder;
         if (!state) {
           moveDialog.close();
-          panel.hidden = true;
           panel.dataset.state = "";
           panel.dataset.outcome = "";
           list.replaceChildren();
           list.dataset.signature = "";
+          if (finder) {
+            renderProducers();
+            showPanel();
+          } else {
+            panel.hidden = true;
+          }
           return;
         }
+        setCloseLabel("Close task list");
         const outcome = openOutcome();
         const sameList = panel.dataset.state === state && panel.dataset.outcome === (outcome ?? "");
         const filter = filterQuery();
@@ -1575,10 +1578,19 @@
         document.getElementById("detail-empty").textContent = emptyMessage;
         panel.dataset.state = state;
         panel.dataset.outcome = outcome ?? "";
-        if (panel.hidden) {
-          panel.hidden = false;
-          panel.focus();
-        }
+        showPanel();
+      }
+
+      function showPanel() {
+        if (!panel.hidden) return;
+        panel.hidden = false;
+        panel.focus();
+      }
+
+      function setCloseLabel(label) {
+        const button = document.getElementById("close-detail");
+        button.setAttribute("aria-label", label);
+        button.title = label;
       }
 
       function ruleRow(rule) {
@@ -1612,11 +1624,9 @@
         return node;
       }
 
-      function renderProducers(open) {
-        if (!open) {
-          producers.close();
-          return;
-        }
+      function renderProducers() {
+        document.getElementById("detail-title").textContent = "Find work";
+        setCloseLabel("Close find work");
         const manual = element("li", null, "task-row");
         manual.append(element("h3", "User links"),
           element("p", "Send an issue or PR link to the factory session. Links you send do not use the rules or the skipped list.", "muted"));
@@ -1633,10 +1643,6 @@
           return entry;
         }));
         document.getElementById("ignored-empty").hidden = ignored.length > 0;
-        if (!producers.open) {
-          producers.showModal();
-          producers.focus();
-        }
       }
 
       // With `conditional`, the server's tag for this URL is kept and sent back; an
@@ -1850,7 +1856,6 @@
       wireDismiss(moveDialog, "close-move", closeMove);
       wireDismiss(settingsDialog, "close-settings", closeSettings);
       wireDismiss(paletteDialog, "close-palette", () => paletteDialog.close());
-      wireDismiss(producers, "close-producers", closeChoice);
 
       document.getElementById("logo").src = document.getElementById("icon").href;
       setInterval(freshness, 1000);

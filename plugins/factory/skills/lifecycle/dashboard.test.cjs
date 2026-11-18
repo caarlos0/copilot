@@ -719,7 +719,7 @@ test("the slash key focuses the filter unless a field, modifier, or popup owns i
   editable.editable = true;
   ignored({ target: editable }, "Slash in a contenteditable element.");
   for (const key of ["ctrlKey", "metaKey", "altKey"]) ignored({ [key]: true }, `Slash with ${key}.`);
-  for (const id of ["move-dialog", "settings-dialog", "producers-dialog"]) {
+  for (const id of ["move-dialog", "settings-dialog"]) {
     ui.get(id).open = true;
     ignored({}, `Slash with ${id} open.`);
     ui.get(id).open = false;
@@ -1292,8 +1292,12 @@ test("Find work lists rules, user links and skipped work without changing task s
     .find((edge) => edge.dataset.edge === "source>initial").className.includes("idle"), false);
   await source.fire("click");
   assert.equal(ui.run("location.hash"), "#producers");
-  assert.equal(ui.get("producers-dialog").open, true);
-  assert.equal(ui.get("detail").hidden, true);
+  assert.equal(ui.get("detail").hidden, false, "Find work uses the docked panel.");
+  assert.equal(ui.get("detail-title").textContent, "Find work");
+  assert.equal(ui.get("task-view").hidden, true);
+  assert.equal(ui.get("producers-view").hidden, false);
+  assert.equal(ui.get("close-detail")["aria-label"], "Close find work");
+  assert.doesNotMatch(html, /producers-dialog/);
   const rows = ui.get("rule-list").children;
   assert.deepEqual(rows.map((row) => row.querySelector("h3").textContent), ["new-bugs", "find-more", "User links"]);
   assert.match(rows[0].textContent, /search.*enabled.*Search: repo:owner\/repo is:issue.*Every 30m, last run .* ago, due now/);
@@ -1307,13 +1311,19 @@ test("Find work lists rules, user links and skipped work without changing task s
   assert.match(ui.get("ignored-list").textContent, /2 2026-04-30: Archived duplicate/);
   assert.equal(ui.get("ignored-empty").hidden, true);
   assert.equal(ui.get("producers-note").textContent, "");
-  await ui.get("close-producers").fire("click");
-  assert.equal(ui.get("producers-dialog").open, false);
+  await ui.get("close-detail").fire("click");
+  assert.equal(ui.get("detail").hidden, true);
   assert.equal(ui.run("location.hash"), "");
   await source.fire("keydown", { key: "Enter" });
-  assert.equal(ui.get("producers-dialog").open, true);
-  await ui.get("producers-dialog").fire("cancel");
-  assert.equal(ui.get("producers-dialog").open, false);
+  assert.equal(ui.get("detail").hidden, false);
+  ui.press("Escape");
+  assert.equal(ui.get("detail").hidden, true);
+  assert.equal(ui.run("location.hash"), "");
+  await source.fire("click");
+  ui.run("choose('blocked')");
+  assert.equal(ui.get("producers-view").hidden, true, "A state replaces the Find work content.");
+  assert.equal(ui.get("task-view").hidden, false);
+  assert.equal(ui.get("close-detail")["aria-label"], "Close task list");
 });
 
 test("Find work shows a paused factory and disabled or unscheduled rules", async (t) => {
@@ -1845,7 +1855,7 @@ test("Cmd+K and Ctrl+K toggle the task palette, and other dialogs keep it closed
   assert.equal(ui.get("palette-list").children.length, 5);
   palette.open = false;
 
-  for (const id of ["settings-dialog", "move-dialog", "producers-dialog"]) {
+  for (const id of ["settings-dialog", "move-dialog"]) {
     ui.get(id).open = true;
     assert.equal(ui.press("k", { metaKey: true }).defaultPrevented, false, id);
     assert.equal(palette.open, false, id);
