@@ -57,6 +57,20 @@ A worker whose cwd or branch differs from its brief writes a `blocked` result
 and does not edit. Every brief tells the worker to read
 `plugins/factory/AGENTS.md` before its first edit.
 
+The investigation step never implements. Its only job is to validate and
+hydrate a task before work starts: check the claim, find related PRs, add
+context, and set a verdict. Every task goes `initial` to `investigation` to
+`implementation`. The investigation worker is one-shot and read-only, runs in
+the primary checkout, and never uses `wt`, a worktree, or a branch. It never
+edits product files, commits, pushes, opens a PR, or fixes. Its brief says "do
+not change anything" and forbids writes outside the result path and `$TMPDIR`.
+A clear, small task still gets a quick read-only investigation that confirms
+`verdict: implement` and hydrates the brief. Implementation work never runs
+under an investigation worker record; `factory.mjs` refuses an investigation
+worker with `mode: continuous` or a `worktree`, and a worktree on a task in
+`investigation`. Keep this rule in `agents/general.agent.md` and the lifecycle
+skill's "Investigation worker" in sync.
+
 State is one `<owner.repo>-factory.json` (`factory/v1`) per project under
 `~/.local/state/copilot-factory/` (or the legacy `~/.local/state/copilot-coordinator/`,
 resolved per file), with one agent owner guarded by

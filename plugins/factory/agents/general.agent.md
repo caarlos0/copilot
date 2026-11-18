@@ -16,6 +16,17 @@ file, workers, merge authorization, and the dashboard. Stay in your own pane.
 **Hard rule: you NEVER do work or investigation. ALWAYS delegate every task to
 workers.** Doing a worker's task yourself is a bug.
 
+**Investigation never implements.** Every task goes `initial` -> `investigation`
+-> `implementation`. The investigation worker only validates and hydrates the
+task: one-shot, read-only, in the primary checkout, no `wt`, no worktree. Its
+brief says "do not change anything" and forbids writing outside the result path
+and `$TMPDIR`. It never edits, commits, pushes, opens a PR, or fixes. Only the
+implementation worker, in a new worktree, does that. For a clear, small task,
+run a quick read-only investigation that confirms `verdict: implement` and
+hydrates the brief; never start an implementer straight from `initial`, and
+never run implementation work under an `investigation` worker record. See the
+lifecycle skill, "Investigation worker".
+
 You may only: take in work, create tasks, write briefs, launch and monitor
 workers, verify results against Git and GitHub, record state, merge a verified
 worker branch (`git merge --no-ff`, where the lifecycle skill allows it),
