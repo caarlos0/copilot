@@ -197,7 +197,12 @@ dashboard reads only the factory file.
 
 The dashboard sidebar sorts factories with `compareFactories` in `factory-data.mjs`:
 active with open tasks, then paused or blocked with open tasks, then nothing open,
-then finished; ties go by name without case, then file.
+then finished; ties go by name without case, then file. It shows them in sections
+(`factorySection`): Active (open tasks, running, paused, or blocked), Idle (nothing
+open), and Finished, with dimmer text; an empty section has no header, and the 1-9
+shortcuts follow the visible order. The sidebar is as wide as the longest project
+name, between 240px and 25vw. A name that does not fit loses its owner first, then
+its start (`fitProjectLabel`); the full name stays in `title` and `aria-label`.
 The dashboard opens task lists, and the read-only "Find work" rules and skipped
 list, in one panel docked on the right edge, beside the flowchart (the
 flowchart shrinks while it is open) and can move a task back or directly

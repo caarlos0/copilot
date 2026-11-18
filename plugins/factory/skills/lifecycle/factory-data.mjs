@@ -478,6 +478,10 @@ function factoryGroup({ status, task_count, counts }) {
   return status === "active" ? 0 : 1;
 }
 
+// The sidebar section of a factory: open work (running, paused, or blocked), nothing open, or finished.
+export const factorySections = [["active", "Active"], ["idle", "Idle"], ["finished", "Finished"]];
+export const factorySection = (factory) => factorySections[Math.max(factoryGroup(factory) - 1, 0)][0];
+
 export function compareFactories(a, b) {
   return factoryGroup(a) - factoryGroup(b)
     || a.project.localeCompare(b.project, undefined, { sensitivity: "base" })
@@ -489,4 +493,19 @@ export function digitIndex({ key, metaKey, ctrlKey, altKey, shiftKey }, count) {
   if (metaKey || ctrlKey || altKey || shiftKey || !/^[1-9]$/.test(key)) return -1;
   const index = Number(key) - 1;
   return index < count ? index : -1;
+}
+
+// Shortens an `owner/repo` label until `measure(text)` fits `width`, like fish's prompt_pwd:
+// full name, abbreviated owner, repo alone, then the repo cut from the start so its end stays.
+export function fitProjectLabel(label, width, measure) {
+  const slash = label.indexOf("/");
+  const repo = label.slice(slash + 1);
+  const steps = slash > 0 ? [label, `${label[0]}/${repo}`, repo] : [label];
+  const fits = steps.find((text) => measure(text) <= width);
+  if (fits !== undefined) return fits;
+  for (let keep = repo.length - 1; keep > 0; keep--) {
+    const text = `…${repo.slice(-keep)}`;
+    if (measure(text) <= width) return text;
+  }
+  return "…";
 }

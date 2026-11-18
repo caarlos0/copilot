@@ -124,6 +124,31 @@ test("compareFactories sorts by state group, then by name ignoring case, then by
   assert.deepEqual(order([...items].reverse()), expected);
 });
 
+test("factorySection groups factories by run state", async () => {
+  const { factorySection } = await import("./factory-data.mjs");
+  const counts = (resolved) => ({ resolved });
+  assert.equal(factorySection({ status: "active", task_count: 3, counts: counts(1) }), "active");
+  assert.equal(factorySection({ status: "paused", task_count: 3, counts: counts(1) }), "active");
+  assert.equal(factorySection({ status: "active", task_count: 3, counts: counts(3) }), "idle");
+  assert.equal(factorySection({ status: "active", task_count: 0, counts: counts(0) }), "idle");
+  assert.equal(factorySection({ status: "finished", task_count: 3, counts: counts(1) }), "finished");
+});
+
+test("fitProjectLabel shortens the owner first and cuts the repo from the start last", async () => {
+  const { fitProjectLabel } = await import("./factory-data.mjs");
+  const fit = (label, width) => fitProjectLabel(label, width, (text) => text.length);
+  const label = "github/copilot-agent-runtime";
+  assert.equal(fit(label, 28), label);
+  assert.equal(fit(label, 23), "g/copilot-agent-runtime");
+  assert.equal(fit(label, 22), "copilot-agent-runtime");
+  assert.equal(fit(label, 20), "…pilot-agent-runtime");
+  assert.equal(fit(label, 14), "…agent-runtime");
+  assert.equal(fit(label, 2), "…e");
+  assert.equal(fit(label, 0), "…");
+  assert.equal(fit("copilot", 5), "…ilot");
+  assert.equal(fit("Unavailable: a/b.json", 5), "…json");
+});
+
 test("budget validation accepts valid values and an absent budget, and rejects everything else", async (t) => {
   const { validate } = await import("./factory-data.mjs");
   validate(withoutBudget());

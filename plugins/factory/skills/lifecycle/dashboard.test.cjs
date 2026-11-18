@@ -490,6 +490,7 @@ async function dashboard(t, { reducedMotion = true, confirm = () => true, now = 
   const document = {
     getElementById: (id) => elements.get(id),
     createElement: (tag) => new Element(tag),
+    querySelectorAll: () => [],
     createElementNS: (_, tag) => new Element(tag),
     listeners: new Map(),
     addEventListener(name, callback) { this.listeners.set(name, callback); },
@@ -502,6 +503,7 @@ async function dashboard(t, { reducedMotion = true, confirm = () => true, now = 
       this.dataset = {};
       this.style = { setProperty() {} };
       this.listeners = new Map();
+      this.getContext = () => ({});
       this.value = "";
       this.open = false;
       this.hidden = false;
@@ -591,6 +593,7 @@ async function dashboard(t, { reducedMotion = true, confirm = () => true, now = 
     history: { replaceState: (_, __, value) => { location.href = new URL(value, location).href; } },
     window: { addEventListener: (name, callback) => { if (name === "resize") resizeListeners.push(callback); }, confirm },
     matchMedia: (query) => ({ matches: /reduce/.test(query) ? reducedMotion : phoneWidth > 0 }),
+    ResizeObserver: class { observe() {} },
     setTimeout() {}, clearTimeout() {}, setInterval() {},
     fetch: (path, options = {}) => {
       const init = {
@@ -720,6 +723,28 @@ test("the sidebar lists every factory and blinks a dot on one that changed until
   await write("2026-05-01T14:00:00Z");
   await ui.run("refresh()");
   assert.equal(dots().length, 0, "The selected factory never shows a dot.");
+});
+
+test("the sidebar groups factories into Active, Idle and Finished sections in a stable order", async (t) => {
+  const ui = await dashboard(t);
+  const write = (file, project, patch) => writeFile(join(ui.directory, file),
+    JSON.stringify({ ...example, id: project, project, updated_at: "2026-05-01T12:00:00Z", ...patch }));
+  await write("a.repo-factory.json", "a/finished", { status: "finished" });
+  await write("b.repo-factory.json", "b/idle", { tasks: [] });
+  await ui.run("refresh()");
+  const factories = ui.get("factories");
+  const groups = () => factories.querySelectorAll(".factory-section");
+  assert.deepEqual(groups().map((group) => group.querySelector(".section-title").textContent), ["Active", "Idle", "Finished"]);
+  assert.deepEqual(groups().map((group) => group["aria-label"]), ["Active", "Idle", "Finished"]);
+  const names = () => factories.querySelectorAll("button").map((item) => item.querySelector(".name").textContent);
+  assert.deepEqual(names(), ["owner/repo", "b/idle", "a/finished"]);
+  assert.deepEqual(factories.querySelectorAll("button").map((item) => item.querySelector("kbd").textContent), ["1", "2", "3"]);
+  assert.match(factories.querySelectorAll("button")[2].className, /\bfinished\b/);
+  assert.equal(factories.querySelectorAll("button")[0].className.includes("finished"), false);
+
+  await rm(join(ui.directory, "b.repo-factory.json"));
+  await ui.run("refresh()");
+  assert.deepEqual(groups().map((group) => group.querySelector(".section-title").textContent), ["Active", "Finished"]);
 });
 
 test("digits select the Nth sidebar factory and the first nine items show a kbd badge", async (t) => {
