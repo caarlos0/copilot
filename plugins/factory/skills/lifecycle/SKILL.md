@@ -735,11 +735,17 @@ The `pr.merged` command goes in the brief of every implementation worker on a
 task with a PR. Put the absolute path of `broker.mjs` (beside this skill) in the brief.
 An implementation brief also gets the absolute path of `pr-watch.mjs` (beside
 this skill), written as `PR_WATCH` in the watcher rules. `worker.result`
-needs `data.role` and `data.outcome` (`working`, `waiting`, `complete`, or `blocked`);
-add `head`, `result`, `feedback_id`, and a short `summary` when known. Keep long
+needs `data.role`, `data.outcome` (`working`, `waiting`, `complete`, or `blocked`), and
+`data.result`, the result file name in the state directory. `emit` refuses it (exit 1,
+nothing appended) unless that file parses and its `task`, `role` and `outcome` match the
+event. For a `complete` implementation result with `data.head`, it also refuses unless the
+task's worktree (`worktree.path`) is at that head and the head descends from `main`; run
+`git rebase main` and emit again. A task with no worktree record skips the head check.
+Add `head`, `feedback_id`, and a short `summary` when known. Keep long
 evidence in the result file; an event is at most 64 KiB. Emit `worker.blocked`
-(`role`, `reason`) as well as a `blocked` result so a blocker wakes the factory first.
-`pr.merged` needs `data.pr` and `data.merge_commit`; add `role` and `head`. It is
+(`role`, `reason`) as well as a `blocked` result so a blocker wakes the factory first;
+add `result` to have `emit` check that the file records outcome `blocked`.
+`pr.merged` needs `data.pr` and `data.merge_commit` (a full 40-character SHA); add `role` and `head`. It is
 a hint, not proof: the factory verifies the merge on GitHub.
 
 A result file is cumulative and replaced atomically at each milestone:

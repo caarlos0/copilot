@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFileSync, unlinkSync, watch } from "node:fs";
 import { link, open, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
@@ -10,6 +11,7 @@ const maxTimer = 2 ** 31 - 1;
 const maxLine = 64 * 1024;
 const reconcileEvery = "5m";
 const reconcileMs = 5 * 60_000;
+const defaultBranch = "main";
 const workerOutcomes = ["working", "waiting", "complete", "blocked"];
 
 // Each type lists whether it needs --task and the data keys it must carry.
@@ -104,6 +106,56 @@ function validateEvent({ type, task, source, data }) {
   }
 }
 
+const git = (cwd, ...args) =>
+  execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+
+// The result file sits in the state directory beside the factory file; a worker names it,
+// so it must match the event it announces.
+async function checkResult(factory, { type, task, data }) {
+  const name = data.result;
+  if (typeof name !== "string" || name !== basename(name) || name.startsWith(".")) {
+    throw new Error(`${type} data "result" must name a result file in the state directory.`);
+  }
+  let saved;
+  try {
+    saved = JSON.parse(await readFile(join(dirname(factory), name), "utf8"));
+  } catch (error) {
+    throw new Error(`Result file ${name} is not readable JSON in the state directory: ${error.message}`);
+  }
+  const outcome = type === "worker.blocked" ? "blocked" : data.outcome;
+  for (const [key, want] of [["task", task], ["role", data.role], ["outcome", outcome]]) {
+    if (saved?.[key] !== want) throw new Error(`Result file ${name} has ${key} ${JSON.stringify(saved?.[key])}, but the event has ${JSON.stringify(want)}.`);
+  }
+}
+
+// A task without a worktree record has no branch to check.
+async function checkHead(factory, task, head) {
+  const worktree = JSON.parse(await readFile(factory, "utf8")).tasks?.find(({ id }) => id === task)?.worktree;
+  if (!worktree?.path) return;
+  const at = git(worktree.path, "rev-parse", "HEAD");
+  if (at !== head) throw new Error(`The worktree ${worktree.path} is at ${at}, not at head ${head}. Commit, then report the real head.`);
+  try {
+    git(worktree.path, "merge-base", "--is-ancestor", defaultBranch, head);
+  } catch (error) {
+    if (error.status !== 1) throw error;
+    throw new Error(`Head ${head} does not descend from ${defaultBranch}. Run git rebase ${defaultBranch}, then emit again.`);
+  }
+}
+
+// Refuses an event the factory could not trust. Nothing is appended on failure.
+async function checkEvent(factory, event) {
+  const { type, task, data } = event;
+  if (type === "worker.result" || (type === "worker.blocked" && data.result !== undefined)) {
+    await checkResult(factory, event);
+  }
+  if (type === "worker.result" && data.role === "implementation" && data.outcome === "complete" && typeof data.head === "string") {
+    await checkHead(factory, task, data.head);
+  }
+  if (type === "pr.merged" && !/^[0-9a-f]{40}$/.test(data.merge_commit)) {
+    throw new Error("pr.merged data merge_commit must be a full 40-character SHA.");
+  }
+}
+
 // The log directory is resolved the way factory.mjs resolves its file.
 export async function resolveFactory(file) {
   return join(await realpath(dirname(resolve(file))), basename(file));
@@ -121,6 +173,7 @@ async function size(file) {
 // One O_APPEND write per event keeps concurrent emitters from interleaving lines.
 export async function emit(factory, { type, task = null, source, data = {} }) {
   validateEvent({ type, task, source, data });
+  await checkEvent(factory, { type, task, data });
   const event = { id: randomUUID(), at: new Date().toISOString(), type, task, source, data };
   const line = `${JSON.stringify(event)}\n`;
   if (Buffer.byteLength(line) > maxLine) throw new Error("Event is larger than 64 KiB. Keep long evidence in the result file.");
@@ -307,6 +360,12 @@ wait    Blocks until an event exists after the cursor, prints {"events":[...],"c
 emit    Appends one event and prints it. Types: ${Object.keys(eventTypes).join(", ")}.
         Needed data keys: ${Object.entries(eventTypes).map(([type, { data }]) => `${type}: ${data.join(", ")}`).join("; ")}.
         worker.result outcome: ${workerOutcomes.join(", ")}. --source defaults to worker.
+        emit refuses (exit 1, nothing appended) a worker.result whose data.result is not a JSON
+        file in the state directory with the same task, role and outcome; a worker.blocked with
+        data.result gets the same check with outcome blocked. A complete implementation
+        worker.result with data.head must match HEAD of the task's worktree and descend from
+        main (skipped when the task has no worktree record). pr.merged needs a full
+        merge_commit SHA.
         pr.merged is a hint from the implementation worker (role, pr, merge_commit, head); the
         factory verifies the merge on GitHub before it resolves the task.
         factory.mjs emits task.moved, task.updated, and feedback.pending after every task write,

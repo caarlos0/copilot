@@ -234,7 +234,11 @@ so no event is lost between two `wait` calls. `factory.mjs` emits after every
 successful write (source `coordinator`, or `dashboard` for operator moves), and
 the factory waits with `--exclude-source coordinator` so its own writes never
 wake it. Workers write their result file atomically, then run
-`broker.mjs emit worker.result` (or `worker.blocked`). After a PR merge, the
+`broker.mjs emit worker.result` (or `worker.blocked`). `emit` validates before it
+appends and exits 1 with a reason when it refuses: a `worker.result` needs
+`data.result`, a JSON file in the state directory whose `task`, `role` and
+`outcome` match the event, and a `complete` implementation result with `data.head`
+needs the task's worktree at that head and descended from `main`. After a PR merge, the
 implementation worker also emits `pr.merged`, a hint: the factory verifies the
 merge on GitHub, resolves the task, and releases its panes and worktree, and
 `reconcile.mjs` stays the backstop for a missed event, and while the run is
