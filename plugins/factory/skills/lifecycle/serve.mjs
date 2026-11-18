@@ -215,13 +215,14 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
     }
   }
 
-  async function readJSONBody(request) {
+  // Reads a same-origin POST body of the given content type, at most 16 KiB.
+  async function readBody(request, type) {
     if (request.headers.origin !== `http://${request.headers.host}` ||
         (request.headers["sec-fetch-site"] && request.headers["sec-fetch-site"] !== "same-origin")) {
       throw new HttpError(403, "State changes must come from this dashboard.");
     }
-    if (request.headers["content-type"]?.split(";")[0].trim() !== "application/json") {
-      throw new HttpError(415, "State changes require application/json.");
+    if (request.headers["content-type"]?.split(";")[0].trim() !== type) {
+      throw new HttpError(415, `State changes require ${type}.`);
     }
     if (Number(request.headers["content-length"]) > maxBody) {
       throw new HttpError(413, "State change is too large (maximum 16 KiB).");
@@ -233,8 +234,10 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
       if (size > maxBody) throw new HttpError(413, "State change is too large (maximum 16 KiB).");
       chunks.push(chunk);
     }
-    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    return Buffer.concat(chunks).toString("utf8");
   }
+
+  const readJSONBody = async (request) => JSON.parse(await readBody(request, "application/json"));
 
   async function write(file, values) {
     try {
@@ -336,7 +339,7 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
       if (request.method !== "GET") return false;
       url.searchParams.delete("token");
       response.writeHead(302, {
-        "Set-Cookie": `token=${token}; HttpOnly; SameSite=Strict; Path=/`,
+        "Set-Cookie": sessionCookie,
         Location: url.pathname + url.search,
       });
       response.end();
@@ -348,6 +351,55 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
     return false;
   }
 
+  const sessionCookie = `token=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${60 * 60 * 24 * 30}`;
+  const escapeHTML = (value) => value.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
+
+  // Only a browser page load gets the login form; API calls keep the JSON 401.
+  const isPage = (request, url) => request.method === "GET" && /text\/html/.test(request.headers.accept ?? "") &&
+    ["/", "/dashboard.html", "/login"].includes(url.pathname);
+
+  // A same-origin path only, so the redirect after login can never leave this server.
+  function safeNext(value) {
+    if (typeof value !== "string" || !/^\/(?![/\\])[^\s\\]*$/.test(value)) return "/";
+    const target = new URL(value, "http://login.invalid");
+    return target.origin === "http://login.invalid" ? target.pathname + target.search : "/";
+  }
+
+  function loginPage(response, next, wrong) {
+    send(response, 401, `<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Factory dashboard login</title>
+<style>
+body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;font:16px system-ui,sans-serif;background:#111;color:#eee}
+form{width:min(22rem,100% - 2rem);display:flex;flex-direction:column;gap:1rem}
+input,button{font:inherit;font-size:16px;padding:.9rem;border-radius:.5rem;border:1px solid #555;box-sizing:border-box;width:100%}
+input{background:#222;color:inherit}
+button{background:#3b82f6;border-color:#3b82f6;color:#fff;font-weight:600;cursor:pointer}
+p{margin:0;color:#f87171}
+</style></head><body>
+<form method="post" action="/login">
+<h1>Factory dashboard</h1>${wrong ? "\n<p role=\"alert\">Wrong token</p>" : ""}
+<input type="password" name="token" placeholder="Access token" autocomplete="current-password" autofocus required>
+<input type="hidden" name="next" value="${escapeHTML(next)}">
+<button type="submit">Log in</button>
+</form></body></html>
+`, "text/html; charset=utf-8", {
+      "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'",
+    });
+  }
+
+  async function login(request, response) {
+    const form = new URLSearchParams(await readBody(request, "application/x-www-form-urlencoded"));
+    const next = safeNext(form.get("next"));
+    if (!sameToken(form.get("token"), token)) {
+      await new Promise((done) => setTimeout(done, 500));
+      return loginPage(response, next, true);
+    }
+    response.writeHead(303, { "Set-Cookie": sessionCookie, Location: next, "Cache-Control": "no-store" });
+    response.end();
+  }
+
   const server = createServer(async (request, response) => {
     try {
       const port = server.address().port;
@@ -355,7 +407,15 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
         throw new HttpError(403, "Use the printed URL.");
       }
       const url = new URL(request.url, `http://127.0.0.1:${port}`);
-      if (checkToken(request, response, url)) return;
+      if (requireToken && request.method === "POST" && url.pathname === "/login") return await login(request, response);
+      try {
+        if (checkToken(request, response, url)) return;
+      } catch (error) {
+        if (error.status !== 401 || !isPage(request, url)) throw error;
+        const queryToken = url.searchParams.has("token");
+        url.searchParams.delete("token");
+        return loginPage(response, url.pathname === "/login" ? "/" : safeNext(url.pathname + url.search), queryToken);
+      }
       if (request.method === "POST" && url.pathname === "/api/move") {
         send(response, 200, await moveTask(request, url.searchParams.get("file")));
       } else if (request.method === "POST" && url.pathname === "/api/settings") {

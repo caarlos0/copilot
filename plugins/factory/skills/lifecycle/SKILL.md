@@ -1308,9 +1308,11 @@ requires an access token on every request: a random one, unless `--token
 TOKEN` gives one. The startup output lists a ready URL with the token
 (`http://<LAN-IP>:PORT/?token=...`) for each non-internal IPv4 address, and
 warns that plain HTTP carries the token in clear text, so only use this on a
-trusted network. A browser that opens the printed URL gets a cookie and no
-longer needs the token in the address bar; other clients send `Authorization:
-Bearer TOKEN` instead. Only use `--host` when the user asks to reach the
+trusted network. A browser that opens the printed URL gets a cookie (30 days)
+and no longer needs the token in the address bar. A browser page request
+without a valid token gets a login form instead of an error; the form posts to
+`/login`. Other clients send `Authorization: Bearer TOKEN` and get a JSON 401
+without it. Only use `--host` when the user asks to reach the
 dashboard from another device.
 
 The page shows the flow with a task count per state, task lists, the read-only

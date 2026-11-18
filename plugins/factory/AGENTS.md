@@ -161,8 +161,12 @@ caches each parsed file and sends an `ETag` (mtime, size, inode) on
 dashboard skips load and redraw on a 304; it binds `127.0.0.1` with no token
 by default, and a non-loopback `--host` (for reaching the dashboard from
 another device) requires a token (random, or `--token`) on every request,
-checked in constant time, with a cookie set after the first `?token=` load and
-an `Authorization: Bearer` header also accepted, and the bound Host checked to
+checked in constant time, with a cookie (`HttpOnly; SameSite=Strict`, 30 days) set
+after the first `?token=` load or after a `POST /login` from the login form, and
+an `Authorization: Bearer` header also accepted. A browser page request without a
+valid token gets the login form (401); other requests get a JSON 401, and the
+dashboard reloads on a 401 so the form appears. The login redirect keeps a
+same-origin path only, a wrong token waits 500 ms, and the bound Host is checked to
 block DNS rebinding;
 `migrate.mjs` reads each handoff the same way and writes the factory file to
 the new directory. The lock, events log, waiter PID, archive, and sessions file

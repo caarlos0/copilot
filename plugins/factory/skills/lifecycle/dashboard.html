@@ -1651,6 +1651,7 @@
         const headers = { ...options.headers, ...(conditional && etags.has(path) ? { "If-None-Match": etags.get(path) } : {}) };
         const response = await fetch(path, { ...options, headers, cache: "no-store" });
         if (conditional && response.status === 304) return notModified;
+        if (response.status === 401) location.reload();
         const data = await response.json();
         if (!response.ok) throw new Error(data.error ?? `HTTP ${response.status}`);
         if (conditional && response.headers.get("ETag")) etags.set(path, response.headers.get("ETag"));

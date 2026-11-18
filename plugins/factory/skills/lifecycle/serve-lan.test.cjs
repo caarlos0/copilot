@@ -71,7 +71,7 @@ test("a non-loopback --host requires a token on every request and warns about cl
   const location = new URL(first.headers.get("location"), url);
   assert.equal(location.searchParams.get("token"), null, "the token is stripped from the redirect target");
   const cookie = first.headers.get("set-cookie");
-  assert.match(cookie, /^token=[\w-]+; HttpOnly; SameSite=Strict; Path=\/$/);
+  assert.match(cookie, /^token=[\w-]+; HttpOnly; SameSite=Strict; Path=\/; Max-Age=2592000$/);
 
   const withoutCookie = await fetch(location);
   assert.equal(withoutCookie.status, 401, "the redirect target itself carries no token");
@@ -89,4 +89,76 @@ test("a write is rejected without a token and accepted with one", async (t) => {
   assert.equal((await move({})).status, 401, "no token");
   assert.equal((await move({ Authorization: "Bearer wrong" })).status, 401, "wrong token");
   assert.equal((await move({ Authorization: `Bearer ${token}` })).status, 200, "correct token");
+});
+
+test("a browser without a token gets a login form; the API keeps its JSON 401", async (t) => {
+  const { url, token } = await server(t, ["--host", "0.0.0.0"]);
+  const bare = new URL(url);
+  bare.search = "";
+  const html = { Accept: "text/html" };
+
+  const page = await fetch(bare, { headers: html });
+  assert.equal(page.status, 401);
+  assert.match(page.headers.get("content-type"), /^text\/html/);
+  const body = await page.text();
+  assert.match(body, /<input type="password" name="token"/);
+  assert.match(body, /name="viewport"/);
+  assert.doesNotMatch(body, /Wrong token/);
+  assert.doesNotMatch(body, new RegExp(token), "the token is never echoed");
+
+  const wrongLink = await fetch(new URL("?token=wrong-wrong-wrong-wrong", bare), { headers: html });
+  assert.equal(wrongLink.status, 401);
+  assert.match(await wrongLink.text(), /Wrong token/);
+
+  const api = await fetch(new URL(`/api/factories`, bare), { headers: { Accept: "application/json" } });
+  assert.equal(api.status, 401);
+  assert.match(api.headers.get("content-type"), /^application\/json/);
+  assert.match((await api.json()).error, /access token/);
+  const asked = await fetch(new URL(`/api/factories`, bare), { headers: html });
+  assert.match(asked.headers.get("content-type"), /^application\/json/, "only the dashboard page gets the form");
+});
+
+test("POST /login sets the cookie and redirects to a same-origin path only", async (t) => {
+  const { url, token } = await server(t, ["--host", "0.0.0.0"]);
+  const login = (values, extra = {}) => fetch(new URL("/login", url), {
+    method: "POST",
+    redirect: "manual",
+    headers: { Origin: url.origin, "Content-Type": "application/x-www-form-urlencoded", ...extra },
+    body: new URLSearchParams(values),
+  });
+
+  const ok = await login({ token });
+  assert.equal(ok.status, 303);
+  assert.equal(ok.headers.get("location"), "/");
+  const cookie = ok.headers.get("set-cookie");
+  assert.match(cookie, /^token=[\w-]+; HttpOnly; SameSite=Strict; Path=\/; Max-Age=2592000$/);
+  const authed = await fetch(new URL("/", url), { headers: { Cookie: cookie.split(";")[0], Accept: "text/html" } });
+  assert.equal(authed.status, 200);
+
+  const asked = await login({ token, next: "/?file=a.json" });
+  assert.equal(asked.headers.get("location"), "/?file=a.json");
+  for (const next of ["https://evil.example/", "//evil.example/", "/\\evil.example", "javascript:alert(1)"]) {
+    assert.equal((await login({ token, next })).headers.get("location"), "/", `refused ${next}`);
+  }
+
+  const wrong = await login({ token: `wrong-${token}`, next: '/"><script>' });
+  assert.equal(wrong.status, 401);
+  assert.equal(wrong.headers.get("set-cookie"), null);
+  const body = await wrong.text();
+  assert.match(body, /Wrong token/);
+  assert.match(body, /<input type="password"/);
+  assert.doesNotMatch(body, /<script>/, "the next value is escaped");
+
+  assert.equal((await login({ token }, { Origin: "http://evil.example" })).status, 403, "cross-origin login");
+  assert.equal((await login({ token }, { "Content-Type": "text/plain" })).status, 415);
+});
+
+test("POST /login is not a route on the loopback default", async (t) => {
+  const { url } = await server(t);
+  const response = await fetch(new URL("/login", url), {
+    method: "POST",
+    headers: { Origin: url.origin, "Content-Type": "application/x-www-form-urlencoded" },
+    body: "token=x",
+  });
+  assert.equal(response.status, 405);
 });
