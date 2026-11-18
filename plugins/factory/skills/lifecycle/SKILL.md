@@ -614,7 +614,7 @@ missing feedback ID after the task has received dashboard feedback.
 | PR merged on GitHub | `resolved` (`merged`) |
 | Task without an issue merged locally into the default branch | `resolved` (`merged`), with the merge commit SHA in `details.merge_commit` |
 | PR closed without a merge | `blocked`; keep the panes |
-| Worker blocked on a user decision or outside action | `blocked` with its reason. For a user decision you MUST pass the choices in `--blocker` JSON as `options`, with one marked `recommended` (and a `state` when a choice implies one); the dashboard shows them in the Unblock popup. The blocker text stays neutral. |
+| Worker blocked on a user decision or outside action | `blocked` with its reason. For a user decision you MUST pass the choices in `--blocker` JSON as `options`, with one marked `recommended` (and a `state` when a choice implies one); the dashboard shows them in the Unblock popup. Never write "(recommended)" in a label; set the `recommended` flag. The blocker text stays neutral. |
 | Worker blocked on a worker-fixable cause | stay in the state; send a follow-up now |
 
 ### Never park a worker-fixable task

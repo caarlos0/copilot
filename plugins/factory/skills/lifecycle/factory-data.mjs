@@ -162,6 +162,9 @@ function validateBlockerOptions(options, field) {
   if (recommended > 1) throw new Error(`${field} may have at most one recommended option.`);
 }
 
+// The Recommended badge comes from the `recommended` flag, so a typed "(recommended)" suffix is noise.
+export const stripRecommended = (label) => label.replace(/\s*[(\[]\s*recommended\s*[)\]]\s*$/i, "");
+
 // --blocker is plain text, or a JSON object {"reason": "...", "options": [...]}.
 export function parseBlocker(value) {
   const input = typeof value === "string" ? value.trim() : "";
@@ -174,8 +177,13 @@ export function parseBlocker(value) {
   if (extra.length) throw new Error(`--blocker JSON has unknown keys: ${extra.join(", ")}.`);
   text(parsed.reason, "--blocker reason");
   if (parsed.options === undefined) return { reason: parsed.reason };
-  validateBlockerOptions(parsed.options, "--blocker options");
-  return { reason: parsed.reason, options: parsed.options };
+  const options = Array.isArray(parsed.options)
+    ? parsed.options.map((option) => (isObject(option) && typeof option.label === "string"
+      ? { ...option, label: stripRecommended(option.label) }
+      : option))
+    : parsed.options;
+  validateBlockerOptions(options, "--blocker options");
+  return { reason: parsed.reason, options };
 }
 
 // The destination an Unblock popup selects first: where the task was blocked from, else the first open one.
@@ -184,10 +192,10 @@ export function unblockState(task) {
   return choices.includes(task.blocker?.from) ? task.blocker.from : choices[0];
 }
 
-// Choosing an option copies its label verbatim into the comment and, when allowed, selects its state.
+// Choosing an option copies its label into the comment and, when allowed, selects its state.
 export function unblockChoice(task, option) {
   const state = operatorStates(task).includes(option.state) ? option.state : unblockState(task);
-  return { state, comment: option.label };
+  return { state, comment: stripRecommended(option.label) };
 }
 
 export function checkTransition(task, to, operator = false) {

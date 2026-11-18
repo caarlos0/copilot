@@ -352,7 +352,7 @@
     </div>
     <noscript>Enable JavaScript to read the factory.</noscript>
     <script type="module">
-      import { states, outcomes, artifactName, githubURL, validate, countByState, isIdle, hopsSince, entered, byRecency, rankTasks, cyclesOf, operatorStates, operatorOutcomes, unblockState, unblockChoice, nextRun, nextDue, leverSpends, leverAutonomyCaps, maxParallelWorkers, maxRoleLimit, digitIndex } from "./factory-data.mjs";
+      import { states, outcomes, artifactName, githubURL, validate, countByState, isIdle, hopsSince, entered, byRecency, rankTasks, cyclesOf, operatorStates, operatorOutcomes, unblockState, unblockChoice, stripRecommended, nextRun, nextDue, leverSpends, leverAutonomyCaps, maxParallelWorkers, maxRoleLimit, digitIndex } from "./factory-data.mjs";
 
       const SVG = "http://www.w3.org/2000/svg";
       const NODE = { w: 160, h: 110 };
@@ -1167,7 +1167,7 @@
           options.hidden = !suggested.length;
           options.replaceChildren(...(suggested.length ? [element("p", "Suggested answers. Pick one, then edit or write your own below.", "muted")] : []),
             ...suggested.map((option) => {
-              const choice = rich("button", option.label, "option");
+              const choice = rich("button", stripRecommended(option.label), "option");
               choice.type = "button";
               choice.setAttribute("aria-pressed", "false");
               if (option.recommended) choice.append(element("span", "Recommended", "tag"));
@@ -1382,7 +1382,7 @@
           if (task.blocker.options) {
             const choices = element("ul", null, "blocker-options");
             for (const option of task.blocker.options) {
-              choices.append(rich("li", `${option.label}${option.recommended ? " (recommended)" : ""}`));
+              choices.append(rich("li", `${stripRecommended(option.label)}${option.recommended ? " (recommended)" : ""}`));
             }
             node.append(choices);
           }

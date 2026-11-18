@@ -384,6 +384,12 @@ test("a blocker may carry validated options; plain text and old blockers stay va
   bad(/recommended must be a boolean/, { reason: "R", options: [{ label: "A", recommended: "yes" }] });
   bad(/at most one recommended/, { reason: "R", options: [{ label: "A", recommended: true }, { label: "B", recommended: true }] });
   assert.equal(await readFile(f.file, "utf8"), before, "Invalid options must not change the file.");
+  f.ok("--task", "issue-1", "--state", "blocked", "--blocker", JSON.stringify({
+    reason: "Pick one",
+    options: [{ label: "Use token A (Recommended)", recommended: true }, { label: "Cancel [recommended]" }],
+  }));
+  assert.deepEqual((await f.read()).tasks[0].blocker.options.map((option) => option.label), ["Use token A", "Cancel"]);
+  bad(/label must be a non-empty string/, { reason: "R", options: [{ label: "(recommended)" }] });
   f.ok("--task", "issue-1", "--state", "blocked", "--blocker", "{not json");
   assert.equal((await f.read()).tasks[0].blocker.reason, "{not json");
 });
@@ -483,6 +489,8 @@ test("the Unblock popup preselects the blocked-from state and fills option text 
   const [recommended, plain] = blocked.blocker.options;
   assert.deepEqual(unblockChoice(blocked, recommended), { state: "implementation", comment: recommended.label });
   assert.deepEqual(unblockChoice(blocked, plain), { state: "investigation", comment: plain.label });
+  assert.equal(unblockChoice(blocked, { label: "Add the token (Recommended)" }).comment, "Add the token",
+    "a typed recommended suffix is never copied into the comment");
   assert.equal(unblockChoice(review, { label: "Go to review", state: "review" }).state, "initial",
     "a state that the task cannot move to is ignored");
   const old = structuredClone(example);
