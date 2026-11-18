@@ -50,6 +50,7 @@ test("creates a private factory with defaults and a new task in initial", async 
   assert.equal(data.id, "owner.repo-factory");
   assert.equal(data.rex_session, "work");
   assert.deepEqual(data.limits, { investigation: 3, implementation: 3 });
+  assert.deepEqual(data.budget, { max_parallel_workers: 10 });
   assert.equal(data.tasks[0].state, "initial");
   assert.deepEqual(data.tasks[0].history.map((item) => item.state), ["initial"]);
   assert.equal((await stat(f.file)).mode & 0o777, 0o600);
@@ -59,6 +60,77 @@ test("creates a private factory with defaults and a new task in initial", async 
 test("the shipped example is a valid factory", async () => {
   const { validate } = await import("./factory-data.mjs");
   validate(example);
+});
+
+const withoutBudget = () => {
+  const { budget, ...rest } = structuredClone(example);
+  return rest;
+};
+
+test("budget validation accepts valid values and an absent budget, and rejects everything else", async (t) => {
+  const { validate } = await import("./factory-data.mjs");
+  validate(withoutBudget());
+  for (const max_parallel_workers of [1, 10, 100]) validate({ ...example, budget: { max_parallel_workers } });
+  for (const budget of [
+    {}, { max_parallel_workers: 0 }, { max_parallel_workers: -1 }, { max_parallel_workers: 1.5 },
+    { max_parallel_workers: "10" }, { max_parallel_workers: 101 }, { max_parallel_workers: 5, extra: 1 },
+    null, 5, [],
+  ]) {
+    assert.throws(() => validate({ ...example, budget }), /budget/, JSON.stringify(budget));
+  }
+  const f = await fixture(t, withoutBudget());
+  f.ok("--task", "issue-12", "--next-action", "Look again", "--expected-revision", "0");
+  assert.equal("budget" in await f.read(), false, "Writing an old file must not add a budget.");
+  for (const value of ['{"max_parallel_workers":0}', '{"max_parallel_workers":2.5}', '{"extra":1}', "5", "{bad"]) {
+    const before = await readFile(f.file, "utf8");
+    assert.equal(f.run("--budget", value).status, 1, value);
+    assert.equal(await readFile(f.file, "utf8"), before);
+  }
+});
+
+test("--budget sets the total, touches no task, and emits budget.updated", async (t) => {
+  const f = await fixture(t, withoutBudget());
+  const before = await f.read();
+  f.ok("--budget", '{"max_parallel_workers":4}');
+  let data = await f.read();
+  assert.deepEqual(data.budget, { max_parallel_workers: 4 });
+  assert.deepEqual(data.tasks, before.tasks);
+  assert.deepEqual(data.limits, before.limits);
+  f.ok("--budget", '{"max_parallel_workers":1}');
+  assert.deepEqual((await f.read()).budget, { max_parallel_workers: 1 });
+  const events = (await readFile(join(f.directory, "owner.repo-factory-events.jsonl"), "utf8"))
+    .trim().split("\n").map((line) => JSON.parse(line));
+  assert.deepEqual(events.map(({ type, task, source, data }) => [type, task, source, data.max_parallel_workers]),
+    [["budget.updated", null, "coordinator", 4], ["budget.updated", null, "coordinator", 1]]);
+});
+
+test("--expected-budget rejects a stale budget and leaves the file untouched", async (t) => {
+  const f = await fixture(t, withoutBudget());
+  f.fails(/needs --budget/, "--expected-budget", "5");
+  f.fails(/positive integer or none/, "--budget", '{"max_parallel_workers":3}', "--expected-budget", "abc");
+  f.ok("--budget", '{"max_parallel_workers":3}', "--expected-budget", "none");
+  const original = await readFile(f.file, "utf8");
+  f.fails(/Budget changed since it was read/, "--budget", '{"max_parallel_workers":5}', "--expected-budget", "none");
+  f.fails(/Budget changed since it was read/, "--budget", '{"max_parallel_workers":5}', "--expected-budget", "4");
+  assert.equal(await readFile(f.file, "utf8"), original);
+  f.ok("--budget", '{"max_parallel_workers":5}', "--expected-budget", "3");
+  assert.deepEqual((await f.read()).budget, { max_parallel_workers: 5 });
+});
+
+test("an operator write needs the seen budget and can set nothing else", async (t) => {
+  const f = await fixture(t, example);
+  const original = await readFile(f.file, "utf8");
+  const { update, ConflictError } = await import("./factory.mjs");
+  const budget = '{"max_parallel_workers":2}';
+  await assert.rejects(update(f.file, { budget }, { operator: true }), ConflictError);
+  await assert.rejects(update(f.file, { budget, "expected-budget": "9" }, { operator: true }), ConflictError);
+  await assert.rejects(update(f.file, { budget, "expected-budget": "10", "run-goal": "Other" }, { operator: true }),
+    /may only set the budget/);
+  assert.equal(await readFile(f.file, "utf8"), original);
+  const data = await update(f.file, { budget, "expected-budget": "10" }, { operator: true });
+  assert.deepEqual(data.budget, { max_parallel_workers: 2 });
+  const events = (await readFile(join(f.directory, "owner.repo-factory-events.jsonl"), "utf8")).trim().split("\n");
+  assert.equal(JSON.parse(events.at(-1)).source, "dashboard");
 });
 
 test("a new task needs --issue; null is accepted only on purpose", async (t) => {

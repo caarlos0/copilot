@@ -19,6 +19,8 @@ const workerStatuses = ["running", "idle", "closed", "unknown"];
 const ruleKinds = ["search", "backlog", "improve"];
 const everyUnits = { m: 60_000, h: 3_600_000, d: 86_400_000 };
 export const defaultLimits = { investigation: 3, implementation: 3 };
+export const defaultBudget = { max_parallel_workers: 10 };
+export const maxParallelWorkers = 100;
 
 export function isObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -373,9 +375,30 @@ export function validate(data) {
     oneOf(role, ["investigation", "implementation"], "limits key");
     if (!Number.isInteger(limit) || limit < 1) throw new Error(`limits.${role} must be a positive integer.`);
   }
+  if (data.budget !== undefined) validateBudget(data.budget);
   if (!Array.isArray(data.tasks)) throw new Error("tasks must be an array.");
   const seen = { ids: new Set(), issue: new Set(), pr: new Set() };
   for (const task of data.tasks) validateTask(task, seen);
+}
+
+export function validateBudget(budget) {
+  if (!isObject(budget)) throw new Error("budget must be an object.");
+  for (const key of Object.keys(budget)) oneOf(key, ["max_parallel_workers"], "budget key");
+  const value = budget.max_parallel_workers;
+  if (!Number.isInteger(value) || value < 1 || value > maxParallelWorkers) {
+    throw new Error(`budget.max_parallel_workers must be an integer from 1 to ${maxParallelWorkers}.`);
+  }
+}
+
+// Every worker with status running counts, whatever its role, including rule workers.
+export function runningWorkers(data) {
+  const workers = [...data.tasks.flatMap((task) => Object.values(task.workers)), ...data.rules.map((rule) => rule.worker)];
+  return workers.filter((worker) => worker?.status === "running").length;
+}
+
+export function budgetText(data) {
+  const cap = data.budget?.max_parallel_workers;
+  return `${runningWorkers(data)} running / ${cap === undefined ? "no total cap" : `budget ${cap}`}`;
 }
 
 export function countByState(tasks) {

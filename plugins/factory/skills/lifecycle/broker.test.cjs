@@ -209,6 +209,17 @@ test("factory.mjs writes emit task.moved, task.updated, and dashboard feedback e
   ]);
 });
 
+test("budget.updated emits without a task, needs its data key, and wakes a waiter that skips the coordinator", async (t) => {
+  const f = await fixture(t);
+  assert.equal(f.run("emit", f.factory, "budget.updated", "--source", "dashboard").status, 2);
+  const done = await f.wait("--exclude-source", "coordinator");
+  const out = f.run("emit", f.factory, "budget.updated", "--source", "dashboard", "--data", '{"max_parallel_workers":4}');
+  assert.equal(out.status, 0, out.stderr);
+  const woken = await done();
+  assert.deepEqual(woken.events.map(({ type, task, source, data }) => [type, task, source, data]),
+    [["budget.updated", null, "dashboard", { max_parallel_workers: 4 }]]);
+});
+
 test("--due follows run-status and rule edits made while the waiter is armed", async (t) => {
   const f = await fixture(t);
   const factory = (...args) => {

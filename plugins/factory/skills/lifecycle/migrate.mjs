@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { access, link, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { countByState, defaultLimits, format, githubResourceURL, githubURL, prURL, validate } from "./factory-data.mjs";
+import { countByState, defaultBudget, defaultLimits, format, githubResourceURL, githubURL, prURL, validate } from "./factory-data.mjs";
 import { stateFile } from "./state-dir.mjs";
 
 const sources = ["implementer", "coordinator"];
@@ -219,6 +219,7 @@ function build(project, key, loaded, reviewers) {
     rex_session: null,
     rules: [],
     limits: defaultLimits,
+    budget: defaultBudget,
     tasks,
   };
   validate(data);

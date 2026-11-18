@@ -58,6 +58,7 @@ test("maps, joins, renames, and attaches reviews from the legacy handoffs", asyn
   const { validate } = await import("./factory-data.mjs");
   validate(data);
   assert.equal(data.id, "owner.repo-factory");
+  assert.deepEqual(data.budget, { max_parallel_workers: 10 });
   const byId = Object.fromEntries(data.tasks.map((task) => [task.id, task]));
 
   assert.deepEqual(Object.keys(byId).sort(),

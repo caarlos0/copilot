@@ -6,7 +6,7 @@ import { parseArgs } from "node:util";
 import { archiveDirectory, findArchived, readArchive, removeArchived, saveArchive } from "./archive.mjs";
 import { emit, resolveFactory } from "./broker.mjs";
 import {
-  checkTransition, defaultLimits, format, isObject, operatorOutcomes, outcomes, parseBlocker, validate,
+  checkTransition, defaultBudget, defaultLimits, format, isObject, operatorOutcomes, outcomes, parseBlocker, validate,
 } from "./factory-data.mjs";
 import { recordSessions, registryFile, sessionID } from "./sessions.mjs";
 
@@ -189,6 +189,7 @@ async function writeFactory(file, values, operator, source) {
       rex_session: null,
       rules: [],
       limits: defaultLimits,
+      budget: defaultBudget,
       tasks: [],
     }
     : JSON.parse(original);
@@ -204,6 +205,29 @@ async function writeFactory(file, values, operator, source) {
   if (values["rex-session"] !== undefined) rootPatch.rex_session = nullable(values["rex-session"]);
   if (values.rules !== undefined) rootPatch.rules = json(values.rules, "rules", Array.isArray);
   if (values.limits !== undefined) rootPatch.limits = json(values.limits, "limits", isObject);
+  const events = [];
+  if (values["expected-budget"] !== undefined && values.budget === undefined) {
+    throw new Error("--expected-budget needs --budget.");
+  }
+  if (values.budget !== undefined) {
+    rootPatch.budget = json(values.budget, "budget", isObject);
+    const expected = values["expected-budget"];
+    if (expected !== undefined) {
+      if (expected !== "none" && (!/^\d+$/.test(expected) || !Number.isSafeInteger(Number(expected)))) {
+        throw new Error("--expected-budget must be a positive integer or none.");
+      }
+      const present = current.budget?.max_parallel_workers;
+      if ((expected === "none" ? undefined : Number(expected)) !== present) {
+        throw new ConflictError("Budget changed since it was read. Reload it and reconcile before saving.");
+      }
+    } else if (operator) {
+      throw new ConflictError("A budget change needs --expected-budget from a fresh read.");
+    }
+  }
+  if (operator && values.task === undefined &&
+      Object.keys(values).some((key) => !["budget", "expected-budget"].includes(key))) {
+    throw new Error("A dashboard write without a task may only set the budget.");
+  }
   if (values.ignored !== undefined) rootPatch.ignored = json(values.ignored, "ignored", Array.isArray);
   const sessions = [];
   const track = (value, role, owner) => {
@@ -244,7 +268,6 @@ async function writeFactory(file, values, operator, source) {
   const addingTask = values.task !== undefined && !live && !restoring;
   const inserting = addingTask || restoring;
   let archived = null;
-  const events = [];
   if (values.task !== undefined) {
     if (inserting) {
       const matches = findArchived(await readArchive(directory, current.project), restoring
@@ -335,6 +358,9 @@ async function writeFactory(file, values, operator, source) {
   current = merge(current, rootPatch);
   current.tasks = tasks;
   validate(current);
+  if (values.budget !== undefined) {
+    events.push({ type: "budget.updated", data: { max_parallel_workers: current.budget.max_parallel_workers } });
+  }
   let stale = [];
   if (inserting) {
     const cutoff = Date.parse(now) - 7 * 24 * 60 * 60 * 1000;
@@ -419,6 +445,8 @@ async function main() {
         "rex-session": { type: "string" },
         rules: { type: "string" },
         limits: { type: "string" },
+        budget: { type: "string" },
+        "expected-budget": { type: "string" },
         "updated-at": { type: "string" },
         task: { type: "string" },
         restore: { type: "boolean" },
@@ -475,6 +503,11 @@ Run options:
                         (<owner.repo>-factory-sessions.jsonl). Worker sessions are recorded
                         automatically from --workers and --rule-worker records that have a session
   --limits JSON         Merge worker caps, e.g. '{"investigation":2}' (default 3 each)
+  --budget JSON         Merge the total worker budget, e.g. '{"max_parallel_workers":10}' (1 to 100).
+                        The coordinator never runs more workers than this, over all roles. A new
+                        factory gets 10; a file without a budget has no total cap. Emits budget.updated
+  --expected-budget N|none  Budget the write was based on (none when the file had no budget);
+                        a different current value is a conflict. Needs --budget
   --updated-at VALUE    Explicit run timestamp (ISO 8601 with timezone)
   --source NAME         Source of the events this write emits to the broker (default coordinator;
                         task.moved, task.updated, feedback.pending). The factory waits with

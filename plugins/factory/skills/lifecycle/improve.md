@@ -78,7 +78,7 @@ If you use `session_store_sql`, follow these rules:
 | Kind | What it is | Who applies it |
 | --- | --- | --- |
 | `rule` | A rule's `every`, `enabled`, `query`, or `prompt` | The factory, with `--rules`, after the user agrees |
-| `limit` | The worker caps in `limits` | The factory, with `--limits`, after the user agrees |
+| `limit` | The worker caps in `limits`, or the total `budget` | The factory, with `--limits` or `--budget`, after the user agrees |
 | `process` | How the factory or its workers behave, such as a brief line | The factory, in later briefs, after the user agrees |
 | `skill` | A text change to the factory skill or agent files | The user. The factory only reports it |
 

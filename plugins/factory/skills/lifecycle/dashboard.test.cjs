@@ -51,6 +51,11 @@ const move = (url, body, file = factoryFile, headers = {}) => get(url, `/api/mov
   headers: { Origin: new URL(url).origin, "Content-Type": "application/json", ...headers },
   body: JSON.stringify(body),
 });
+const budget = (url, body, file = factoryFile, headers = {}) => get(url, `/api/budget?file=${encodeURIComponent(file)}`, {
+  method: "POST",
+  headers: { Origin: new URL(url).origin, "Content-Type": "application/json", ...headers },
+  body: JSON.stringify(body),
+});
 const unblocked = { task: "issue-5", state: "initial", comment: "This is now unblocked.", revision: 0 };
 
 test("serves the dashboard and the shared data module without caching", async (t) => {
@@ -225,6 +230,71 @@ test("move endpoint rejects foreign pages, invalid moves and unconfined files wi
   }
 });
 
+test("the budget endpoint saves, returns the factory, and emits a dashboard event", async (t) => {
+  const { url, directory } = await server(t);
+  const file = join(directory, factoryFile);
+  const response = await budget(url, { max_parallel_workers: 4, expected: 10 });
+  assert.equal(response.status, 200, await response.clone().text());
+  const data = await response.json();
+  assert.deepEqual(data.budget, { max_parallel_workers: 4 });
+  assert.deepEqual(data.tasks, example.tasks);
+  assert.deepEqual(JSON.parse(await readFile(file, "utf8")), data);
+  const events = (await readFile(join(directory, "owner.repo-factory-events.jsonl"), "utf8")).trim().split("\n")
+    .map((line) => JSON.parse(line));
+  assert.deepEqual(events.map(({ type, task, source, data }) => [type, task, source, data]),
+    [["budget.updated", null, "dashboard", { max_parallel_workers: 4 }]]);
+  const stale = await budget(url, { max_parallel_workers: 5, expected: 10 });
+  assert.equal(stale.status, 409);
+  assert.match((await stale.json()).error, /Budget changed since it was read/);
+  const { budget: _, ...old } = example;
+  await writeFile(file, JSON.stringify(old));
+  assert.equal((await budget(url, { max_parallel_workers: 5, expected: 4 })).status, 409);
+  const added = await budget(url, { max_parallel_workers: 5, expected: null });
+  assert.equal(added.status, 200, await added.clone().text());
+  assert.deepEqual((await added.json()).budget, { max_parallel_workers: 5 });
+});
+
+test("budget endpoint rejects foreign pages and bad input without writes", async (t) => {
+  const { url, directory } = await server(t);
+  const file = join(directory, factoryFile);
+  const original = await readFile(file, "utf8");
+  const good = { max_parallel_workers: 4, expected: 10 };
+  const cases = [
+    { headers: { Origin: "https://evil.example" }, status: 403 },
+    { headers: { "Sec-Fetch-Site": "cross-site" }, status: 403 },
+    { headers: { "Content-Type": "text/plain" }, status: 415 },
+    { body: { ...good, padding: "x".repeat(20000) }, status: 413 },
+    { body: { ...good, max_parallel_workers: 0 }, status: 400 },
+    { body: { ...good, max_parallel_workers: 101 }, status: 400 },
+    { body: { ...good, max_parallel_workers: 1.5 }, status: 400 },
+    { body: { ...good, max_parallel_workers: "4" }, status: 400 },
+    { body: { max_parallel_workers: 4 }, status: 400 },
+    { body: { ...good, expected: -1 }, status: 400 },
+    { body: { ...good, limits: {} }, status: 400 },
+    { body: null, status: 400 },
+    { file: "../owner.repo-factory.json", status: 400 },
+    { file: "unrelated-notes.md", status: 400 },
+  ];
+  for (const item of cases) {
+    const response = await budget(url, "body" in item ? item.body : good, item.file, item.headers);
+    assert.equal(response.status, item.status, JSON.stringify({ item, body: await response.text() }));
+    assert.equal(await readFile(file, "utf8"), original);
+  }
+});
+
+test("the CLI and the dashboard share the write lock for budget writes", async (t) => {
+  const { url, directory } = await server(t);
+  const file = join(directory, factoryFile);
+  const original = await readFile(file, "utf8");
+  await writeFile(`${file}.write.lock`, "", { flag: "wx" });
+  assert.equal((await budget(url, { max_parallel_workers: 4, expected: 10 })).status, 409);
+  const cli = spawnSync(process.execPath, [join(__dirname, "factory.mjs"), file,
+    "--budget", '{"max_parallel_workers":4}'], { encoding: "utf8" });
+  assert.equal(cli.status, 1, cli.stderr);
+  assert.match(cli.stderr, /write is locked/);
+  assert.equal(await readFile(file, "utf8"), original);
+});
+
 test("a dashboard edit wakes the factory waiter even with no worker results", { timeout: 10000 }, async (t) => {
   const { url, directory } = await server(t);
   const file = join(directory, factoryFile);
@@ -359,6 +429,7 @@ async function dashboard(t, { reducedMotion = true, confirm = () => true, now = 
   for (const [, tag, id] of html.matchAll(/<(\w+)[^>]*\bid="([^"]+)"/g)) elements.set(id, new Element(tag));
   elements.get("detail").append(...["detail-title", "close-detail", "detail-status", "task-list", "detail-empty"]
     .map((id) => elements.get(id)));
+  elements.get("budget-dialog").append(...["budget-title", "close-budget", "budget-body"].map((id) => elements.get(id)));
   elements.get("move-dialog").append(...["move-title", "close-move", "move-body"].map((id) => elements.get(id)));
   const location = new URL(`?file=${factoryFile}`, url);
   class ClockDate extends Date {
@@ -1144,6 +1215,60 @@ test("the popup can resolve an initial task with an outcome and comment", async 
   assert.match(ui.get("detail-status").textContent, /to Resolved\./);
 });
 
+test("runningWorkers and budgetText count every running worker against the budget", async () => {
+  const { runningWorkers, budgetText } = await import("./factory-data.mjs");
+  const data = structuredClone(example);
+  assert.equal(runningWorkers(data), 3, "Idle, closed, and missing workers do not count.");
+  assert.equal(budgetText(data), "3 running / budget 10");
+  data.rules[0].worker = { ...data.rules[1].worker, status: "running" };
+  assert.equal(runningWorkers(data), 4, "A running rule worker counts.");
+  delete data.budget;
+  assert.equal(budgetText(data), "4 running / no total cap");
+});
+
+test("the header shows running workers against the budget and refreshes with the file", async (t) => {
+  const ui = await dashboard(t);
+  assert.equal(ui.get("budget-state").textContent, "3 running / budget 10");
+  assert.equal(ui.get("budget-line").hidden, false);
+  const { budget: _, ...old } = structuredClone(example);
+  await writeFile(join(ui.directory, factoryFile), JSON.stringify(old));
+  await ui.run("refresh()");
+  assert.equal(ui.get("budget-state").textContent, "3 running / no total cap");
+});
+
+test("the budget dialog keeps its draft across refresh, reports a conflict, and saves", async (t) => {
+  const confirms = [];
+  const ui = await dashboard(t, { confirm: (message) => { confirms.push(message); return false; } });
+  const file = join(ui.directory, factoryFile);
+  await ui.get("edit-budget").fire("click");
+  assert.equal(ui.get("budget-dialog").open, true);
+  const form = ui.get("budget-body").querySelector("form");
+  const input = form.querySelector("input");
+  assert.equal(input.value, "10");
+  assert.equal(ui.document.activeElement, input);
+  input.value = "6";
+  const { update } = await import("./factory.mjs");
+  await update(file, { budget: '{"max_parallel_workers":8}' });
+  await ui.run("refresh()");
+  assert.equal(ui.get("budget-body").querySelector("input"), input);
+  assert.equal(input.value, "6");
+  assert.equal(ui.get("budget-state").textContent, "3 running / budget 8");
+  await form.fire("submit");
+  assert.match(form.querySelector(".save-error").textContent, /Budget changed since it was read/);
+  assert.equal(ui.get("budget-dialog").open, true);
+  assert.equal(JSON.parse(await readFile(file, "utf8")).budget.max_parallel_workers, 8);
+  await ui.get("close-budget").fire("click");
+  assert.equal(confirms.length, 1, "A changed value asks before discarding.");
+  assert.equal(ui.get("budget-dialog").open, true);
+  const reload = form.querySelectorAll("button").find((button) => button.textContent === "Reload budget");
+  await reload.fire("click");
+  assert.equal(input.value, "6", "Reload keeps the draft.");
+  await form.fire("submit");
+  assert.equal(JSON.parse(await readFile(file, "utf8")).budget.max_parallel_workers, 6);
+  assert.equal(ui.get("budget-dialog").open, false);
+  assert.equal(ui.get("budget-state").textContent, "3 running / budget 6");
+});
+
 test("the delegate-always rule is present in the agent, skill, and plugin rules", () => {
   const plugin = join(__dirname, "..", "..");
   for (const file of [
@@ -1158,6 +1283,15 @@ test("the delegate-always rule is present in the agent, skill, and plugin rules"
     assert.match(text, /only\s+for\s+a\s+user\s+decision/i, file);
     assert.match(text, /never\s+uses?\s+the\s+`task`,\s+`read_agent`,?\s+or\s+`write_agent`\s+tools/i, file);
     assert.match(text, /Copilot\s+session\s+in\s+a\s+Rex\s+tab/, file);
+  }
+});
+
+test("the agent, skill, and plugin rules say the coordinator never exceeds the budget", () => {
+  const plugin = join(__dirname, "..", "..");
+  for (const file of [join(plugin, "agents", "general.agent.md"), join(__dirname, "SKILL.md"), join(plugin, "AGENTS.md")]) {
+    const text = readFileSync(file, "utf8");
+    assert.match(text, /budget\.max_parallel_workers/, file);
+    assert.match(text, /never\s+exceeds?\s+(it|the\s+budget)/i, file);
   }
 });
 
