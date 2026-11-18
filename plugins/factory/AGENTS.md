@@ -183,6 +183,14 @@ refreshes head-specific evidence before landing. Prefer an existing repository
 merge queue. For local-only tasks, use the current local default branch, not
 `origin`; independent tasks stay parallel.
 
+PR watching goes through `skills/lifecycle/pr-watch.mjs`, which the factory
+ships and workers call by absolute path (like `broker.mjs`). It makes one
+GraphQL call per tick, prints one typed JSON event, and exits 3 on a rate limit
+instead of sleeping. Run one watcher per PR; the review worker runs none. It is
+a native watcher, so its own loop uses a timer and its tests never sleep or poll
+(a fake `gh` is on `PATH`; tests never call GitHub). `session-metrics.mjs`
+counts it under `gh_wait`.
+
 Review workers use `cross-model-review`, not the local `review` wrapper.
 Review depth follows the shared spend budget. A clean precision result is not
 a GitHub approval, and `review` state can have no optional model reviewer.

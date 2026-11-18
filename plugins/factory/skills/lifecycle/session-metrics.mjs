@@ -11,7 +11,7 @@ const minutes = (ms) => Math.round(ms / 600) / 100;
 
 const commandPatterns = {
   sleep: /\bsleep\s+\d/,
-  gh_wait: /\bgh\s+wait\b/,
+  gh_wait: /\bgh\s+wait\b|\bpr-watch\.mjs\b/,
   watch: /--watch\b|\bgh\s+run\s+watch\b/,
 };
 const statusRead = /\bgh\s+(?:pr\s+(?:view|checks)|run\s+(?:view|list))\b/;

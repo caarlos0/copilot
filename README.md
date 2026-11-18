@@ -84,7 +84,7 @@ It takes work from rules or from links you give it, and it runs all workers as
 tabs in the Rex session it started in. It never creates or renames sessions.
 Worker briefs use Lever's template. Implementation workers use `pr-shepherd`
 for CI, feedback, and landing; review workers use `cross-model-review` at the
-resolved spend tier. Workers use `gh wait` for local events, not a second
+resolved spend tier. Workers watch a PR with the bundled `pr-watch.mjs`, not a second
 delivery coordinator or an automatic cloud schedule.
 
 Lever's autonomy dial controls writes and merges, capped by repository rules.

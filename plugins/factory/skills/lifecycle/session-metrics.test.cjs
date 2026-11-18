@@ -24,6 +24,7 @@ const events = [
   ...bash(2, "a", "sleep 30 && gh pr checks 5 -R secret/repo"),
   ...bash(3, "b", "gh pr checks 5 -R secret/repo --watch --fail-fast", false),
   ...bash(3, "c", "gh wait 5"),
+  ...bash(3, "e", "node /skills/lifecycle/pr-watch.mjs 5 --merge"),
   event(3, "tool.execution_start", { toolCallId: "d", toolName: "ask_user", arguments: { message: "SECRET-QUESTION" } }),
   event(3, "tool.execution_complete", { toolCallId: "d", success: true }),
   event(4, "session.usage_record", { usage: { model: "m1", cost: 1, inputTokens: 100, outputTokens: 10, cacheReadTokens: 50, duration: 2000 } }),
@@ -65,18 +66,18 @@ test("measures waits, commands, tools, and usage without exposing content", asyn
   assert.equal(report.sessions.length, 1);
   assert.deepEqual(report.sessions[0], {
     id: first, role: "implementation", task: "issue-1",
-    events: 18, skipped_lines: 1,
+    events: 20, skipped_lines: 1,
     started_at: "2026-05-01T12:00:00.000Z", ended_at: "2026-05-01T12:21:15.000Z", wall_minutes: 21.25,
     user_messages: 2, turns: 3,
     idle: { minutes: 21, over_10_minutes: 1, longest_minutes: 20 },
-    tools: { bash: { calls: 3, failures: 1 }, ask_user: { calls: 1, failures: 0 } },
-    commands: { sleep: 1, gh_wait: 1, watch: 1, status_reads: 1 },
+    tools: { bash: { calls: 4, failures: 1 }, ask_user: { calls: 1, failures: 0 } },
+    commands: { sleep: 1, gh_wait: 2, watch: 1, status_reads: 1 },
     usage: { cost: 3, input_tokens: 300, output_tokens: 30, cache_read_tokens: 50, model_seconds: 5, models: ["m1", "m2"] },
   });
   assert.deepEqual(report.totals, {
     sessions: 1, wall_minutes: 21.25, user_messages: 2, turns: 3,
     idle_minutes: 21, idle_over_10_minutes: 1, ask_user_calls: 1,
-    commands: { sleep: 1, gh_wait: 1, watch: 1, status_reads: 1 },
+    commands: { sleep: 1, gh_wait: 2, watch: 1, status_reads: 1 },
     usage: { cost: 3, input_tokens: 300, output_tokens: 30, cache_read_tokens: 50, model_seconds: 5 },
   });
 });

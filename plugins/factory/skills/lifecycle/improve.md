@@ -57,7 +57,7 @@ If you use `session_store_sql`, follow these rules:
    | Spend | `usage.cost`, tokens, low `cache_read_tokens` | Narrow a brief; smaller worker caps; fewer review models |
    | Speed | `wall_minutes` and `turns` per resolved task | Cut a step; start workers sooner |
    | Idle time | `idle.minutes`, `over_10_minutes`, `longest_minutes` | Shorter or no wait; use the waiter instead of manual checks |
-   | Polling | `commands.sleep`, `commands.status_reads` high; `gh_wait` and `watch` low | Use `gh wait`, `gh pr checks --watch --fail-fast` |
+   | Polling | `commands.sleep`, `commands.status_reads` high; `gh_wait` and `watch` low | Use `pr-watch.mjs` (`gh_wait` counts it); `gh pr checks --watch --fail-fast` for a one-off check |
    | Questions to the user | `tools.ask_user.calls`, `user_messages` in worker sessions | Give the worker a default answer, or decide in the brief |
    | Failures | `tools.<name>.failures` | Fix the tool profile or the brief; a tool that fails every call is a config bug |
 
@@ -89,7 +89,7 @@ If you use `session_store_sql`, follow these rules:
   "format": "factory-improve/v1",
   "window": { "from": "2026-05-01T00:00:00Z", "to": "2026-05-08T00:00:00Z", "sessions": 6 },
   "previous": {
-    "change": "Use gh wait in review briefs",
+    "change": "Use pr-watch.mjs in implementation briefs",
     "decision": "applied",
     "metric": "commands.status_reads per review session",
     "before": 14,
@@ -98,7 +98,7 @@ If you use `session_store_sql`, follow these rules:
   },
   "change": {
     "kind": "process",
-    "summary": "Tell implementation workers to wait with gh pr checks --watch --fail-fast.",
+    "summary": "Tell implementation workers to wait with pr-watch.mjs instead of sleeping.",
     "apply": "Add one line to the implementation brief.",
     "evidence": [
       { "metric": "commands.sleep", "value": 21, "sessions": ["11111111-1111-4111-8111-111111111111"] }

@@ -729,7 +729,9 @@ node broker.mjs emit /abs/state/owner.repo-factory.json pr.merged --task issue-4
 ```
 
 The `pr.merged` command goes in the brief of every implementation worker on a
-task with a PR. Put the absolute path of `broker.mjs` (beside this skill) in the brief. `worker.result`
+task with a PR. Put the absolute path of `broker.mjs` (beside this skill) in the brief.
+An implementation brief also gets the absolute path of `pr-watch.mjs` (beside
+this skill), written as `PR_WATCH` in the watcher rules. `worker.result`
 needs `data.role` and `data.outcome` (`working`, `waiting`, `complete`, or `blocked`);
 add `head`, `result`, `feedback_id`, and a short `summary` when known. Keep long
 evidence in the result file; an event is at most 64 KiB. Emit `worker.blocked`
@@ -797,9 +799,11 @@ Tell every worker:
   block and do not emit `worker.blocked`. Save a `waiting` result whose
   `summary` names the rate limit and the reset time, and emit `worker.result`.
   Until the reset, make at most one REST check (`gh api`) every 5 minutes or
-  more; then resume `gh wait`.
+  more; then resume `node PR_WATCH`. `pr-watch.mjs` does this classification
+  itself: it exits 3 with `{"event":"rate_limited","retry_at":...}`, so save the
+  `waiting` result with that `retry_at` and stop the watcher.
 - Implementation worker only, on a task with a PR: when your watcher
-  (`gh wait --merge`) or your own merge reports the merge, save the final
+  (`pr-watch.mjs --merge`) or your own merge reports the merge, save the final
   result (`merged: true`, full `merge_commit` and `head`), emit `worker.result`,
   then emit `pr.merged` with the PR URL and the full merge commit SHA. Then stop
   every watcher you started and return idle. Do not close your pane or remove
@@ -867,9 +871,17 @@ broken or a dependency is missing, it rebases onto the default branch
 and makes the small fix, or reports it so the coordinator creates a new task.
 It writes `blocked` only for a user decision or an outside action.
 
-Use the coding plugin's `gh-cli` native watchers for local wakeups: required
-checks with fail-fast watching, `gh wait` for PR changes, and `gh wait --merge`
-for a pending merge. You are the only worker that watches the PR; the review
+Watch the PR with the bundled `pr-watch.mjs` (absolute path in your brief),
+started with your shell tool in an attached async shell: `node PR_WATCH PR`.
+It makes one GraphQL call per tick, covers PR changes and required checks
+(fail-fast), and prints one JSON line on the first event, then exits: `merged`,
+`closed`, `checks` (`checks.state` is `failed`, `cancelled`, or `passed`),
+`head`, `review`, `conflict`, `draft`, `base`, `timeout`, `rate_limited`, or
+`error`. Exit 0 is an event, 1 an error, 3 a rate limit. `passed` means every
+reported required check succeeded; confirm with `gh pr checks --required`
+once before you land. `--merge` reports only `merged` or `closed` while a merge
+is pending. Run one watcher per PR, restart it after each event, and stop it
+before you idle. You are the only worker that watches the PR; the review
 worker does not. Feed each event into a bounded shepherd pass. Do not
 also create an automation or scheduled poller. If a watcher fails with a
 rate-limit error, follow the rate-limit rule in "Brief the workers". When a
@@ -918,7 +930,7 @@ model choices within the user's preferences and the resolved spend budget.
 The worker must never checkout, switch, reset, or clean a shared implementation
 worktree. It reads the exact remote PR head, not uncommitted worker edits; for
 a task without a PR, it reads the recorded local `head` commit.
-It runs no `gh wait` watcher: the implementation worker is the only watcher of
+It runs no `pr-watch.mjs` watcher: the implementation worker is the only watcher of
 a PR, and two watchers on one PR double GraphQL use and trigger rate limits.
 The review worker reads the PR on each `worker.result` or head change the
 factory passes to it, and saves a result for each review.
@@ -1065,7 +1077,7 @@ Rules:
    acknowledgement; do not create a wake/write loop.
 9. A lane whose result is `waiting` for a rate limit is not stuck and not
    blocked. On the next wake, reconcile it: once its reset time has passed,
-   re-arm the lane by telling the worker to resume `gh wait` (`rex send`
+   re-arm the lane by telling the worker to resume `node PR_WATCH` (`rex send`
    reaches idle workers only). Do not start a timed loop to check the reset.
 
 Events do not prove a worker is alive. If a worker crashed before it emitted,
