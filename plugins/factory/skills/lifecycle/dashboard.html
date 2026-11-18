@@ -171,12 +171,13 @@
       }
       @keyframes task-flash { from { background: color-mix(in srgb, var(--accent) 25%, transparent); } }
       #title-row { display: flex; align-items: center; gap: 8px; }
-      #open-settings { width: 32px; height: 32px; padding: 0; font-size: 18px; line-height: 28px;
-        color: var(--fg-muted); background: transparent; border-color: transparent; }
-      #budget-line { margin: 0 0 8px; }
-      .settings-form h3 { margin: 16px 0 4px; font-size: 14px; }
-      .settings-form h3:first-child { margin-top: 0; }
-      .settings-form input { display: block; width: 100%; margin-top: 4px; font-weight: 400; }
+      #open-settings { width: 32px; height: 32px; padding: 0; font-size: 18px; line-height: 28px; }
+      .settings-form h3 { margin: 24px 0 4px; padding-top: 16px; border-top: 1px solid var(--border); font-size: 14px; }
+      .settings-form h3:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+      .settings-form input { display: block; width: 100%; margin-top: 4px; padding: 5px 12px; background: var(--bg); font-weight: 400; }
+      .settings-form label { margin-top: 12px; }
+      .settings-form p.muted { margin: 4px 0 12px; }
+      .settings-form .controls { margin-top: 24px; }
       #producers-dialog { width: min(720px, calc(100% - 32px)); }
       #rule-list, #improve-list, #ignored-list { list-style: none; margin: 0; padding: 0; }
       #producers-note { margin: 16px 24px 0; }
@@ -288,11 +289,8 @@
       <div id="title-row">
         <h2 id="goal"></h2>
         <button id="open-settings" type="button" aria-label="Settings" title="Settings">&#9881;&#xFE0E;</button>
+        <span id="run-status" class="chip" hidden></span>
       </div>
-      <p id="run-state" class="muted"></p>
-      <p id="budget-line" class="muted" hidden>
-        <span id="budget-state"></span>
-      </p>
       <p id="discovery-error" role="alert" hidden></p>
       <details id="skipped" hidden>
         <summary>Some factories could not be listed</summary>
@@ -354,7 +352,7 @@
     </div>
     <noscript>Enable JavaScript to read the factory.</noscript>
     <script type="module">
-      import { states, outcomes, artifactName, githubURL, validate, countByState, isIdle, hopsSince, entered, byRecency, rankTasks, cyclesOf, operatorStates, operatorOutcomes, unblockState, unblockChoice, nextRun, nextDue, budgetText, leverSpends, leverAutonomyCaps, maxParallelWorkers, maxRoleLimit, digitIndex } from "./factory-data.mjs";
+      import { states, outcomes, artifactName, githubURL, validate, countByState, isIdle, hopsSince, entered, byRecency, rankTasks, cyclesOf, operatorStates, operatorOutcomes, unblockState, unblockChoice, nextRun, nextDue, leverSpends, leverAutonomyCaps, maxParallelWorkers, maxRoleLimit, digitIndex } from "./factory-data.mjs";
 
       const SVG = "http://www.w3.org/2000/svg";
       const NODE = { w: 160, h: 110 };
@@ -1664,10 +1662,9 @@
           }
         }
         document.getElementById("goal").textContent = data.project;
-        document.getElementById("run-state").textContent =
-          `${data.id} / ${data.status} / ${data.tasks.length} ${data.tasks.length === 1 ? "task" : "tasks"}`;
-        document.getElementById("budget-state").textContent = budgetText(data);
-        document.getElementById("budget-line").hidden = false;
+        const runStatus = document.getElementById("run-status");
+        runStatus.textContent = data.status;
+        runStatus.hidden = data.status === "active";
         document.title = `${data.project} - Factory`;
         draw();
         animate(hops);

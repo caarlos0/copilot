@@ -1367,25 +1367,13 @@ test("the popup can resolve an initial task with an outcome and comment", async 
   assert.equal(ui.get("detail").dataset.state, "initial");
 });
 
-test("runningWorkers and budgetText count every running worker against the budget", async () => {
-  const { runningWorkers, budgetText } = await import("./factory-data.mjs");
-  const data = structuredClone(example);
-  assert.equal(runningWorkers(data), 3, "Idle, closed, and missing workers do not count.");
-  assert.equal(budgetText(data), "3 running / budget 10");
-  data.rules[0].worker = { ...data.rules[1].worker, status: "running" };
-  assert.equal(runningWorkers(data), 4, "A running rule worker counts.");
-  delete data.budget;
-  assert.equal(budgetText(data), "4 running / no total cap");
-});
-
-test("the header shows running workers against the budget and refreshes with the file", async (t) => {
+test("the header shows the run status only when the factory is not active", async (t) => {
   const ui = await dashboard(t);
-  assert.equal(ui.get("budget-state").textContent, "3 running / budget 10");
-  assert.equal(ui.get("budget-line").hidden, false);
-  const { budget: _, ...old } = structuredClone(example);
-  await writeFile(join(ui.directory, factoryFile), JSON.stringify(old));
+  assert.equal(ui.get("run-status").hidden, true);
+  await writeFile(join(ui.directory, factoryFile), JSON.stringify({ ...structuredClone(example), status: "paused" }));
   await ui.run("refresh()");
-  assert.equal(ui.get("budget-state").textContent, "3 running / no total cap");
+  assert.equal(ui.get("run-status").hidden, false);
+  assert.equal(ui.get("run-status").textContent, "paused");
 });
 
 test("the cog opens one settings dialog and the old budget button is gone", async (t) => {
@@ -1422,7 +1410,6 @@ test("the settings dialog keeps its draft across refresh, reports a conflict, an
   await ui.run("refresh()");
   assert.equal(ui.get("settings-body").querySelector("input"), budget);
   assert.equal(budget.value, "6");
-  assert.equal(ui.get("budget-state").textContent, "3 running / budget 8");
   await form.fire("submit");
   assert.match(form.querySelector(".save-error").textContent, /Budget changed since it was read/);
   assert.equal(ui.get("settings-dialog").open, true);
@@ -1442,7 +1429,6 @@ test("the settings dialog keeps its draft across refresh, reports a conflict, an
   assert.deepEqual(saved.lever, { autonomy_cap: "L2" });
   assert.equal(investigation.value, "3");
   assert.equal(ui.get("settings-dialog").open, false);
-  assert.equal(ui.get("budget-state").textContent, "3 running / budget 6");
 });
 
 test("the settings dialog validates numbers before sending and saves nothing when nothing changed", async (t) => {

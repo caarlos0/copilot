@@ -427,17 +427,6 @@ export function validateLever(lever) {
   }
 }
 
-// Every worker with status running counts, whatever its role, including rule workers.
-export function runningWorkers(data) {
-  const workers = [...data.tasks.flatMap((task) => Object.values(task.workers)), ...data.rules.map((rule) => rule.worker)];
-  return workers.filter((worker) => worker?.status === "running").length;
-}
-
-export function budgetText(data) {
-  const cap = data.budget?.max_parallel_workers;
-  return `${runningWorkers(data)} running / ${cap === undefined ? "no total cap" : `budget ${cap}`}`;
-}
-
 export function countByState(tasks) {
   const counts = Object.fromEntries(states.map((state) => [state, 0]));
   for (const task of tasks) counts[task.state] += 1;
