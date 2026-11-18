@@ -419,7 +419,8 @@ test("accepts only GET on loopback host names", async (t) => {
   assert.equal((await get(url, "/nope")).status, 404);
   const status = await new Promise((resolve, reject) => {
     const target = new URL(url);
-    http.get({ host: target.hostname, port: target.port, path: "/", headers: { Host: "evil.example" } },
+    // A fresh agent ignores NODE_USE_ENV_PROXY, so the forged Host reaches the server.
+    http.get({ agent: new http.Agent(), host: target.hostname, port: target.port, path: "/", headers: { Host: "evil.example" } },
       (response) => { response.resume(); resolve(response.statusCode); }).on("error", reject);
   });
   assert.equal(status, 403);
