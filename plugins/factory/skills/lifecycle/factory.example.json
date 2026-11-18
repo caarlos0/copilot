@@ -152,7 +152,7 @@
       "head": null,
       "reviewed_head": null,
       "links": [],
-      "blocker": { "from": "investigation", "reason": "The docs build needs a token that the worker cannot read.", "since": "2026-05-01T09:00:00Z" },
+      "blocker": { "from": "investigation", "reason": "The docs build needs a token that the worker cannot read.", "since": "2026-05-01T09:00:00Z", "options": [{ "label": "Add the docs token to the CI secrets", "state": "implementation", "recommended": true }, { "label": "Skip the docs build in CI" }] },
       "resolution": null,
       "merge": null,
       "workers": {},

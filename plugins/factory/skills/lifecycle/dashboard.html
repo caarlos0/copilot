@@ -190,6 +190,12 @@
       .move-form label + label { margin-top: 12px; }
       .move-form label[hidden] { display: none; }
       .move-form select, .move-form textarea { display: block; width: 100%; margin-top: 4px; font-weight: 400; }
+      .unblock-options { display: flex; flex-direction: column; gap: 8px; margin: 12px 0; }
+      .unblock-options p { margin: 0; }
+      .unblock-options button { display: block; width: 100%; text-align: left; font-weight: 400;
+        white-space: normal; overflow-wrap: anywhere; }
+      .unblock-options button[aria-pressed="true"] { border-color: var(--accent); }
+      .unblock-options .tag { margin-left: 8px; color: var(--fg-muted); font-size: 12px; }
       .save-error { white-space: pre-wrap; }
       .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: var(--neutral); }
       .dot.running { background: var(--success); }
@@ -299,7 +305,7 @@
     </div>
     <noscript>Enable JavaScript to read the factory.</noscript>
     <script type="module">
-      import { states, outcomes, artifactName, githubURL, validate, countByState, hopsSince, entered, cyclesOf, operatorStates, operatorOutcomes, nextRun, nextDue } from "./factory-data.mjs";
+      import { states, outcomes, artifactName, githubURL, validate, countByState, hopsSince, entered, cyclesOf, operatorStates, operatorOutcomes, unblockState, unblockChoice, nextRun, nextDue } from "./factory-data.mjs";
 
       const SVG = "http://www.w3.org/2000/svg";
       const NODE = { w: 160, h: 110 };
@@ -763,7 +769,7 @@
 
       function openMove(task) {
         const title = document.getElementById("move-title");
-        title.textContent = `Move: ${task.title}`;
+        title.textContent = `${task.state === "blocked" ? "Unblock" : "Move"}: ${task.title}`;
         document.getElementById("move-body").replaceChildren(moveForm(task));
         moveDialog.showModal();
         moveDialog.querySelector("select").focus();
@@ -774,6 +780,7 @@
         let current = task;
         const form = element("form", null, "move-form");
         const fields = element("fieldset");
+        const unblock = task.state === "blocked";
         const stateLabel = element("label", "Move to");
         const state = element("select");
         state.name = "state";
@@ -803,12 +810,37 @@
             return option;
           }));
           if (choices.includes(previous)) state.value = previous;
+          else if (unblock && choices.length) state.value = unblockState(current);
           showResolution();
+          renderOptions();
         };
+        const options = element("div", null, "unblock-options");
+        options.setAttribute("role", "group");
+        options.setAttribute("aria-label", "Suggested answers");
+        const renderOptions = () => {
+          const suggested = unblock && current.state === "blocked" ? current.blocker?.options ?? [] : [];
+          options.hidden = !suggested.length;
+          options.replaceChildren(...(suggested.length ? [element("p", "Suggested answers. Pick one, then edit or write your own below.", "muted")] : []),
+            ...suggested.map((option) => {
+              const choice = element("button", option.label, "option");
+              choice.type = "button";
+              choice.setAttribute("aria-pressed", "false");
+              if (option.recommended) choice.append(element("span", "Recommended", "tag"));
+              choice.addEventListener("click", () => {
+                const picked = unblockChoice(current, option);
+                if (operatorStates(current).includes(picked.state)) state.value = picked.state;
+                comment.value = picked.comment;
+                showResolution();
+                for (const other of options.querySelectorAll("button")) other.setAttribute("aria-pressed", String(other === choice));
+                comment.focus();
+              });
+              return choice;
+            }));
+        };
+        const comment = element("textarea");
         setChoices();
         stateLabel.append(state);
         const commentLabel = element("label", "Comment for the factory");
-        const comment = element("textarea");
         comment.name = "comment";
         comment.required = true;
         comment.maxLength = 4000;
@@ -829,7 +861,7 @@
         reload.hidden = true;
         const actions = element("div", null, "controls");
         actions.append(reload, save);
-        fields.append(stateLabel, resolutionLabel, commentLabel, notice, error, actions);
+        fields.append(stateLabel, resolutionLabel, options, commentLabel, notice, error, actions);
         form.append(fields);
         const failed = (cause) => {
           error.textContent = cause.message;
@@ -978,7 +1010,7 @@
         const heading = element("div", null, "row-head");
         heading.append(element("h3", task.title));
         if (operatorStates(task).length) {
-          const move = element("button", "Move", "move");
+          const move = element("button", task.state === "blocked" ? "Unblock" : "Move", "move");
           move.type = "button";
           move.addEventListener("click", () => openMove(task));
           heading.append(move);
@@ -1004,6 +1036,13 @@
         node.append(chips);
         if (task.blocker) {
           node.append(element("p", `Blocked in ${task.blocker.from}: ${task.blocker.reason}`));
+          if (task.blocker.options) {
+            const choices = element("ul", null, "blocker-options");
+            for (const option of task.blocker.options) {
+              choices.append(element("li", `${option.label}${option.recommended ? " (recommended)" : ""}`));
+            }
+            node.append(choices);
+          }
         }
         if (task.resolution) {
           node.append(element("p", `Resolved: ${task.resolution.outcome}${task.resolution.note ? `. ${task.resolution.note}` : ""}`));

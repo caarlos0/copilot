@@ -104,6 +104,58 @@ export function operatorStates(task) {
   return [...candidates.filter((state) => state !== "review" || !needsPR(task)), "resolved"];
 }
 
+const openStates = ["initial", "investigation", "implementation", "review"];
+const maxBlockerOptions = 8;
+const maxOptionLabel = 300;
+
+function validateBlockerOptions(options, field) {
+  if (!Array.isArray(options) || !options.length || options.length > maxBlockerOptions) {
+    throw new Error(`${field} must be an array of 1 to ${maxBlockerOptions} options.`);
+  }
+  let recommended = 0;
+  for (const option of options) {
+    if (!isObject(option)) throw new Error(`${field} entries must be objects.`);
+    text(option.label, `${field} label`);
+    if (option.label.length > maxOptionLabel) {
+      throw new Error(`${field} label must be at most ${maxOptionLabel} characters.`);
+    }
+    if (option.state !== undefined) oneOf(option.state, openStates, `${field} state`);
+    if (option.recommended !== undefined) {
+      if (typeof option.recommended !== "boolean") throw new Error(`${field} recommended must be a boolean.`);
+      if (option.recommended) recommended += 1;
+    }
+  }
+  if (recommended > 1) throw new Error(`${field} may have at most one recommended option.`);
+}
+
+// --blocker is plain text, or a JSON object {"reason": "...", "options": [...]}.
+export function parseBlocker(value) {
+  const input = typeof value === "string" ? value.trim() : "";
+  let parsed;
+  if (input.startsWith("{")) {
+    try { parsed = JSON.parse(input); } catch { /* plain text that starts with a brace */ }
+  }
+  if (!isObject(parsed)) return { reason: value };
+  const extra = Object.keys(parsed).filter((key) => key !== "reason" && key !== "options");
+  if (extra.length) throw new Error(`--blocker JSON has unknown keys: ${extra.join(", ")}.`);
+  text(parsed.reason, "--blocker reason");
+  if (parsed.options === undefined) return { reason: parsed.reason };
+  validateBlockerOptions(parsed.options, "--blocker options");
+  return { reason: parsed.reason, options: parsed.options };
+}
+
+// The destination an Unblock popup selects first: where the task was blocked from, else the first open one.
+export function unblockState(task) {
+  const choices = operatorStates(task);
+  return choices.includes(task.blocker?.from) ? task.blocker.from : choices[0];
+}
+
+// Choosing an option copies its label verbatim into the comment and, when allowed, selects its state.
+export function unblockChoice(task, option) {
+  const state = operatorStates(task).includes(option.state) ? option.state : unblockState(task);
+  return { state, comment: option.label };
+}
+
 export function checkTransition(task, to, operator = false) {
   if (task.state === to && !operator) return;
   const allowed = operator ? operatorStates(task) : [...transitions[task.state]];
@@ -192,6 +244,7 @@ function validateTask(task, seen) {
       `${at} blocker.from`);
     text(task.blocker.reason, `${at} blocker.reason`);
     timestamp(task.blocker.since, `${at} blocker.since`);
+    if (task.blocker.options !== undefined) validateBlockerOptions(task.blocker.options, `${at} blocker.options`);
   } else if (task.blocker != null) {
     throw new Error(`${at}: blocker is allowed only in the blocked state.`);
   }

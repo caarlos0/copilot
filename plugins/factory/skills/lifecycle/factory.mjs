@@ -6,7 +6,7 @@ import { parseArgs } from "node:util";
 import { archiveDirectory, findArchived, readArchive, removeArchived, saveArchive } from "./archive.mjs";
 import { emit, resolveFactory } from "./broker.mjs";
 import {
-  checkTransition, defaultLimits, format, isObject, operatorOutcomes, outcomes, validate,
+  checkTransition, defaultLimits, format, isObject, operatorOutcomes, outcomes, parseBlocker, validate,
 } from "./factory-data.mjs";
 import { recordSessions, registryFile, sessionID } from "./sessions.mjs";
 
@@ -105,7 +105,7 @@ function changeState(task, values, now, operator) {
   }
   if (to === "blocked") {
     if (!values.blocker) throw new Error("Moving to blocked needs --blocker REASON.");
-    task.blocker = { from, reason: values.blocker, since: now };
+    task.blocker = { from, ...parseBlocker(values.blocker), since: now };
   } else if (values.blocker !== undefined) {
     throw new Error("--blocker is allowed only when moving to or staying in blocked.");
   }
@@ -302,7 +302,7 @@ async function writeFactory(file, values, operator, source) {
     } else {
       if (values.blocker !== undefined) {
         if (task.state !== "blocked") throw new Error("--blocker needs --state blocked or a blocked task.");
-        task.blocker = { ...task.blocker, reason: values.blocker };
+        task.blocker = { from: task.blocker.from, ...parseBlocker(values.blocker), since: task.blocker.since };
       }
       if (values.resolution !== undefined) {
         throw new Error("--resolution is allowed only when moving to resolved.");
@@ -491,7 +491,9 @@ Task options:
   --state VALUE         initial, investigation, implementation, review, blocked, resolved
   --note VALUE          History note for the state change
   --next-action VALUE   Next action (new task)
-  --blocker VALUE       Reason; with --state blocked, or to edit a blocked task
+  --blocker VALUE       Reason; with --state blocked, or to edit a blocked task. For a user decision pass
+                        JSON '{"reason":"...","options":[{"label":"...","state":"implementation","recommended":true}]}'
+                        (1-8 options; state and recommended optional; one recommended at most)
   --resolution VALUE    ${outcomes.join(", ")}; with --state resolved
   --links JSON          Replace the GitHub issue/PR URL array
   --workers JSON        Merge worker records by role, e.g.
