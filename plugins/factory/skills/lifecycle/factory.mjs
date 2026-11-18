@@ -9,7 +9,7 @@ import {
   checkTransition, defaultBudget, defaultLimits, format, isObject, maxRoleLimit, operatorOutcomes, outcomes,
   parseBlocker, validate,
 } from "./factory-data.mjs";
-import { recordSessions, registryFile, sessionID } from "./sessions.mjs";
+import { findSession, recordSessions, registryFile, sessionID, sessionStateDirectory } from "./sessions.mjs";
 
 export class ConflictError extends Error {}
 
@@ -266,6 +266,7 @@ async function writeFactory(file, values, operator, source) {
   }
   if (values.ignored !== undefined) rootPatch.ignored = json(values.ignored, "ignored", Array.isArray);
   const sessions = [];
+  const launches = new Set();
   const track = (value, role, owner) => {
     const id = sessionID(value);
     if (id) sessions.push({ id, role, ...owner, at: rootPatch.updated_at });
@@ -281,6 +282,7 @@ async function writeFactory(file, values, operator, source) {
     if (values.ran) changes.last_run_at = rootPatch.updated_at;
     if (values["rule-worker"] !== undefined) {
       changes.worker = nullableObject(values["rule-worker"], "rule-worker");
+      if (changes.worker?.status === "running") launches.add(`rule:${values.rule}`);
     }
     if (!Object.keys(changes).length) throw new Error("--rule needs --ran or --rule-worker.");
     const rules = rootPatch.rules ?? current.rules;
@@ -372,6 +374,7 @@ async function writeFactory(file, values, operator, source) {
     task = merge(task, { ...patch, updated_at: at, revision: revision + 1 });
     for (const [role, worker] of Object.entries(patch.workers ?? {})) {
       track(worker?.session, role, { task: task.id });
+      if (worker?.status === "running") launches.add(`${task.id}:${role}`);
     }
     if (operator) {
       const id = randomUUID();
@@ -391,9 +394,11 @@ async function writeFactory(file, values, operator, source) {
       events.push({ type: "feedback.pending", task: task.id, data: { feedback_id: task.feedback.id } });
     }
   }
+  const previous = current;
   current = merge(current, rootPatch);
   current.tasks = tasks;
   validate(current);
+  await locateSessions(current, previous, launches, now, track);
   if (values.budget !== undefined) {
     events.push({ type: "budget.updated", data: { max_parallel_workers: current.budget.max_parallel_workers } });
   }
@@ -443,6 +448,34 @@ async function writeFactory(file, values, operator, source) {
     }
   }
   return current;
+}
+
+// A running worker without a session gets the ID of the one session started
+// in its worktree (or in the repo for one-shot workers) since it launched.
+async function locateSessions(current, previous, launches, now, track) {
+  const directory = sessionStateDirectory();
+  const find = async (worker, key, anchor, cwd, role, owner) => {
+    if (worker?.status !== "running" || worker.session) return;
+    if (launches.has(key)) worker.launched_at = anchor;
+    if (!worker.launched_at) return;
+    const id = await findSession(directory, cwd, worker.launched_at);
+    if (id) {
+      worker.session = id;
+      track(id, role, owner);
+    }
+  };
+  for (const task of current.tasks) {
+    const before = previous.tasks?.find((item) => item.id === task.id);
+    for (const [role, worker] of Object.entries(task.workers ?? {})) {
+      await find(worker, `${task.id}:${role}`, before?.updated_at ?? now,
+        task.worktree?.path ?? process.cwd(), role, { task: task.id });
+    }
+  }
+  for (const rule of current.rules ?? []) {
+    const before = previous.rules?.find((item) => item.id === rule.id);
+    await find(rule.worker, `rule:${rule.id}`, before?.last_run_at ?? previous.updated_at ?? now,
+      process.cwd(), rule.kind === "improve" ? "improver" : "producer", { rule: rule.id });
+  }
 }
 
 export async function update(file, values, { operator = false, source = operator ? "dashboard" : "coordinator" } = {}) {
@@ -550,7 +583,10 @@ Run options:
   --ignored JSON        Replace the skipped-work list: [{url, at, reason}]
   --session UUID        Record the factory's own Copilot session in FILE's sessions registry
                         (<owner.repo>-factory-sessions.jsonl). Worker sessions are recorded
-                        automatically from --workers and --rule-worker records that have a session
+                        automatically from --workers and --rule-worker records that have a session.
+                        A running worker without one gets the single session in the Copilot
+                        session-state folder (FACTORY_SESSION_STATE, default ~/.copilot/session-state)
+                        created since its launch in its worktree, or in the current directory
   --limits JSON         Merge worker caps, e.g. '{"investigation":2}' (default 3 each; the dashboard
                         accepts 1 to 100). Emits limits.updated
   --expected-limits JSON  Caps the write was based on, e.g. '{"investigation":3}'. Every key in

@@ -1,5 +1,6 @@
-import { appendFile, readFile } from "node:fs/promises";
-import { basename, dirname, extname, join } from "node:path";
+import { appendFile, readFile, readdir, realpath, stat } from "node:fs/promises";
+import { homedir } from "node:os";
+import { basename, dirname, extname, join, resolve } from "node:path";
 
 const sessionRoles = ["factory", "investigation", "implementation", "review", "producer", "improver"];
 
@@ -45,4 +46,31 @@ export async function recordSessions(file, entries) {
   if (fresh.length) {
     await appendFile(file, fresh.map((item) => `${JSON.stringify(item)}\n`).join(""), { mode: 0o600 });
   }
+}
+
+export const sessionStateDirectory = () =>
+  process.env.FACTORY_SESSION_STATE ?? join(homedir(), ".copilot", "session-state");
+
+const real = (path) => realpath(path).catch(() => resolve(path));
+
+// The one Copilot session started in cwd at or after `since`, or null when
+// there is none or more than one.
+export async function findSession(directory, cwd, since) {
+  const from = Date.parse(since);
+  const names = await readdir(directory).catch(() => []);
+  const wanted = await real(cwd);
+  const found = [];
+  await Promise.all(names.filter((name) => sessionID(name) === name).map(async (name) => {
+    try {
+      // A session folder is modified at least once after it is created.
+      if ((await stat(join(directory, name))).mtimeMs < from) return;
+      const yaml = await readFile(join(directory, name, "workspace.yaml"), "utf8");
+      const field = (key) => yaml.match(new RegExp(`^${key}: *["']?(.+?)["']?$`, "m"))?.[1];
+      if (!(Date.parse(field("created_at")) >= from) || !field("cwd")) return;
+      if (await real(field("cwd")) === wanted) found.push(name);
+    } catch {
+      // An unreadable folder is not a match; the lookup never fails a write.
+    }
+  }));
+  return found.length === 1 ? found[0] : null;
 }

@@ -817,3 +817,80 @@ test("the sessions registry records each factory and worker session once, privat
   f.fails(/--session must be a Copilot session UUID/, "--session", "pane-1");
   assert.equal((await lines()).length, 4, "A refused write must not record a session.");
 });
+
+async function sessionState(t) {
+  const directory = await mkdtemp(join(tmpdir(), "session-state-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const previous = process.env.FACTORY_SESSION_STATE;
+  process.env.FACTORY_SESSION_STATE = directory;
+  t.after(() => {
+    if (previous === undefined) delete process.env.FACTORY_SESSION_STATE;
+    else process.env.FACTORY_SESSION_STATE = previous;
+  });
+  return {
+    directory,
+    add: async (id, cwd, created) => {
+      await mkdir(join(directory, id));
+      await writeFile(join(directory, id, "workspace.yaml"), `id: ${id}\ncwd: ${cwd}\ncreated_at: ${new Date(created).toISOString()}\n`);
+    },
+  };
+}
+
+test("a running worker without a session gets the one session created in its worktree since launch", async (t) => {
+  const state = await sessionState(t);
+  const f = await started(t);
+  const worktree = await mkdtemp(join(tmpdir(), "worktree-"));
+  t.after(() => rm(worktree, { recursive: true, force: true }));
+  const launch = Date.now() - 60_000;
+  await state.add(uuid(1), worktree, launch - 3_600_000);
+  await state.add(uuid(2), join(worktree, "other"), launch + 5_000);
+  await state.add(uuid(3), worktree, launch + 10_000);
+  await writeFile(join(state.directory, uuid(3), "events.jsonl"),
+    `${JSON.stringify({ type: "session.start", timestamp: new Date(launch + 10_000).toISOString(), data: {} })}\n`);
+
+  f.ok("--task", "issue-1", "--state", "investigation", "--note", "Go");
+  f.ok("--task", "issue-1", "--state", "implementation", "--worktree", JSON.stringify({ path: worktree, created_by_run: true }),
+    "--task-updated-at", new Date(launch - 1_000).toISOString(), "--workers", JSON.stringify({ implementation: { status: "unknown", mode: "continuous" } }));
+  f.ok("--task", "issue-1", "--workers", JSON.stringify({ implementation: { status: "running", pane: "p1" } }));
+
+  const worker = (await f.read()).tasks[0].workers.implementation;
+  assert.equal(worker.session, uuid(3));
+  assert.equal(worker.pane, "p1");
+  const registry = join(f.directory, "owner.repo-factory-sessions.jsonl");
+  assert.deepEqual((await readFile(registry, "utf8")).split("\n").filter(Boolean).map((line) => JSON.parse(line).id), [uuid(3)]);
+
+  const metrics = spawnSync(process.execPath, [join(__dirname, "session-metrics.mjs"), "--registry", registry, "--directory", state.directory], { encoding: "utf8" });
+  assert.equal(metrics.status, 0, metrics.stderr);
+  assert.deepEqual(JSON.parse(metrics.stdout).sessions.map((item) => [item.id, item.role, item.task]), [[uuid(3), "implementation", "issue-1"]]);
+});
+
+test("a one-shot rule worker is matched by the factory's directory; no or many matches leave it unset", async (t) => {
+  const state = await sessionState(t);
+  const f = await fixture(t);
+  const repo = await mkdtemp(join(tmpdir(), "repo-"));
+  t.after(() => rm(repo, { recursive: true, force: true }));
+  const launch = Date.now() - 60_000;
+  const run = (...args) => {
+    const result = spawnSync(process.execPath, [script, f.file, ...args], { encoding: "utf8", cwd: repo });
+    assert.equal(result.status, 0, result.stderr);
+  };
+  const running = JSON.stringify({ status: "running", mode: "one-shot" });
+  run("--project", "owner/repo", "--run-goal", "Run it", "--rules",
+    JSON.stringify([{ ...search, kind: "improve", query: null, id: "self", last_run_at: new Date(launch).toISOString() }]));
+
+  run("--rule", "self", "--rule-worker", running);
+  assert.equal((await f.read()).rules[0].worker.session, undefined, "No session: leave it unset.");
+
+  await state.add(uuid(1), repo, launch + 1_000);
+  await state.add(uuid(2), repo, launch + 2_000);
+  run("--rule", "self", "--rule-worker", running);
+  assert.equal((await f.read()).rules[0].worker.session, undefined, "Two sessions are not a clear match.");
+
+  await rm(join(state.directory, uuid(2)), { recursive: true });
+  run("--run-status", "active");
+  const { session } = (await f.read()).rules[0].worker;
+  assert.equal(session, uuid(1), "A later write finds the session.");
+  const registry = (await readFile(join(f.directory, "owner.repo-factory-sessions.jsonl"), "utf8")).split("\n").filter(Boolean);
+  assert.deepEqual(registry.map((line) => JSON.parse(line)).map(({ id, role, rule }) => ({ id, role, rule })),
+    [{ id: uuid(1), role: "improver", rule: "self" }]);
+});
