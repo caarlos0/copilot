@@ -48,6 +48,7 @@
     }
   ],
   "limits": { "investigation": 3, "implementation": 3 },
+  "budget": { "max_parallel_workers": 10 },
   "tasks": [
     {
       "id": "issue-12",

@@ -140,7 +140,7 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
     response.end(typeof body === "object" && !Buffer.isBuffer(body) ? JSON.stringify(body) : body);
   }
 
-  async function moveTask(request, file) {
+  async function readJSONBody(request) {
     if (request.headers.origin !== `http://${request.headers.host}` ||
         (request.headers["sec-fetch-site"] && request.headers["sec-fetch-site"] !== "same-origin")) {
       throw new HttpError(403, "State changes must come from this dashboard.");
@@ -158,7 +158,21 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
       if (size > maxBody) throw new HttpError(413, "State change is too large (maximum 16 KiB).");
       chunks.push(chunk);
     }
-    const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  }
+
+  async function write(file, values) {
+    try {
+      return await update(await localFile(file), values, { operator: true });
+    } catch (error) {
+      if (error instanceof ConflictError) throw new HttpError(409, error.message);
+      if (error.code) throw error;
+      throw new HttpError(400, error.message);
+    }
+  }
+
+  async function moveTask(request, file) {
+    const body = await readJSONBody(request);
     if (!isObject(body) ||
         Object.keys(body).some((key) => !["task", "state", "comment", "revision", "resolution"].includes(key)) ||
         !["task", "state", "comment"].every((key) => typeof body[key] === "string" && body[key].trim()) ||
@@ -167,16 +181,24 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
     }
     const data = await loadFactory(file);
     if (!data.tasks.some((task) => task.id === body.task)) throw new HttpError(404, "Task not found.");
-    try {
-      return await update(await localFile(file), {
-        task: body.task, state: body.state, note: body.comment,
-        "expected-revision": String(body.revision), resolution: body.resolution,
-      }, { operator: true });
-    } catch (error) {
-      if (error instanceof ConflictError) throw new HttpError(409, error.message);
-      if (error.code) throw error;
-      throw new HttpError(400, error.message);
+    return write(file, {
+      task: body.task, state: body.state, note: body.comment,
+      "expected-revision": String(body.revision), resolution: body.resolution,
+    });
+  }
+
+  async function setBudget(request, file) {
+    const body = await readJSONBody(request);
+    if (!isObject(body) || Object.keys(body).some((key) => !["max_parallel_workers", "expected"].includes(key)) ||
+        !Number.isSafeInteger(body.max_parallel_workers) ||
+        !(body.expected === null || Number.isSafeInteger(body.expected))) {
+      throw new HttpError(400, "Provide max_parallel_workers and the budget you saw (expected, or null for none).");
     }
+    await loadFactory(file);
+    return write(file, {
+      budget: JSON.stringify({ max_parallel_workers: body.max_parallel_workers }),
+      "expected-budget": body.expected === null ? "none" : String(body.expected),
+    });
   }
 
   const server = createServer(async (request, response) => {
@@ -190,8 +212,10 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
       const url = new URL(request.url, `http://127.0.0.1:${port}`);
       if (request.method === "POST" && url.pathname === "/api/move") {
         send(response, 200, await moveTask(request, url.searchParams.get("file")));
+      } else if (request.method === "POST" && url.pathname === "/api/budget") {
+        send(response, 200, await setBudget(request, url.searchParams.get("file")));
       } else if (request.method !== "GET") {
-        throw new HttpError(405, "Use GET, or POST /api/move for dashboard state changes.");
+        throw new HttpError(405, "Use GET, or POST /api/move or /api/budget for dashboard changes.");
       } else if (url.pathname === "/" || url.pathname === "/dashboard.html") {
         send(response, 200, await readFile(join(assets, "dashboard.html")), "text/html; charset=utf-8");
       } else if (url.pathname === "/factory-data.mjs") {

@@ -153,7 +153,9 @@
         color: var(--fg); background: var(--bg); border: 1px solid var(--border); border-radius: 12px; }
       dialog:focus { outline: none; }
       dialog::backdrop { background: rgb(0 0 0 / .5); }
-      #move-dialog { width: min(560px, calc(100% - 32px)); }
+      #move-dialog, #budget-dialog { width: min(560px, calc(100% - 32px)); }
+      #budget-line { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; }
+      .budget-form input { display: block; width: 100%; margin-top: 4px; font-weight: 400; }
       #producers-dialog { width: min(720px, calc(100% - 32px)); }
       #rule-list, #improve-list, #ignored-list { list-style: none; margin: 0; padding: 0; }
       #producers-note { margin: 16px 24px 0; }
@@ -265,6 +267,10 @@
     <main>
       <h2 id="goal"></h2>
       <p id="run-state" class="muted"></p>
+      <p id="budget-line" class="muted" hidden>
+        <span id="budget-state"></span>
+        <button id="edit-budget" type="button">Edit budget</button>
+      </p>
       <p id="discovery-error" role="alert" hidden></p>
       <details id="skipped" hidden>
         <summary>Some factories could not be listed</summary>
@@ -279,6 +285,14 @@
             aria-label="Cancel move" title="Cancel move">&times;</button>
         </div>
         <div id="move-body"></div>
+      </dialog>
+      <dialog id="budget-dialog" aria-labelledby="budget-title">
+        <div class="detail-head">
+          <h2 id="budget-title">Worker budget</h2>
+          <button id="close-budget" class="close-button" type="button" tabindex="-1"
+            aria-label="Cancel budget change" title="Cancel budget change">&times;</button>
+        </div>
+        <div id="budget-body"></div>
       </dialog>
       <dialog id="producers-dialog" aria-labelledby="producers-title" tabindex="-1">
         <div class="detail-head">
@@ -309,7 +323,7 @@
     </div>
     <noscript>Enable JavaScript to read the factory.</noscript>
     <script type="module">
-      import { states, outcomes, artifactName, githubURL, validate, countByState, hopsSince, entered, byRecency, cyclesOf, operatorStates, operatorOutcomes, unblockState, unblockChoice, nextRun, nextDue } from "./factory-data.mjs";
+      import { states, outcomes, artifactName, githubURL, validate, countByState, hopsSince, entered, byRecency, cyclesOf, operatorStates, operatorOutcomes, unblockState, unblockChoice, nextRun, nextDue, budgetText } from "./factory-data.mjs";
 
       const SVG = "http://www.w3.org/2000/svg";
       const NODE = { w: 160, h: 110 };
@@ -384,6 +398,7 @@
       const flow = document.getElementById("flow");
       const panel = document.getElementById("detail");
       const moveDialog = document.getElementById("move-dialog");
+      const budgetDialog = document.getElementById("budget-dialog");
       const producers = document.getElementById("producers-dialog");
       function element(tag, value, className) {
         const node = document.createElement(tag);
@@ -799,6 +814,97 @@
         document.getElementById("move-body").replaceChildren(moveForm(task));
         moveDialog.showModal();
         moveDialog.querySelector("select").focus();
+      }
+
+      function closeBudget() {
+        const input = budgetDialog.querySelector("input");
+        if (input && input.value !== input.defaultValue && !window.confirm("Discard your unsaved budget?")) return;
+        budgetDialog.close();
+      }
+
+      function openBudget() {
+        const form = budgetForm();
+        document.getElementById("budget-body").replaceChildren(form);
+        budgetDialog.showModal();
+        form.querySelector("input").focus();
+      }
+
+      function budgetForm() {
+        const file = selection;
+        const seenBudget = () => snapshot.budget?.max_parallel_workers ?? null;
+        let expected = seenBudget();
+        const form = element("form", null, "budget-form move-form");
+        const fields = element("fieldset");
+        const label = element("label", "Maximum workers running at the same time");
+        const input = element("input");
+        input.type = "number";
+        input.name = "max_parallel_workers";
+        input.min = "1";
+        input.max = "100";
+        input.step = "1";
+        input.required = true;
+        input.value = String(expected ?? "");
+        input.defaultValue = input.value;
+        label.append(input);
+        const notice = element("p",
+          "The factory reads this on its next pass and never starts a worker past it. Lowering it does not stop running workers.",
+          "muted");
+        const error = element("p", null, "save-error");
+        error.setAttribute("role", "alert");
+        error.hidden = true;
+        const reload = element("button", "Reload budget");
+        reload.type = "button";
+        reload.hidden = true;
+        const save = element("button", "Save budget", "action-primary");
+        save.type = "submit";
+        const actions = element("div", null, "controls");
+        actions.append(reload, save);
+        fields.append(label, notice, error, actions);
+        form.append(fields);
+        const failed = (cause) => {
+          error.textContent = cause.message;
+          error.hidden = false;
+          reload.hidden = false;
+        };
+        reload.addEventListener("click", async () => {
+          fields.disabled = true;
+          try {
+            const data = await requestJSON(`/api/factory?${new URLSearchParams({ file })}`);
+            validate(data);
+            expected = data.budget?.max_parallel_workers ?? null;
+            notice.textContent = `Current budget: ${expected ?? "none"}. Your value is kept. Check it before saving again.`;
+            error.hidden = true;
+            reload.hidden = true;
+            if (selection === file) load(data, file);
+          } catch (cause) {
+            failed(cause);
+          } finally {
+            fields.disabled = false;
+          }
+        });
+        form.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          if (fields.disabled) return;
+          fields.disabled = true;
+          error.hidden = true;
+          mutation += 1;
+          try {
+            const data = await requestJSON(`/api/budget?${new URLSearchParams({ file })}`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ max_parallel_workers: Number(input.value), expected }),
+            });
+            validate(data);
+            if (budgetDialog.querySelector("form") === form) budgetDialog.close();
+            if (selection === file) load(data, file);
+          } catch (cause) {
+            failed(new Error(`Budget was not saved: ${cause.message}`));
+          } finally {
+            mutation += 1;
+            fields.disabled = false;
+          }
+        });
+        return form;
       }
 
       function moveForm(task) {
@@ -1343,6 +1449,8 @@
         document.getElementById("goal").textContent = data.project;
         document.getElementById("run-state").textContent =
           `${data.id} / ${data.status} / ${data.tasks.length} ${data.tasks.length === 1 ? "task" : "tasks"}`;
+        document.getElementById("budget-state").textContent = budgetText(data);
+        document.getElementById("budget-line").hidden = false;
         document.title = `${data.project} - Factory`;
         draw();
         animate(hops);
@@ -1414,6 +1522,7 @@
         return refresh();
       }
       document.getElementById("refresh").addEventListener("click", refresh);
+      document.getElementById("edit-budget").addEventListener("click", openBudget);
       document.getElementById("global-filter").addEventListener("input", draw);
       document.getElementById("clear-filter").addEventListener("click", () => {
         document.getElementById("global-filter").value = "";
@@ -1423,9 +1532,10 @@
       const closeChoice = () => choose(null);
       document.getElementById("close-detail").addEventListener("click", closeChoice);
       document.addEventListener("keydown", (event) => {
-        if (event.key === "Escape" && !panel.hidden && !moveDialog.open && !producers.open) closeChoice();
+        if (event.key === "Escape" && !panel.hidden && !moveDialog.open && !budgetDialog.open && !producers.open) closeChoice();
       });
       wireDismiss(moveDialog, "close-move", closeMove);
+      wireDismiss(budgetDialog, "close-budget", closeBudget);
       wireDismiss(producers, "close-producers", closeChoice);
 
       document.getElementById("logo").src = document.getElementById("icon").href;

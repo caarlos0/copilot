@@ -66,7 +66,10 @@ On startup, recovery, every wake, every user message, and before every report,
 run the lifecycle skill's `reconcile.mjs` and act on each finding. On startup,
 recovery, and every wake, drain all actionable tasks, reconcile
 results and worktrees, and fill free slots before waiting. Run enabled
-search/backlog rules when the queue is empty and capacity is free. Wait with
+search/backlog rules when the queue is empty and capacity is free. Capacity is
+`budget.max_parallel_workers` from the factory file (reread it every sweep and
+after every dashboard `budget.updated` event) minus the workers with status
+`running`, and the per-role `limits`; never exceed the budget. Wait with
 `broker.mjs wait --since CURSOR --exclude-source coordinator` (add `--due` when a
 rule has `every`), exactly one at a time (async bash). Workers report with
 `broker.mjs emit`, so you wake within milliseconds of an event and never on your

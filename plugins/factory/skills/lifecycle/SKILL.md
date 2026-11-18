@@ -421,7 +421,7 @@ ending the turn:
 2. Fill available worker slots with runnable queued tasks, including every
    `initial` task, which gets a read-only investigation worker first (never an
    implementer). Continue until no queued task can use a free slot or the
-   applicable worker, spend, or authority limit is reached.
+   applicable worker, budget, spend, or authority limit is reached.
 3. When the task queue is empty and worker capacity is free, run each enabled
    `search` and `backlog` rule once in this idle sweep, even if its `every`
    interval is not due. A search uses no worker. A backlog rule needs a free
@@ -518,6 +518,18 @@ worker reports with `broker.mjs emit worker.result`, using the rule ID as
 all workers and review models as well; do not give each worker a fresh budget.
 The task waits in its current state until a slot opens.
 
+`budget.max_parallel_workers` is the total worker budget: the most workers
+running at the same time, over every role (investigation, implementation,
+review, and rule workers). It is optional. A file without it has no total cap,
+and a new file gets 10. Read it from the factory file on every sweep and after
+every dashboard `budget.updated` event, and never exceed it. Reconcile stale
+`running` records first, then count every worker with status `running`; start a
+worker only when the count stays within the budget. The per-role `limits` still
+apply on top. Lowering the budget below the running count never stops a worker:
+start no new worker until the count falls under it. Change it with
+`factory.mjs --budget '{"max_parallel_workers":N}'`; the operator can also edit it
+in the dashboard. It is a worker count, not the Lever spend budget.
+
 ### Self-improve
 
 An `improve` rule reviews how the factory ran and proposes one change. It is
@@ -547,7 +559,7 @@ work". It changes nothing without the user's answer. Its worker follows
 5. Read the result. If `change` is null, record the worker as closed and say
    nothing. Otherwise use `ask_user` once. Show the proposal, its evidence, and
    a recommended answer. After the user answers:
-   - `rule` or `limit`: apply it with `--rules` or `--limits`.
+   - `rule`, `limit`, or `budget`: apply it with `--rules`, `--limits`, or `--budget`.
    - `process`: put it in later briefs.
    - `skill`: report only. Never edit plugin files.
 
