@@ -200,10 +200,23 @@
       .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: var(--neutral); }
       .dot.running { background: var(--success); }
       .dot.unknown { background: var(--attention); }
-      ul.workers, ol.history { margin: 8px 0; padding-left: 20px; }
+      ul.workers { margin: 8px 0; padding-left: 20px; }
       h4 { margin: 12px 0 0; font-size: 12px; font-weight: 600; color: var(--fg-muted); }
-      ol.history { font-size: 12px; }
-      ol.history .history-state { font-weight: 600; }
+      ol.history { margin: 8px 0; padding: 0; list-style: none; font-size: 12px; }
+      .history-gap { position: relative; display: flex; align-items: center; gap: 8px; min-height: 22px; margin-left: 24px;
+        padding-left: 14px; border-left: 2px dashed var(--border-emphasis); color: var(--fg-muted); font-size: 11px;
+        font-variant-numeric: tabular-nums; }
+      .history-gap::after { content: ""; position: absolute; left: -6px; bottom: -2px; border: 5px solid transparent;
+        border-top: 6px solid var(--border-emphasis); border-bottom-width: 0; }
+      .history-node { padding: 6px 10px; border: 1px solid color-mix(in srgb, var(--c) 45%, var(--border)); border-radius: 6px;
+        background: color-mix(in srgb, var(--c) 8%, var(--bg)); }
+      .history-node.operator { border-style: dashed; }
+      .history-state { font-weight: 600; color: var(--c); }
+      .history-time, .history-note { color: var(--fg-muted); }
+      .history-note { margin: 2px 0 0; }
+      .history-badge { margin-left: 6px; padding: 0 6px; border: 1px solid var(--border-emphasis); border-radius: 999px;
+        color: var(--fg-muted); font-size: 11px; }
+      details.history-earlier { margin: 8px 0; font-size: 12px; }
       summary { cursor: pointer; color: var(--fg-muted); }
       pre { padding: 16px; border-radius: 6px; background: var(--bg-muted); white-space: pre-wrap; }
       /* Primer "prettylights" syntax colours. */
@@ -925,6 +938,70 @@
         }
       }
 
+      function shortTime(at) {
+        const time = new Date(at);
+        return Number.isNaN(time.getTime()) ? at
+          : time.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+      }
+
+      function historySteps(history) {
+        return history.map((item, index) => {
+          const previous = history[index - 1];
+          const seconds = previous ? Math.round((Date.parse(item.at) - Date.parse(previous.at)) / 1000) : NaN;
+          return {
+            state: item.state,
+            at: item.at,
+            time: shortTime(item.at),
+            note: item.note ?? null,
+            operator: item.source === "dashboard",
+            gap: Number.isFinite(seconds) ? `+${span(Math.max(0, seconds))}` : null,
+            back: previous?.state === "review" && item.state === "implementation" ? "rework"
+              : previous?.state === "blocked" ? "unblocked" : null,
+          };
+        });
+      }
+
+      function historyItem(step, index) {
+        const entry = element("li");
+        if (index > 0) {
+          const gap = element("div", null, "history-gap");
+          if (step.gap) gap.append(element("span", step.gap));
+          if (step.back) gap.append(element("span", `↩ ${step.back}`));
+          entry.append(gap);
+        }
+        const box = element("div", null, `history-node${step.operator ? " operator" : ""}`);
+        box.style.setProperty("--c", `var(--${step.state})`);
+        box.title = [`${step.state} at ${step.at}`, step.operator ? "operator move from the dashboard" : null, step.note]
+          .filter(Boolean).join("\n");
+        const head = element("div");
+        head.append(element("span", step.state, "history-state"), " ", element("span", step.time, "history-time"));
+        if (step.operator) head.append(element("span", "operator", "history-badge"));
+        box.append(head);
+        if (step.note) box.append(element("p", step.note, "history-note"));
+        entry.append(box);
+        return entry;
+      }
+
+      // Long histories fold the older steps into a details element; every step stays in the DOM.
+      const HISTORY_RECENT = 8;
+      function historyFlow(task, expanded) {
+        const steps = historySteps(task.history);
+        const earlier = Math.max(0, steps.length - HISTORY_RECENT);
+        const list = (from, to) => {
+          const items = element("ol", null, "history");
+          items.setAttribute("role", "list");
+          items.start = from + 1;
+          items.append(...steps.slice(from, to).map((step, index) => historyItem(step, from + index)));
+          return items;
+        };
+        if (!earlier) return [list(0, steps.length)];
+        const folded = element("details", null, "history-earlier");
+        folded.dataset.taskId = `${task.id}:history`;
+        folded.open = expanded.has(folded.dataset.taskId);
+        folded.append(element("summary", `Earlier steps (${earlier})`), list(0, earlier));
+        return [folded, list(earlier, steps.length)];
+      }
+
       function taskRow(task, expanded) {
         const node = element("li", null, "task-row");
         node.dataset.taskId = task.id;
@@ -976,16 +1053,8 @@
             element("p", task.feedback.acknowledged_id === task.feedback.id
               ? "Factory acknowledged this direction." : "Awaiting factory acknowledgement.", "muted"));
         }
-        node.append(element("p", `Next: ${task.next_action}`));
-        const items = element("ol", null, "history");
-        for (const item of task.history) {
-          const entry = element("li");
-          entry.append(element("span", item.state, "history-state"),
-            element("span", ` ${item.at}${item.source ? ` (${item.source})` : ""}`, "muted"),
-            ...(item.note ? [`: ${item.note}`] : []));
-          items.append(entry);
-        }
-        node.append(element("h4", `History (${task.history.length})`), items);
+        if (!/^(none\.?)?$/i.test(task.next_action?.trim() ?? "")) node.append(element("p", `Next: ${task.next_action}`));
+        node.append(element("h4", `History (${task.history.length})`), ...historyFlow(task, expanded));
         const more = element("details");
         more.dataset.taskId = `${task.id}:details`;
         more.open = expanded.has(more.dataset.taskId);
