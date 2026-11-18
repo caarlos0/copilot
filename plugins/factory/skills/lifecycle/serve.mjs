@@ -1,6 +1,7 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 import { readFile, readdir, realpath, stat } from "node:fs/promises";
+import { networkInterfaces } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -10,6 +11,20 @@ import { stateDirectories } from "./state-dir.mjs";
 
 const factoryFile = /-factory\.json$/i;
 const maxBody = 16384;
+const tokenPattern = /^[\w.~-]{16,}$/;
+
+const bracket = (host) => (host.includes(":") ? `[${host}]` : host);
+const isWildcard = (host) => host === "0.0.0.0" || host === "::";
+const isLoopback = (host) => host === "localhost" || host === "::1" || /^127\./.test(host);
+
+function lanAddresses() {
+  return Object.values(networkInterfaces()).flat()
+    .filter((entry) => entry && entry.family === "IPv4" && !entry.internal)
+    .map((entry) => entry.address);
+}
+
+const digest = (value) => createHash("sha256").update(value).digest();
+const sameToken = (value, expected) => typeof value === "string" && timingSafeEqual(digest(value), digest(expected));
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -26,10 +41,16 @@ async function main() {
         help: { type: "boolean", short: "h" },
         directory: { type: "string" },
         port: { type: "string", default: "8766" },
+        host: { type: "string", default: "127.0.0.1" },
+        token: { type: "string" },
       },
     }).values;
     if (!/^\d+$/.test(options.port) || Number(options.port) > 65535) {
       throw new Error("--port must be an integer from 0 to 65535.");
+    }
+    options.host = options.host.toLowerCase();
+    if (options.token !== undefined && !tokenPattern.test(options.token)) {
+      throw new Error("--token must be at least 16 characters from A-Z a-z 0-9 . _ ~ -");
     }
   } catch (error) {
     console.error(`${error.message}\nRun with --help for usage.`);
@@ -37,15 +58,20 @@ async function main() {
     return;
   }
   if (options.help) {
-    console.log(`Serve the factory dashboard on 127.0.0.1.
+    console.log(`Serve the factory dashboard on 127.0.0.1 (no token) or on --host (token required).
 
-Usage: node serve.mjs [--directory PATH] [--port PORT]
-       bun serve.mjs [--directory PATH] [--port PORT]
+Usage: node serve.mjs [--directory PATH] [--port PORT] [--host ADDR] [--token TOKEN]
+       bun serve.mjs [--directory PATH] [--port PORT] [--host ADDR] [--token TOKEN]
 
   --directory PATH  Only this state directory (default: both ~/.local/state/copilot-factory
                     and the legacy ~/.local/state/copilot-coordinator, whichever exist;
                     the new one wins on a name clash)
   --port PORT       Listening port (default: 8766; 0 chooses an available port)
+  --host ADDR       Address to bind (default: 127.0.0.1). A non-loopback address, such as
+                    0.0.0.0, makes every request require an access token. The page is plain
+                    HTTP, so the token travels in clear text: use a trusted network only
+  --token TOKEN     Access token for a non-loopback --host (at least 16 characters from
+                    A-Z a-z 0-9 . _ ~ -). Default: a random one. Ignored on loopback
   -h, --help        Show help
 
 Open the printed HTTP URL. It lists every <owner.repo>-factory.json in the directories.
@@ -267,15 +293,69 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
     return write(file, values);
   }
 
+  const requireToken = !isLoopback(options.host);
+  const token = requireToken ? options.token ?? randomBytes(24).toString("base64url") : options.token;
+
+  // The allowed Host values are the server's own bound/advertised addresses, never an
+  // arbitrary client-supplied value, to defend against DNS rebinding.
+  function allowedHosts(port) {
+    const hosts = new Set();
+    const add = (addr) => {
+      hosts.add(`${bracket(addr)}:${port}`);
+      if (port === 80) hosts.add(bracket(addr));
+    };
+    if (isWildcard(options.host)) {
+      add("127.0.0.1");
+      add("localhost");
+      add("::1");
+      for (const addr of lanAddresses()) add(addr);
+    } else {
+      add(options.host);
+      if (isLoopback(options.host)) add("localhost");
+    }
+    return hosts;
+  }
+
+  function cookieToken(header) {
+    for (const part of (header ?? "").split(";")) {
+      const at = part.indexOf("=");
+      if (at !== -1 && part.slice(0, at).trim() === "token") return decodeURIComponent(part.slice(at + 1).trim());
+    }
+    return null;
+  }
+
+  const bearerToken = (header) => /^Bearer (.+)$/.exec(header ?? "")?.[1] ?? null;
+
+  // Validates the request's token. A valid query token (the first page load, or any link
+  // that carries one) gets the token out of the URL and into an HttpOnly cookie instead.
+  function checkToken(request, response, url) {
+    if (!requireToken) return false;
+    const queryToken = url.searchParams.get("token");
+    if (queryToken !== null) {
+      if (!sameToken(queryToken, token)) throw new HttpError(401, "Missing or invalid access token.");
+      if (request.method !== "GET") return false;
+      url.searchParams.delete("token");
+      response.writeHead(302, {
+        "Set-Cookie": `token=${token}; HttpOnly; SameSite=Strict; Path=/`,
+        Location: url.pathname + url.search,
+      });
+      response.end();
+      return true;
+    }
+    if (!sameToken(cookieToken(request.headers.cookie) ?? bearerToken(request.headers.authorization), token)) {
+      throw new HttpError(401, "Missing or invalid access token.");
+    }
+    return false;
+  }
+
   const server = createServer(async (request, response) => {
     try {
       const port = server.address().port;
-      const hosts = [`127.0.0.1:${port}`, `localhost:${port}`];
-      if (port === 80) hosts.push("127.0.0.1", "localhost");
-      if (!hosts.includes(request.headers.host)) {
-        throw new HttpError(403, "Use the printed loopback URL.");
+      if (!allowedHosts(port).has(request.headers.host)) {
+        throw new HttpError(403, "Use the printed URL.");
       }
       const url = new URL(request.url, `http://127.0.0.1:${port}`);
+      if (checkToken(request, response, url)) return;
       if (request.method === "POST" && url.pathname === "/api/move") {
         send(response, 200, await moveTask(request, url.searchParams.get("file")));
       } else if (request.method === "POST" && url.pathname === "/api/settings") {
@@ -314,9 +394,18 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
   });
   await new Promise((ready, reject) => {
     server.once("error", reject);
-    server.listen(Number(options.port), "127.0.0.1", ready);
+    server.listen(Number(options.port), options.host, ready);
   });
-  console.log(`http://127.0.0.1:${server.address().port}/`);
+  const port = server.address().port;
+  if (!requireToken) {
+    console.log(`http://127.0.0.1:${port}/`);
+  } else {
+    const addresses = isWildcard(options.host) ? lanAddresses() : [options.host];
+    for (const addr of addresses.length ? addresses : ["127.0.0.1"]) {
+      console.log(`http://${bracket(addr)}:${port}/?token=${token}`);
+    }
+    console.log("Plain HTTP: the token travels in clear text on this network. Use a trusted network only.");
+  }
   process.on("SIGINT", () => server.close(() => { process.exitCode = 130; }));
   process.on("SIGTERM", () => server.close());
 }

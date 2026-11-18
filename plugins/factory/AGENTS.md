@@ -158,7 +158,12 @@ directory. `serve.mjs` lists and serves the factories of both directories
 (deduped by name, the new one wins) and writes the file where it lives; it
 caches each parsed file and sends an `ETag` (mtime, size, inode) on
 `/api/factory` and `/api/factories`, answering `If-None-Match` with 304, and the
-dashboard skips load and redraw on a 304;
+dashboard skips load and redraw on a 304; it binds `127.0.0.1` with no token
+by default, and a non-loopback `--host` (for reaching the dashboard from
+another device) requires a token (random, or `--token`) on every request,
+checked in constant time, with a cookie set after the first `?token=` load and
+an `Authorization: Bearer` header also accepted, and the bound Host checked to
+block DNS rebinding;
 `migrate.mjs` reads each handoff the same way and writes the factory file to
 the new directory. The lock, events log, waiter PID, archive, and sessions file
 sit beside the factory file, so they follow it. An explicit `--directory` means

@@ -1294,20 +1294,31 @@ skill and run it from that directory:
 node serve.mjs
 ```
 
-Bun can run it too. No package install is needed. It binds to `127.0.0.1`,
-uses port 8766 (`--port PORT` to change it), and prints its URL. It lists the
-factories of both `~/.local/state/copilot-factory/` and the legacy
+Bun can run it too. No package install is needed. It binds to `127.0.0.1` with
+no token, uses port 8766 (`--port PORT` to change it), and prints its URL. It
+lists the factories of both `~/.local/state/copilot-factory/` and the legacy
 `~/.local/state/copilot-coordinator/` (the new one wins on a name clash);
 `--directory PATH` uses only that directory. Do not stop another process to
 take a port. Share the printed HTTP URL, not a `file://` link. Do not open the
 browser for the user.
 
+`--host ADDR` (for example `0.0.0.0`, to reach the dashboard from another
+device such as a phone) binds that address instead. Any non-loopback `--host`
+requires an access token on every request: a random one, unless `--token
+TOKEN` gives one. The startup output lists a ready URL with the token
+(`http://<LAN-IP>:PORT/?token=...`) for each non-internal IPv4 address, and
+warns that plain HTTP carries the token in clear text, so only use this on a
+trusted network. A browser that opens the printed URL gets a cookie and no
+longer needs the token in the address bar; other clients send `Authorization:
+Bearer TOKEN` instead. Only use `--host` when the user asks to reach the
+dashboard from another device.
+
 The page shows the flow with a task count per state, task lists, the read-only
 "Find work" panel, Move and Unblock, settings, and a Cmd+K palette (see
 `AGENTS.md`). It rereads the file every 30 seconds and shows saved state, not
 live worker status. The server accepts writes only from its own origin, with
-JSON, through the shared writer. Do not expose it on a public interface. Do not
-add a polling schedule just for the dashboard.
+JSON, through the shared writer. Do not add a polling schedule just for the
+dashboard.
 
 Use one shared server for all factories. Before you reuse a listener, check
 that it is this server. Do not run it in a worker pane. Stop only a server you
