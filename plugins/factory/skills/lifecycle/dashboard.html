@@ -164,6 +164,10 @@
       .icon-button { display: inline-flex; flex: none; align-items: center; justify-content: center;
         width: 32px; height: 32px; padding: 0; line-height: 1; }
       .icon-button svg { display: block; }
+      #title-pill { display: flex; align-items: stretch; border: 1px solid var(--border); border-radius: 6px; background: var(--btn-bg); }
+      #title-pill h2 { display: flex; align-items: center; padding: 4px 12px; font-weight: 600; overflow-wrap: anywhere; }
+      #open-settings { height: auto; border: 0; border-left: 1px solid var(--border); border-radius: 0 5px 5px 0; }
+      #open-settings:focus-visible { outline-offset: -2px; }
       .settings-form h3 { margin: 24px 0 4px; padding-top: 16px; border-top: 1px solid var(--border); font-size: 14px; }
       .settings-form h3:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
       .settings-form input { display: block; width: 100%; margin-top: 4px; padding: 5px 12px; background: var(--bg); font-weight: 400; }
@@ -282,8 +286,14 @@
     <nav id="factories" aria-label="Factories"></nav>
     <main>
       <div id="title-row">
-        <h2 id="goal"></h2>
-        <button id="open-settings" type="button" aria-label="Settings" title="Settings">&#9881;&#xFE0E;</button>
+        <div id="title-pill">
+          <h2 id="goal"></h2>
+          <button id="open-settings" class="icon-button" type="button" aria-label="Settings" title="Settings">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+              <path d="M4.427 7.427 7.573 10.573a.6.6 0 0 0 .854 0l3.146-3.146A.25.25 0 0 0 11.396 7H4.604a.25.25 0 0 0-.177.427Z"/>
+            </svg>
+          </button>
+        </div>
         <span id="run-status" class="chip" hidden></span>
       </div>
       <p id="discovery-error" role="alert" hidden></p>

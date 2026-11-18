@@ -1633,8 +1633,8 @@ test("the header shows the run status only when the factory is not active", asyn
   assert.equal(ui.get("run-status").textContent, "paused");
 });
 
-test("the cog opens one settings dialog", async (t) => {
-  assert.match(html, /<h2 id="goal"><\/h2>\s*<button id="open-settings"[^>]*aria-label="Settings"[^>]*title="Settings"/);
+test("the chevron beside the factory name opens one settings dialog", async (t) => {
+  assert.match(html, /<div id="title-pill">\s*<h2 id="goal"><\/h2>\s*<button id="open-settings"[^>]*type="button"[^>]*aria-label="Settings"[^>]*title="Settings"/);
   const ui = await dashboard(t);
   await ui.get("open-settings").fire("click");
   assert.equal(ui.get("settings-dialog").open, true);

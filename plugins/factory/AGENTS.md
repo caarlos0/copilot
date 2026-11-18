@@ -144,7 +144,7 @@ workers are safely rebriefed or parked. CLI writes after dashboard feedback need
 `--expected-revision` plus `--ack-feedback` or `--feedback-id`.
 The factory waits on dashboard events even when all workers are blocked.
 Dashboard changes do not stop workers, resume a paused run, or grant authority.
-The cog beside the factory name opens one settings dialog. It edits the optional
+The chevron segment joined to the factory name opens one settings dialog. It edits the optional
 root `budget.max_parallel_workers` (the most workers running at once over all
 roles; absent means no total cap, a new file gets 10), `limits.investigation`
 and `limits.implementation` (integers 1 to 100), and the optional root `lever`
