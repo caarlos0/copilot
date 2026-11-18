@@ -89,6 +89,11 @@ export function entered(task) {
   return task.history.at(-1).at;
 }
 
+export function byRecency(tasks) {
+  const time = (task) => Date.parse(task.history?.at(-1)?.at) || 0;
+  return [...tasks].sort((a, b) => time(b) - time(a) || a.id.localeCompare(b.id));
+}
+
 export function cyclesOf(task) {
   return task.history.filter((item, index) =>
     item.state === "implementation" && task.history[index - 1]?.state === "review").length;

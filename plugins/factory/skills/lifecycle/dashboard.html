@@ -305,7 +305,7 @@
     </div>
     <noscript>Enable JavaScript to read the factory.</noscript>
     <script type="module">
-      import { states, outcomes, artifactName, githubURL, validate, countByState, hopsSince, entered, cyclesOf, operatorStates, operatorOutcomes, unblockState, unblockChoice, nextRun, nextDue } from "./factory-data.mjs";
+      import { states, outcomes, artifactName, githubURL, validate, countByState, hopsSince, entered, byRecency, cyclesOf, operatorStates, operatorOutcomes, unblockState, unblockChoice, nextRun, nextDue } from "./factory-data.mjs";
 
       const SVG = "http://www.w3.org/2000/svg";
       const NODE = { w: 160, h: 110 };
@@ -1114,8 +1114,7 @@
         const expanded = new Set([...list.querySelectorAll("details[open]")].map((node) => node.dataset.taskId));
         const inList = (task) => task.state === state && (!outcome || task.resolution.outcome === outcome);
         const allTasks = snapshot.tasks.filter(inList);
-        const tasks = matchingTasks.filter(inList)
-          .sort((a, b) => Date.parse(entered(a)) - Date.parse(entered(b)));
+        const tasks = byRecency(matchingTasks.filter(inList));
         const title = document.getElementById("detail-title");
         title.textContent = outcome ? `Resolved: ${outcomeTitles[outcome]}` : places[state].title;
         title.append(element("span", String(tasks.length), "counter"));

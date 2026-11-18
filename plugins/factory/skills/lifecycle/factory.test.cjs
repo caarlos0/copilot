@@ -108,6 +108,19 @@ test("moves follow the flow and each move adds history", async (t) => {
   assert.equal(entered(task), task.history.at(-1).at);
 });
 
+test("byRecency sorts newest first, breaks ties by id, and keeps the input", async () => {
+  const { byRecency } = await import("./factory-data.mjs");
+  const at = (id, time) => ({ id, history: time ? [{ at: "2020-01-01T00:00:00Z" }, { at: time }] : [] });
+  const tasks = [
+    at("b", "2026-01-02T00:00:00Z"),
+    at("c", "2026-01-03T00:00:00Z"),
+    at("a", "2026-01-02T00:00:00Z"),
+    at("none", null),
+  ];
+  assert.deepEqual(byRecency(tasks).map((task) => task.id), ["c", "a", "b", "none"]);
+  assert.deepEqual(tasks.map((task) => task.id), ["b", "c", "a", "none"]);
+});
+
 test("a task with a PR can skip initial: created in review, or moved from initial", async (t) => {
   const f = await started(t);
   f.fails(/only with --pr/, "--task", "pr-5", "--title", "Review it", "--issue", issue(5),
