@@ -299,6 +299,12 @@ leave work behind. Treat each finding as unfinished work:
 - `merged-worktree`: a `merged` task's worktree is clean and its HEAD is in the
   default branch. If `created_by_run` is true, remove it with `wt NAME --delete`
   as in "Release panes". Leave a reused worktree (`false`).
+- `worker-missing`: a worker (a task role or a rule worker) has status `running`,
+  but its window is not in the live Rex session. It carries the role, window,
+  pane, worktree, brief, and result. Recover it as in "Recover after a restart".
+- `rex-session-missing`: the recorded `rex_session` is not in `rex ls`. Every
+  running worker is also reported as `worker-missing`. Report the blocker once;
+  never create or rename a session.
 
 Do not report a sweep as clean while `findings` or `errors` is not empty.
 
@@ -938,6 +944,28 @@ Record the Copilot session ID, pane, window, name, brief, result, and worktree
 with `--workers` and `--worktree` right after launch. The worker already runs,
 so the file must hold the planned role with `unknown` status before launch;
 the IDs follow immediately, in the same turn.
+
+### Recover after a restart
+
+A reboot or a closed Rex session leaves workers recorded as `running` with no
+window. Run `reconcile.mjs` at startup and handle each `worker-missing`:
+
+1. If `rex-session-missing` is reported, the factory session is gone. Do not
+   create, select, or rename a session. Report the blocker and stop; the user
+   restores the session, then you sweep again.
+2. If the worker's result is `complete`, it is an `unprocessed-result`: process
+   it as usual.
+3. Otherwise set the worker status to `unknown` with `factory.mjs` and write the
+   planned relaunch to `next_action`, before any launch.
+4. Count the relaunch against `budget.max_parallel_workers` and `limits`. Leave
+   the rest `unknown` and launch them as slots free up.
+5. Reuse the existing worktree. Never run `wt` to create another; keep
+   `created_by_run` unchanged.
+6. Relaunch as in "Launch rules" with the same brief plus one line: "You were
+   restarted: check git status and your result file, then continue." Investigation
+   and rule workers start one-shot from the beginning.
+7. Record the new session, pane, and window with `running` status, then re-arm
+   the waiter.
 
 ## Receive worker events
 

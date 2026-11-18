@@ -31,17 +31,21 @@ function isAncestor(cwd, branch) {
   }
 }
 
-function liveWindows(session) {
-  const out = execFileSync("rex", ["window", "ls", "-s", session, "--json"], {
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  return JSON.parse(out).windows.map((window) => window.window_id);
+const rexJSON = (...args) => JSON.parse(execFileSync("rex", [...args, "--json"], {
+  encoding: "utf8",
+  stdio: ["ignore", "pipe", "pipe"],
+}));
+
+// A gone session makes `rex window ls` fail, so ask for the session list first.
+function liveState(session) {
+  const sessions = rexJSON("ls").sessions.map((s) => s.session_id);
+  if (!sessions.some((id) => sameId(id, session))) return { sessionGone: true, windows: [] };
+  return { sessionGone: false, windows: rexJSON("window", "ls", "-s", session).windows.map((w) => w.window_id) };
 }
 
 // Rex may record short IDs; a short ID is the tail of the full one.
-const bare = (id) => id.replace(/^window:/, "");
-const sameWindow = (a, b) => bare(a).endsWith(bare(b)) || bare(b).endsWith(bare(a));
+const bare = (id) => id.replace(/^\w+:/, "");
+const sameId = (a, b) => bare(a).endsWith(bare(b)) || bare(b).endsWith(bare(a));
 
 async function reconcile(file, defaultBranch = "main") {
   const factory = JSON.parse(await readFile(file, "utf8"));
@@ -55,10 +59,37 @@ async function reconcile(file, defaultBranch = "main") {
     findings.push({ kind: "no-waiter", status: factory.status ?? null, open: open.length });
   }
 
+  // One Rex read per sweep, and only when a check needs it. After a Rex failure, null.
+  let live;
+  const rex = () => {
+    if (live === undefined) {
+      try {
+        live = factory.rex_session ? liveState(factory.rex_session) : null;
+      } catch (error) {
+        errors.push(`rex: ${error.message.split("\n")[0]}`);
+        live = null;
+      }
+    }
+    return live;
+  };
+  const openWindows = () => rex()?.windows ?? [];
+  const missing = [];
+  const checkMissing = (worker, finding) => {
+    if (worker?.status !== "running" || !rex()) return;
+    if (!worker.window || !openWindows().some((id) => sameId(id, worker.window))) {
+      missing.push({
+        ...finding,
+        window: worker.window ?? null,
+        pane: worker.pane ?? null,
+        brief: worker.brief ?? null,
+        result: worker.result ?? null,
+      });
+    }
+  };
+
   for (const task of open) {
     for (const [role, worker] of Object.entries(task.workers ?? {})) {
-      if (!worker?.result) continue;
-      const result = await readJSON(join(directory, worker.result));
+      const result = worker?.result ? await readJSON(join(directory, worker.result)) : null;
       if (result?.outcome === "complete" && Date.parse(result.updated_at) > Date.parse(task.updated_at)) {
         findings.push({
           kind: "unprocessed-result",
@@ -68,6 +99,8 @@ async function reconcile(file, defaultBranch = "main") {
           result: worker.result,
           head: result.head ?? null,
         });
+      } else {
+        checkMissing(worker, { kind: "worker-missing", task: task.id, role, worktree: task.worktree?.path ?? null });
       }
     }
 
@@ -106,24 +139,10 @@ async function reconcile(file, defaultBranch = "main") {
     }
   }
 
-  // One Rex read per sweep, and only when a check needs it.
-  let windows;
-  const openWindows = () => {
-    if (windows === undefined) {
-      try {
-        windows = factory.rex_session ? liveWindows(factory.rex_session) : [];
-      } catch (error) {
-        errors.push(`rex: ${error.message.split("\n")[0]}`);
-        windows = [];
-      }
-    }
-    return windows;
-  };
-
   if (resolved.some((task) => Object.values(task.workers ?? {}).some((w) => w?.window))) {
     for (const task of resolved) {
       for (const [role, worker] of Object.entries(task.workers ?? {})) {
-        const window = openWindows().find((id) => worker?.window && sameWindow(id, worker.window));
+        const window = openWindows().find((id) => worker?.window && sameId(id, worker.window));
         if (window) findings.push({ kind: "open-window", task: task.id, role, window });
       }
     }
@@ -132,18 +151,24 @@ async function reconcile(file, defaultBranch = "main") {
   // A rule worker is finished when its result is complete and newer than the rule's last run stamp.
   for (const rule of factory.rules ?? []) {
     const worker = rule.worker;
-    if (!worker?.result) continue;
-    const file = join(directory, worker.result);
-    const result = await readJSON(file);
-    if (!result) continue;
-    const at = Date.parse(result.updated_at) || (await stat(file)).mtimeMs;
-    const finished = result.outcome === "complete" && (!rule.last_run_at || at > Date.parse(rule.last_run_at));
-    if (!finished) continue;
-    const window = worker.window ? openWindows().find((id) => sameWindow(id, worker.window)) : undefined;
+    const file = worker?.result ? join(directory, worker.result) : null;
+    const result = file ? await readJSON(file) : null;
+    const at = result && (Date.parse(result.updated_at) || (await stat(file)).mtimeMs);
+    const finished = result?.outcome === "complete" && (!rule.last_run_at || at > Date.parse(rule.last_run_at));
+    if (!finished) {
+      checkMissing(worker, { kind: "worker-missing", rule: rule.id, role: "rule", worktree: null });
+      continue;
+    }
+    const window = worker.window ? openWindows().find((id) => sameId(id, worker.window)) : undefined;
     if (window || worker.status === "running") {
       findings.push({ kind: "rule-worker-done", rule: rule.id, window: window ?? null, result: worker.result });
     }
   }
+
+  if (missing.length > 0 && rex()?.sessionGone) {
+    findings.push({ kind: "rex-session-missing", session: factory.rex_session, workers: missing.length });
+  }
+  findings.push(...missing);
 
   return { findings, errors };
 }

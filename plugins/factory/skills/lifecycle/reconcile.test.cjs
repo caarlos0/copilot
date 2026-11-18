@@ -42,7 +42,7 @@ async function fixture(t, rex) {
   return {
     directory, repo, file,
     async run(tasks, { status = "active", waiter = process.pid, rules } = {}) {
-      await writeFile(file, JSON.stringify({ rex_session: "work", status, tasks, rules }));
+      await writeFile(file, JSON.stringify({ rex_session: "session:work", status, tasks, rules }));
       const pidFile = join(directory, "owner.repo-factory-waiter.pid");
       if (waiter === null) await rm(pidFile, { force: true });
       else await writeFile(pidFile, `${waiter}\n`);
@@ -56,7 +56,14 @@ async function fixture(t, rex) {
   };
 }
 
-const fakeRex = `#!/bin/sh\necho '{"windows":[{"window_id":"${window}"}]}'\n`;
+const session = "session:01a1e7a3-fa38-7cc9-b339-f6c5afbd626c";
+const rexScript = (sessions) => `#!/bin/sh
+case "$1" in
+  ls) echo '{"sessions":[${sessions.map((id) => `{"session_id":"${id}"}`)}]}' ;;
+  *) echo '{"windows":[{"window_id":"${window}"}]}' ;;
+esac
+`;
+const fakeRex = rexScript(["session:work"]);
 
 test("reports a complete result newer than its task, a branch ahead, and a window of a resolved task", async (t) => {
   const f = await fixture(t, fakeRex);
@@ -138,9 +145,9 @@ test("flags a finished rule worker whose window is open or whose status is still
     rule("open", { status: "closed", window: "a621-95363a2bc34f", result: "open-result.json" }),
     rule("closed", { status: "closed", window: "window:other-id", result: "closed-result.json" }),
     rule("fresh", { status: "running", window, result: "fresh-result.json" }),
-    rule("working", { status: "running", result: "working-result.json" }),
-    rule("working-first", { status: "running", result: "working-result.json" }, null),
-    rule("missing", { status: "running", result: "none-result.json" }),
+    rule("working", { status: "running", window, result: "working-result.json" }),
+    rule("working-first", { status: "running", window, result: "working-result.json" }, null),
+    rule("missing", { status: "running", window, result: "none-result.json" }),
     rule("cleared", null),
   ];
   const { findings, errors } = await f.run([], { rules });
@@ -182,4 +189,45 @@ test("reports no-waiter while the run is active or a task is open, and no waiter
   assert.deepEqual(await kinds(open, { status: "paused", waiter: null }), ["no-waiter"]);
   assert.deepEqual(await kinds(open), []);
   assert.deepEqual(await kinds(done, { status: "finished", waiter: null }), []);
+});
+
+test("flags a running worker whose window is gone, for tasks and rules", async (t) => {
+  const f = await fixture(t, fakeRex);
+  const worker = (extra) => ({
+    status: "running", pane: "block:p1", brief: "b.md", result: "none.json", window: "window:gone", ...extra,
+  });
+  await writeFile(join(f.directory, "r.json"), JSON.stringify({ outcome: "complete", updated_at: "2026-05-01T13:00:00Z" }));
+  const worktree = { path: join(f.directory, "wt"), created_by_run: true };
+  const { findings, errors } = await f.run([
+    task("lost", "implementation", { workers: { implementation: worker({ result: "lost.json" }) }, worktree }),
+    task("alive", "implementation", { workers: { implementation: worker({ window }) } }),
+    task("unplaced", "investigation", { workers: { investigation: worker({ window: null, pane: null, result: "none.json" }) } }),
+    task("finished", "investigation", { workers: { investigation: worker({ result: "r.json" }) } }),
+    task("closed", "implementation", { workers: { implementation: worker({ status: "closed" }) } }),
+  ], { rules: [{ id: "scan", description: "scan", kind: "backlog", enabled: true, last_run_at: null, worker: worker({ result: "scan.json" }) }] });
+  assert.deepEqual(errors.filter((e) => !/worktree/.test(e)), []);
+  assert.deepEqual(findings.filter(({ kind }) => kind !== "unprocessed-result"), [
+    { kind: "worker-missing", task: "lost", role: "implementation", worktree: worktree.path,
+      window: "window:gone", pane: "block:p1", brief: "b.md", result: "lost.json" },
+    { kind: "worker-missing", task: "unplaced", role: "investigation", worktree: null,
+      window: null, pane: null, brief: "b.md", result: "none.json" },
+    { kind: "worker-missing", rule: "scan", role: "rule", worktree: null,
+      window: "window:gone", pane: "block:p1", brief: "b.md", result: "scan.json" },
+  ]);
+  assert.deepEqual(findings.filter(({ kind }) => kind === "unprocessed-result").map((x) => x.task), ["finished"]);
+});
+
+test("reports a gone Rex session once, with every running worker missing", async (t) => {
+  const f = await fixture(t, rexScript(["session:other"]));
+  const running = { status: "running", window, pane: "block:p1", brief: "b.md", result: "r.json" };
+  const { findings, errors } = await f.run([
+    task("a", "implementation", { workers: { implementation: running } }),
+    task("b", "investigation", { workers: { investigation: running } }),
+  ]);
+  assert.deepEqual(errors, []);
+  assert.deepEqual(findings.map(({ kind, task, workers }) => ({ kind, task, workers })), [
+    { kind: "rex-session-missing", task: undefined, workers: 2 },
+    { kind: "worker-missing", task: "a", workers: undefined },
+    { kind: "worker-missing", task: "b", workers: undefined },
+  ]);
 });

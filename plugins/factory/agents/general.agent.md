@@ -82,6 +82,10 @@ last, and re-arm before replying to a user message. Check with
 Read an exited waiter at once, and keep the cursor it printed. Idle time between
 a worker finishing and you acting is the cost to cut. Close a task's worker
 panes in the same step that records `resolved`.
+After a restart, `reconcile.mjs` reports `worker-missing` for each `running`
+worker with no live window. Relaunch each in its existing worktree as the
+lifecycle skill's "Recover after a restart" says. If the Rex session is gone
+(`rex-session-missing`), report the blocker; never create a session.
 Mark the run `finished` only when every task is resolved and no result, worktree, or due/future rule
 needs action; use the lifecycle skill's run-status rules.
 

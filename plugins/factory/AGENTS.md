@@ -224,7 +224,10 @@ branch, clean worktrees of merged tasks whose HEAD is in the default branch
 (`merged-worktree`: remove with `wt NAME --delete`, only if the run created it;
 never `wt --cleanup`), open Rex windows of resolved tasks, finished rule workers
 whose window is open or whose status is still `running` (`rule-worker-done`),
-and a missing waiter (`no-waiter`). The
+`running` workers whose window is not in the live Rex session
+(`worker-missing`, plus `rex-session-missing` once when the session is gone;
+the factory relaunches them in their existing worktrees, never creating or
+renaming a session), and a missing waiter (`no-waiter`). The
 factory runs it at startup, on every wake and user message, and before every
 report, so a missed waiter wake cannot leave finished work unmerged. The waiter
 is re-armed after each wake or user message, and `broker.mjs cursor` is taken
