@@ -65,6 +65,23 @@ and `rex` and `jq` exist. Keep `--feature-session-naming=false`: the factory
 never renames a Rex session. The user-level dotfiles hook does the same, so
 with both installed the context appears twice; remove one.
 
+`hooks.json` also ships one `agentStop` hook, `skills/lifecycle/stop-hook.mjs`.
+It blocks the end of a coordinator turn (`decision: "block"` with a `reason` the
+model reads as its next prompt) when the run is not `finished` and either no
+waiter is armed (the same check as `broker.mjs armed`) or `reconcile.mjs`
+reports findings. A missing waiter blocks every time; findings block once per
+turn (`stop_hook_active` allows the next stop), because some findings need the
+user. Copilot ends the turn after 8 consecutive blocks. The hook cannot arm the
+waiter or wake an idle agent; it only forces the model to do it. It runs in
+every session of every user, so it is gated: it does nothing unless
+`FACTORY_COORDINATOR=1`, and the coordinator launch must set that variable
+(the hook payload has no agent name, and agent-frontmatter hooks resolve paths
+from the repository root, so plugin-root expansion there is unverified). The
+factory file comes from `FACTORY_FILE`, else `<owner.repo>-factory.json` from the
+`origin` remote of the session cwd, in the state directory; with no file the
+hook allows. It also allows on any error, a bad payload, or a reconcile
+timeout (15 seconds).
+
 Workers start with their brief in the launch command
 (`copilot ... --model claude-sonnet-5.5 -i 'Read <brief> and do it.'`), so there is no fixed sleep and no
 `rex send` for the first message; `rex send` is only for follow-ups to idle
@@ -292,4 +309,4 @@ or scheduled rule remains actionable.
 Run `node --test plugins/factory/skills/lifecycle/*.test.cjs` from the
 repository root for factory data, writer, migration, server, dashboard, and
 result notification changes. Run `node --test plugins/factory/*.test.cjs` for
-the session hook.
+the session and stop hooks.

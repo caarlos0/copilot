@@ -87,6 +87,9 @@ completion, and a user message. Never end a turn after a notification without
 re-arming. Arm it FIRST in a turn that takes a long step (tests, merges), not
 last, and re-arm before replying to a user message. Check with
 `broker.mjs armed FACTORY_FILE` (exit 1 means none; a second `wait` is refused).
+When `FACTORY_COORDINATOR=1`, a Stop hook blocks the end of your turn while no
+waiter is armed or `reconcile.mjs` has findings; arm the waiter or act on the
+findings, then end the turn.
 Read an exited waiter at once, and keep the cursor it printed. Idle time between
 a worker finishing and you acting is the cost to cut. Close a task's worker
 panes in the same step that records `resolved`.
