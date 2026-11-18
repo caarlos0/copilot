@@ -57,6 +57,9 @@ workers. Implementation worktrees come from the local default branch:
 local `HEAD`, never from `origin`, so unpushed local commits are kept. The helper
 reads `worktreePathTemplate` from `$COPILOT_HOME/settings.json` and prints the
 path and branch that the factory records. It needs no other tool.
+`skills/lifecycle/worker-name.mjs` prints each worker's `--name` as
+`<Verb> <ref>: <summary>` (see "Launch rules" in the lifecycle skill); the
+factory never formats a name by hand.
 
 `hooks.json` ships a `sessionStart` hook that gives every session the Rex
 terminal context (`rex __internal session-start`). It runs on every session

@@ -124,12 +124,13 @@ in. Do not create, select, or rename a Rex session.
    session ID there. If neither works, stop and report the blocker.
 2. Save it once with `--rex-session "$REX_SESSION"`.
 3. Open each worker as a background tab in that session:
-   `rex window new -s "$REX_SESSION" --focus=false --json 'TITLE' -- COMMAND`.
+   `rex window new -s "$REX_SESSION" --focus=false --json 'NAME' -- COMMAND`,
+   where NAME is the worker name from "Launch rules".
    Record the returned window and pane IDs. Use a split only on request.
 4. After a restart, read `rex_session` and check that the session still
    exists with `rex ls --json` before you use its panes.
 
-Never run `rex session rename` or `rex new`. Task titles name worker Copilot
+Never run `rex session rename` or `rex new`. Worker names name worker Copilot
 sessions and Rex tabs only. Put this rule in every worker's startup
 instructions.
 
@@ -856,7 +857,8 @@ edits, commits, or pushes. Use a new worktree for every task:
 
 ```sh
 WT=$(node /abs/path/to/worktree.mjs create fix-login)   # run in the main checkout
-rex window new -c "$(echo "$WT" | jq -r .path)" -- copilot --agent coding:caarlos0 --model claude-sonnet-5.5 --name 'Fix login redirect' --yolo --sandbox -i 'Read /abs/brief.md and do it.'
+NAME=$(node /abs/path/to/worker-name.mjs --role implementation --ref '#42' --summary 'Fix login redirect')
+rex window new -c "$(echo "$WT" | jq -r .path)" -- copilot --agent coding:caarlos0 --model claude-sonnet-5.5 --name "$NAME" --yolo --sandbox -i 'Read /abs/brief.md and do it.'
 ```
 
 `worktree.mjs` (next to this file) is a dependency-free helper. It prints JSON
@@ -871,8 +873,11 @@ default branch before you launch. If a worktree for the branch exists, it is
 reused and `created_by_run` is false. For a task that already has a PR, use
 `worktree.mjs create NAME --pr N`; record `created_by_run` from its output.
 `worktree.mjs create NAME -- CMD...` runs CMD in the worktree instead, for use
-inside a Rex window you opened yourself. Keep `--sandbox`: `--yolo` skips tool permission
-prompts, not sandbox restrictions. Omit `--autopilot` unless the user asks.
+inside a Rex window you opened yourself. `worker-name.mjs` (next to this file)
+is a dependency-free helper that prints the worker's `--name` (see "Launch
+rules"); never format a name by hand. Keep `--sandbox`: `--yolo` skips tool
+permission prompts, not sandbox restrictions. Omit `--autopilot` unless the
+user asks.
 
 It reproduces the problem, makes the smallest complete change, validates it,
 and opens the PR when authorized. For iterative performance or quality work,
@@ -992,16 +997,35 @@ claude-sonnet-5.5`. The hook sees only the command line,
 so a launcher script hides what it runs: the script must enforce the same
 flags itself.
 
-Open the tab in the factory's session with the task title as its label. Verify
+Name every worker `<Verb> <ref>: <short summary>`. Do not write it by hand;
+run `worker-name.mjs --role ROLE --ref REF --summary TEXT` and pass its output
+as one quoted argument: `--name "$NAME"`. The Rex tab label is the same text.
+
+- Verb by role: `Investigate` (investigation), `Implement` (implementation),
+  `Review` (review), `Find work` (backlog rule), `Improve` (improve rule).
+- Ref: `#N` for the task's issue, or the PR number for a review (and for
+  implementation when the task has a PR and no issue); `owner/repo#N` for
+  another repository. A task without an issue or PR uses its task ID; a rule
+  worker uses the rule ID.
+- Summary: the issue or PR title, or a short summary. The whole name is at most
+  100 characters, the Copilot limit. The helper ends a long summary with `…`
+  and never cuts the verb or the ref. It strips quotes and newlines.
+
+```sh
+NAME=$(node /abs/path/to/worker-name.mjs --role review --ref '#57' --summary 'Add retry to pr-watch')
+# Review #57: Add retry to pr-watch
+# Investigate #12: Login redirect loops on expired sessions
+# Implement favicon: Add a dashboard favicon   (task ID, no issue)
+```
+
+Open the tab in the factory's session with the worker name as its label. Verify
 the visible label. Pass the first message in the launch command with
 `-i`/`--interactive`: `copilot ... --model claude-sonnet-5.5 -i 'Read <absolute brief path> and do it.'`.
 It starts the interactive session and runs the prompt at once. Use no fixed
 sleep, no wait for the input prompt, and no `rex send` for the first message.
 Use `rex send` only for follow-ups to an idle worker you created. Run the launch
 command in the foreground of the new tab; a backgrounded launch once lost the
-brief. Pass `--name` as one quoted argument, up to 100 characters. Prefer
-the issue title for investigation and implementation and the PR title for
-review. Never type into a pane you did not create or whose recorded identity no
+brief. Never type into a pane you did not create or whose recorded identity no
 longer matches. Pane IDs can be reused: verify identity first. If a launch
 fails, inspect new panes once before you retry.
 
