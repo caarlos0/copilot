@@ -56,6 +56,13 @@ initial -> investigation -> implementation <-> review -> resolved
                  any open state <-> blocked
 ```
 
+Investigation never implements. It only validates and hydrates a task before
+work starts. Every task that needs work, including implementation work the user
+specified, goes `initial` -> `investigation` -> `implementation`. Only a task
+with an existing PR may go straight to `review`. Only an implementation
+worker, in its own worktree, changes anything. Never run implementation work
+under an `investigation` worker record. See "Investigation worker".
+
 ## Use Lever by default
 
 Install `lever@lever` from `github/lever`. Use the installed skills and their
@@ -399,7 +406,8 @@ ending the turn:
    worktree unreconciled. Send a follow-up to every `blocked` task or waiting
    worker that has a worker-fixable cause ("Never park a worker-fixable task").
 2. Fill available worker slots with runnable queued tasks, including every
-   `initial` task. Continue until no queued task can use a free slot or the
+   `initial` task, which gets a read-only investigation worker first (never an
+   implementer). Continue until no queued task can use a free slot or the
    applicable worker, spend, or authority limit is reached.
 3. When the task queue is empty and worker capacity is free, run each enabled
    `search` and `backlog` rule once in this idle sweep, even if its `every`
@@ -540,8 +548,8 @@ work". It changes nothing without the user's answer. Its worker follows
 | State | Meaning | Worker |
 | --- | --- | --- |
 | `initial` | Task is recorded. Nothing started. | None |
-| `investigation` | One worker adds context to the issue, or to its result when there is no issue, then quits. | one-shot |
-| `implementation` | One worker fixes it in a new worktree until a PR is open or the task is done by other means. It then handles review findings, CI, conflicts, and mergeability. | continuous |
+| `investigation` | One read-only worker validates and hydrates the task: it checks the claim, adds context to the issue, or to its result when there is no issue, and sets a verdict. It changes nothing and quits. | one-shot, primary checkout, no worktree |
+| `implementation` | One worker fixes it in a new worktree until a PR is open or the task is done by other means. It then handles review findings, CI, conflicts, and mergeability. All edits, commits, and pushes happen here, never in investigation. | continuous |
 | `review` | The PR, or the local branch `head` of a task without an issue, is being checked for landing. A review worker runs when required by the task, repo, or spend policy. | continuous, if enabled |
 | `blocked` | A user decision or an outside action is needed. `blocker.from` records where. Never a worker-fixable cause: see "Never park a worker-fixable task". | none new |
 | `resolved` | Done, with an outcome: `merged`, `already-fixed`, `duplicate`, `invalid`, `cancelled`, or `completed`. | none |
@@ -562,7 +570,7 @@ missing feedback ID after the task has received dashboard feedback.
 
 | Result | Move |
 | --- | --- |
-| Investigation `verdict: implement` | `implementation` |
+| Investigation `verdict: implement` | `implementation`; the worktree and continuous implementation worker start now, not before |
 | Investigation `already-fixed`, `duplicate`, or `invalid` | `resolved` with that outcome |
 | Investigation `blocked`, or a missing issue fact only the user knows | `blocked` |
 | Implementation has a PR and a head | `review`, with `--pr` and `--head`; start a reviewer only when enabled |
@@ -639,6 +647,14 @@ before the first edit. If either differs from the brief, the worker stops,
 writes a `blocked` result, and does not edit. Every brief also has this
 standing line: "Read `plugins/factory/AGENTS.md` before the first edit." Skip
 that line only when the repo has no such file.
+
+An investigation brief has one more hard line, in these words: "You are an
+investigation worker. Do not change anything. You are forbidden to write
+anywhere except the result path and `$TMPDIR`: no product file edits, no
+commits, no pushes, no PR, no branch, no worktree, no fix." It also names the
+checkout, which is the primary checkout, read-only, and says the only output
+is the result file, plus issue comments when the brief allows them. See
+"Investigation worker".
 
 Save the brief as `<project>-<task>-<role>-brief.md` and tell the worker to
 save `<project>-<task>-<role>-result.json` in the state directory. Before
@@ -744,16 +760,39 @@ Tell every worker:
 
 ### Investigation worker
 
-One-shot. It reads the issue, reproduces or checks the claim against the
-current code (use the `issue-validator` skill), and checks related PRs. It runs
-read-only in the primary checkout, never creates a worktree, and may comment on
-the issue only if the brief allows it. It adds the context to the issue, saves
-its result with a `verdict`, and returns idle. No watchers. After you verify
-the result, close its pane.
+One-shot and read-only. Its only job is to validate and hydrate the task before
+anyone works on it. It never implements. It reads the issue, reproduces or
+checks the claim against the current code (use the `issue-validator` skill),
+checks related PRs, adds context, and sets a `verdict`. It runs in the primary
+checkout and may comment on the issue only if the brief allows it.
+
+It never edits product files, commits, pushes, opens a PR, creates a worktree
+or a branch, or fixes anything. It writes only its result path and `$TMPDIR`.
+Its brief carries the hard line from "Brief the workers". If the worker finds
+that the fix is small, it says so in the result and still does not make it: the
+fix is the implementation worker's job. Record the worker with
+`mode: "one-shot"`, no worktree, and no `wt`. `factory.mjs` refuses an
+investigation worker with `mode: "continuous"` or a `worktree`, and refuses a
+worktree on a task in `investigation`.
+
+The worker saves its result with a `verdict` and returns idle. No watchers.
+After you verify the result, close its pane. A `verdict: implement` moves the
+task to `implementation`; only then do you create the worktree and launch the
+implementation worker.
+
+**Fast path.** When the user gives a clear, small task, do not skip
+investigation and do not start an implementer. Run one quick read-only
+investigation worker. It confirms the task is still valid, hydrates the brief
+(files, acceptance criteria, related PRs, checks to run), and returns
+`verdict: implement`. The implementation worker then starts from that result.
+The same brief rules apply. A task is never launched into a worktree from
+`initial`.
 
 ### Implementation worker
 
-Continuous. Use a new worktree for every task:
+Continuous. Launch it only after the task is in `implementation`, following an
+investigation result with `verdict: implement`. It is the only worker that
+edits, commits, or pushes. Use a new worktree for every task:
 
 ```sh
 wt fix-login -- copilot --agent coding:caarlos0 --name 'Fix login redirect' --yolo --sandbox -i 'Read /abs/brief.md and do it.'

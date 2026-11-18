@@ -148,6 +148,18 @@ function taskPatch(task, values) {
   return patch;
 }
 
+// Investigation only validates and hydrates a task, so it is read-only and one-shot.
+// Checked on writes only, so old files with other records stay readable.
+function checkInvestigation(patch, state) {
+  const worker = patch.workers?.investigation;
+  if (worker?.mode === "continuous" || (worker && Object.hasOwn(worker, "worktree"))) {
+    throw new Error("An investigation worker is one-shot and read-only: no continuous mode, no worktree. Implementation work goes to an implementation worker.");
+  }
+  if (state === "investigation" && patch.worktree != null) {
+    throw new Error("A task in investigation has no worktree. Move it to implementation first.");
+  }
+}
+
 // The state is already saved, so a failed notification only warns.
 async function announce(file, source, events) {
   for (const event of events) {
@@ -297,6 +309,7 @@ async function writeFactory(file, values, operator, source) {
       }
     }
     const patch = taskPatch(task, values);
+    checkInvestigation(patch, task.state);
     task = merge(task, { ...patch, updated_at: at, revision: revision + 1 });
     for (const [role, worker] of Object.entries(patch.workers ?? {})) {
       track(worker?.session, role, { task: task.id });
@@ -484,6 +497,8 @@ Task options:
   --workers JSON        Merge worker records by role, e.g.
                         '{"implementation":{"status":"running","pane":"block:id"}}'; a null role clears it
   --worktree JSON       {"path":"...","created_by_run":true}, or null
+                        Refused in investigation; an investigation worker is one-shot and
+                        read-only (no continuous mode, no worktree)
   --merge JSON          Merge the head-specific decision ({authorized_by,source,evidence,
                         authorized_at,head,requested_at}), or null to clear it
                         Source: lever; legacy comment/factory-session records remain readable

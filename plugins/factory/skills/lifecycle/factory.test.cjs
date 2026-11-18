@@ -260,6 +260,21 @@ test("a new head clears the merge authorization and a stale one is rejected", as
   f.fails(/merge.source/, "--task", "issue-1", "--merge", JSON.stringify({ ...merge, head: sha("b"), source: "worker-session" }));
 });
 
+test("investigation is one-shot and read-only", async (t) => {
+  const f = await started(t);
+  const worktree = JSON.stringify({ path: "/tmp/wt", created_by_run: true });
+  f.ok("--task", "issue-1", "--state", "investigation");
+  f.fails(/one-shot and read-only/, "--task", "issue-1", "--workers",
+    JSON.stringify({ investigation: { status: "unknown", mode: "continuous" } }));
+  f.fails(/one-shot and read-only/, "--task", "issue-1", "--workers",
+    JSON.stringify({ investigation: { status: "unknown", worktree: "/tmp/wt" } }));
+  f.fails(/no worktree/, "--task", "issue-1", "--worktree", worktree);
+  f.ok("--task", "issue-1", "--workers",
+    JSON.stringify({ investigation: { status: "unknown", mode: "one-shot" } }));
+  f.ok("--task", "issue-1", "--state", "implementation", "--worktree", worktree,
+    "--workers", JSON.stringify({ implementation: { status: "unknown", mode: "continuous" } }));
+});
+
 test("workers merge by role and a null role clears it", async (t) => {
   const f = await started(t);
   f.ok("--task", "issue-1", "--workers", JSON.stringify({ investigation: { status: "running", pane: "p1" } }));
