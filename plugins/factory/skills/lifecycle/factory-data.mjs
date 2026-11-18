@@ -68,6 +68,19 @@ export function githubURL(value, field = "link") {
   return url;
 }
 
+// Issues first, then pull requests, each by ascending number.
+export function sortReferences(hrefs) {
+  const key = (href) => {
+    const [, , , kind, number] = githubURL(href).pathname.split("/");
+    return [kind === "issues" ? 0 : 1, Number(number)];
+  };
+  return [...hrefs].sort((a, b) => {
+    const [kindA, numberA] = key(a);
+    const [kindB, numberB] = key(b);
+    return kindA - kindB || numberA - numberB;
+  });
+}
+
 export function githubResourceURL(value, field = "link") {
   const url = githubURL(value, field);
   return `${url.origin}${url.pathname}`;

@@ -357,7 +357,7 @@
     </div>
     <noscript>Enable JavaScript to read the factory.</noscript>
     <script type="module">
-      import { states, outcomes, artifactName, githubURL, validate, countByState, isIdle, hopsSince, entered, byRecency, rankTasks, cyclesOf, operatorStates, operatorOutcomes, unblockState, unblockChoice, stripRecommended, nextRun, nextDue, leverSpends, leverAutonomyCaps, maxParallelWorkers, maxRoleLimit, digitIndex } from "./factory-data.mjs";
+      import { states, outcomes, artifactName, githubURL, validate, countByState, isIdle, hopsSince, entered, byRecency, rankTasks, sortReferences, cyclesOf, operatorStates, operatorOutcomes, unblockState, unblockChoice, stripRecommended, nextRun, nextDue, leverSpends, leverAutonomyCaps, maxParallelWorkers, maxRoleLimit, digitIndex } from "./factory-data.mjs";
 
       const SVG = "http://www.w3.org/2000/svg";
       const NODE = { w: 160, h: 110 };
@@ -759,7 +759,7 @@
 
       function glyph(kind) {
         const [label, paths] = GLYPHS[kind];
-        const node = svg("svg", { viewBox: "0 0 16 16", width: 16, height: 16, role: "img", "aria-label": label, title: label });
+        const node = svg("svg", { viewBox: "0 0 16 16", width: 14, height: 14, role: "img", "aria-label": label, title: label });
         node.append(...paths.map((d) => svg("path", { d })));
         return node;
       }
@@ -1387,7 +1387,7 @@
         const references = new Set([...(task.issue ? [task.issue] : []), ...(task.pr ? [task.pr] : []), ...task.links]);
         if (references.size) {
           const links = element("p", null, "links");
-          for (const href of references) links.append(reference(href));
+          for (const href of sortReferences(references)) links.append(reference(href));
           node.append(links);
         }
         const chips = element("p", null, "chips");

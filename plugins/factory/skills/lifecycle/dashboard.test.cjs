@@ -898,6 +898,15 @@ test("reference links get an issue or pull request glyph and keep the #N text", 
   assert.notEqual(issue.children[0].children[0].d, pull.children[0].children[0].d);
 });
 
+test("a row lists issues first, then pull requests, each by ascending number, without duplicates", async (t) => {
+  const ui = await dashboard(t);
+  const url = (kind, number) => `https://github.com/owner/repo/${kind}/${number}`;
+  const task = { ...example.tasks[0], issue: url("issues", 9), pr: url("pull", 30), links: [url("pull", 4), url("issues", 40), url("issues", 9)] };
+  const row = ui.run(`taskRow(${JSON.stringify(task)}, new Set())`);
+  assert.deepEqual(row.querySelector(".links").children.map((node) => node.href), [url("issues", 9), url("issues", 40), url("pull", 4), url("pull", 30)]);
+  assert.match(html, /width: 14, height: 14, role: "img"/);
+});
+
 test("a row without references has no links line", async (t) => {
   const ui = await dashboard(t);
   const task = { ...example.tasks[0], issue: null, pr: null, links: [] };

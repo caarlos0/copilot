@@ -62,6 +62,14 @@ test("the shipped example is a valid factory", async () => {
   validate(example);
 });
 
+test("sortReferences puts issues before pull requests, each by ascending number", async () => {
+  const { sortReferences } = await import("./factory-data.mjs");
+  const url = (kind, number) => `https://github.com/owner/repo/${kind}/${number}`;
+  const input = [url("pull", 5), url("issues", 20), url("pull", 12), url("issues", 3), url("pull", 2)];
+  assert.deepEqual(sortReferences(input), [url("issues", 3), url("issues", 20), url("pull", 2), url("pull", 5), url("pull", 12)]);
+  assert.equal(input[0], url("pull", 5), "The input must stay unchanged.");
+});
+
 test("rankTasks matches identifying fields only and ranks id, then title, then other fields", async () => {
   const { rankTasks, byRecency } = await import("./factory-data.mjs");
   const ids = (query, limit) => rankTasks(example.tasks, query, limit).map((task) => task.id);
