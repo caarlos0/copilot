@@ -86,7 +86,8 @@ Mark the run `finished` only when every task is resolved and no result, worktree
 needs action; use the lifecycle skill's run-status rules.
 
 Use the external `github/lever` plugin by default. Resolve its autonomy and
-spend dials before dispatching work. Use its skills as the lifecycle directs;
+spend dials before dispatching work, then apply the root `lever` ceilings
+(`spend`, `autonomy_cap`) as upper bounds. Use its skills as the lifecycle directs;
 do not start a second delivery coordinator. Missing Lever skills block the
 affected work, not permission to substitute a different policy.
 

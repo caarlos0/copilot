@@ -187,18 +187,35 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
     });
   }
 
-  async function setBudget(request, file) {
+  // set holds only the sections the user changed; expected holds what the browser saw for each of them.
+  async function setSettings(request, file) {
     const body = await readJSONBody(request);
-    if (!isObject(body) || Object.keys(body).some((key) => !["max_parallel_workers", "expected"].includes(key)) ||
-        !Number.isSafeInteger(body.max_parallel_workers) ||
-        !(body.expected === null || Number.isSafeInteger(body.expected))) {
-      throw new HttpError(400, "Provide max_parallel_workers and the budget you saw (expected, or null for none).");
+    const known = (value, keys) => isObject(value) && Object.keys(value).every((key) => keys.includes(key));
+    const fields = { limits: ["investigation", "implementation"], lever: ["spend", "autonomy_cap"] };
+    const sections = isObject(body?.set) ? Object.keys(body.set) : [];
+    if (!known(body, ["set", "expected"]) || !known(body.expected, ["budget", ...Object.keys(fields)]) ||
+        !sections.length || !known(body.set, ["budget", ...Object.keys(fields)]) ||
+        sections.some((section) => !Object.hasOwn(body.expected, section)) ||
+        (sections.includes("budget") && !Number.isSafeInteger(body.set.budget)) ||
+        !(body.expected.budget === undefined || body.expected.budget === null || Number.isSafeInteger(body.expected.budget)) ||
+        Object.entries(fields).some(([section, keys]) => sections.includes(section) &&
+          !(known(body.set[section], keys) && known(body.expected[section], keys) &&
+            Object.keys(body.set[section]).length && Object.keys(body.set[section]).every((key) =>
+              Object.hasOwn(body.expected[section], key))))) {
+      throw new HttpError(400, "Provide set with budget, limits, or lever values, and the values you saw for each in expected.");
     }
     await loadFactory(file);
-    return write(file, {
-      budget: JSON.stringify({ max_parallel_workers: body.max_parallel_workers }),
-      "expected-budget": body.expected === null ? "none" : String(body.expected),
-    });
+    const values = {};
+    if (sections.includes("budget")) {
+      values.budget = JSON.stringify({ max_parallel_workers: body.set.budget });
+      values["expected-budget"] = body.expected.budget === null ? "none" : String(body.expected.budget);
+    }
+    for (const section of Object.keys(fields)) {
+      if (!sections.includes(section)) continue;
+      values[section] = JSON.stringify(body.set[section]);
+      values[`expected-${section}`] = JSON.stringify(body.expected[section]);
+    }
+    return write(file, values);
   }
 
   const server = createServer(async (request, response) => {
@@ -212,10 +229,10 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
       const url = new URL(request.url, `http://127.0.0.1:${port}`);
       if (request.method === "POST" && url.pathname === "/api/move") {
         send(response, 200, await moveTask(request, url.searchParams.get("file")));
-      } else if (request.method === "POST" && url.pathname === "/api/budget") {
-        send(response, 200, await setBudget(request, url.searchParams.get("file")));
+      } else if (request.method === "POST" && url.pathname === "/api/settings") {
+        send(response, 200, await setSettings(request, url.searchParams.get("file")));
       } else if (request.method !== "GET") {
-        throw new HttpError(405, "Use GET, or POST /api/move or /api/budget for dashboard changes.");
+        throw new HttpError(405, "Use GET, or POST /api/move or /api/settings for dashboard changes.");
       } else if (url.pathname === "/" || url.pathname === "/dashboard.html") {
         send(response, 200, await readFile(join(assets, "dashboard.html")), "text/html; charset=utf-8");
       } else if (url.pathname === "/factory-data.mjs") {

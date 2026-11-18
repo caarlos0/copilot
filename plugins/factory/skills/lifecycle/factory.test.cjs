@@ -133,6 +133,91 @@ test("an operator write needs the seen budget and can set nothing else", async (
   assert.equal(JSON.parse(events.at(-1)).source, "dashboard");
 });
 
+test("lever validation accepts an absent lever and ceilings, and rejects everything else", async (t) => {
+  const { validate } = await import("./factory-data.mjs");
+  validate(example);
+  assert.equal("lever" in example, false, "Old files have no lever.");
+  for (const lever of [{}, { spend: "high" }, { autonomy_cap: "L0" }, { spend: null, autonomy_cap: null },
+    { spend: "standard", autonomy_cap: "L5" }]) {
+    validate({ ...example, lever });
+  }
+  for (const lever of [
+    { spend: "unlimited" }, { spend: "" }, { spend: 3 }, { autonomy_cap: "L6" }, { autonomy_cap: "l2" },
+    { autonomy_level: "L4" }, { grants: [] }, { spend: "high", extra: 1 }, null, "high", [],
+  ]) {
+    assert.throws(() => validate({ ...example, lever }), /lever/, JSON.stringify(lever));
+  }
+  const f = await fixture(t, example);
+  f.ok("--task", "issue-12", "--next-action", "Look again", "--expected-revision", "0");
+  assert.equal("lever" in await f.read(), false, "Writing an old file must not add a lever.");
+  for (const value of ['{"spend":"max2"}', '{"grants":[]}', "null", '"high"', "{bad"]) {
+    const before = await readFile(f.file, "utf8");
+    assert.equal(f.run("--lever", value).status, 1, value);
+    assert.equal(await readFile(f.file, "utf8"), before);
+  }
+});
+
+test("--lever merges ceilings, null clears one, and each write emits lever.updated", async (t) => {
+  const f = await fixture(t, example);
+  f.ok("--lever", '{"spend":"high"}');
+  f.ok("--lever", '{"autonomy_cap":"L2"}');
+  assert.deepEqual((await f.read()).lever, { spend: "high", autonomy_cap: "L2" });
+  f.ok("--lever", '{"spend":null}');
+  assert.deepEqual((await f.read()).lever, { spend: null, autonomy_cap: "L2" });
+  const events = (await readFile(join(f.directory, "owner.repo-factory-events.jsonl"), "utf8"))
+    .trim().split("\n").map((line) => JSON.parse(line));
+  assert.deepEqual(events.map(({ type, task, source, data }) => [type, task, source, data]), [
+    ["lever.updated", null, "coordinator", { spend: "high", autonomy_cap: null }],
+    ["lever.updated", null, "coordinator", { spend: "high", autonomy_cap: "L2" }],
+    ["lever.updated", null, "coordinator", { spend: null, autonomy_cap: "L2" }],
+  ]);
+});
+
+test("--limits and --lever compare each changed key with the expected value", async (t) => {
+  const f = await fixture(t, example);
+  f.fails(/needs --limits/, "--expected-limits", "{}");
+  f.fails(/needs --lever/, "--expected-lever", "{}");
+  f.fails(/must include implementation/, "--limits", '{"implementation":2}', "--expected-limits", '{"investigation":3}');
+  const original = await readFile(f.file, "utf8");
+  f.fails(/limits changed since it was read/, "--limits", '{"implementation":2}', "--expected-limits", '{"implementation":4}');
+  f.fails(/lever changed since it was read/, "--lever", '{"spend":"high"}', "--expected-lever", '{"spend":"max"}');
+  assert.equal(await readFile(f.file, "utf8"), original);
+  f.ok("--limits", '{"implementation":2}', "--expected-limits", '{"implementation":3,"investigation":9}');
+  f.ok("--lever", '{"spend":"high"}', "--expected-lever", '{"spend":null}');
+  const data = await f.read();
+  assert.deepEqual(data.limits, { investigation: 3, implementation: 2 });
+  assert.deepEqual(data.lever, { spend: "high" });
+});
+
+test("an operator write needs the seen limits and lever and keeps the 1 to 100 cap", async (t) => {
+  const f = await fixture(t, example);
+  const original = await readFile(f.file, "utf8");
+  const { update, ConflictError } = await import("./factory.mjs");
+  const limits = '{"implementation":2}';
+  const lever = '{"autonomy_cap":"L1"}';
+  await assert.rejects(update(f.file, { limits }, { operator: true }), ConflictError);
+  await assert.rejects(update(f.file, { lever }, { operator: true }), ConflictError);
+  await assert.rejects(update(f.file, { limits, "expected-limits": '{"implementation":9}' }, { operator: true }), ConflictError);
+  for (const bad of ['{"implementation":0}', '{"implementation":101}', '{"implementation":1.5}']) {
+    await assert.rejects(update(f.file, { limits: bad, "expected-limits": '{"implementation":3}' }, { operator: true }),
+      /from 1 to 100/, bad);
+  }
+  await assert.rejects(update(f.file, { limits, "expected-limits": '{"implementation":3}', rules: "[]" }, { operator: true }),
+    /may only set the budget, limits, or Lever/);
+  assert.equal(await readFile(f.file, "utf8"), original);
+  const data = await update(f.file, {
+    limits, "expected-limits": '{"implementation":3}', lever, "expected-lever": '{"autonomy_cap":null}',
+  }, { operator: true });
+  assert.deepEqual(data.limits, { investigation: 3, implementation: 2 });
+  assert.deepEqual(data.lever, { autonomy_cap: "L1" });
+  const events = (await readFile(join(f.directory, "owner.repo-factory-events.jsonl"), "utf8"))
+    .trim().split("\n").map((line) => JSON.parse(line));
+  assert.deepEqual(events.map(({ type, source }) => [type, source]),
+    [["limits.updated", "dashboard"], ["lever.updated", "dashboard"]]);
+  f.ok("--limits", '{"implementation":250}');
+  assert.equal((await f.read()).limits.implementation, 250, "The CLI and old files keep their larger values.");
+});
+
 test("a new task needs --issue; null is accepted only on purpose", async (t) => {
   const f = await started(t);
   f.fails(/needs --issue/, "--task", "issue-2", "--title", "x", "--next-action", "y");

@@ -95,7 +95,12 @@ the user requests it.
 Record the resolved level, verbatim grants with source, scope and expiry, and
 the shared spend budget in each task's `details.lever`. Each brief receives
 that policy and its budget allocation. Children may narrow it, never raise it.
-Resolve it again on recovery or a policy change. If a required skill or policy
+The optional root `lever` object holds operator ceilings: `spend`
+(`standard`, `high`, `max`) and `autonomy_cap` (`L0` to `L5`). Apply them after
+resolution: take the lower of the resolved value and the ceiling, and record the
+effective values in `details.lever`. They never raise authority. Absent or
+`null` means no ceiling. Reread them after every dashboard `lever.updated`
+event. Resolve it again on recovery or a policy change. If a required skill or policy
 cannot be loaded, report the exact blocker; never silently fall back.
 
 Use the brief template to prepare the existing task, not the full `brief`
@@ -528,7 +533,9 @@ worker only when the count stays within the budget. The per-role `limits` still
 apply on top. Lowering the budget below the running count never stops a worker:
 start no new worker until the count falls under it. Change it with
 `factory.mjs --budget '{"max_parallel_workers":N}'`; the operator can also edit it
-in the dashboard. It is a worker count, not the Lever spend budget.
+in the dashboard settings dialog (cog beside the factory name), together with
+`limits` and the `lever` ceilings. Reread `limits` after every dashboard
+`limits.updated` event. The budget is a worker count, not the Lever spend budget.
 
 ### Self-improve
 

@@ -51,7 +51,7 @@ const move = (url, body, file = factoryFile, headers = {}) => get(url, `/api/mov
   headers: { Origin: new URL(url).origin, "Content-Type": "application/json", ...headers },
   body: JSON.stringify(body),
 });
-const budget = (url, body, file = factoryFile, headers = {}) => get(url, `/api/budget?file=${encodeURIComponent(file)}`, {
+const settings = (url, body, file = factoryFile, headers = {}) => get(url, `/api/settings?file=${encodeURIComponent(file)}`, {
   method: "POST",
   headers: { Origin: new URL(url).origin, "Content-Type": "application/json", ...headers },
   body: JSON.stringify(body),
@@ -230,64 +230,118 @@ test("move endpoint rejects foreign pages, invalid moves and unconfined files wi
   }
 });
 
-test("the budget endpoint saves, returns the factory, and emits a dashboard event", async (t) => {
+const seen = {
+  budget: 10,
+  limits: { investigation: 3, implementation: 3 },
+  lever: { spend: null, autonomy_cap: null },
+};
+
+test("the settings endpoint saves every section, returns the factory, and emits dashboard events", async (t) => {
   const { url, directory } = await server(t);
   const file = join(directory, factoryFile);
-  const response = await budget(url, { max_parallel_workers: 4, expected: 10 });
+  const response = await settings(url, {
+    set: { budget: 4, limits: { investigation: 2, implementation: 5 }, lever: { spend: "high", autonomy_cap: "L2" } },
+    expected: seen,
+  });
   assert.equal(response.status, 200, await response.clone().text());
   const data = await response.json();
   assert.deepEqual(data.budget, { max_parallel_workers: 4 });
+  assert.deepEqual(data.limits, { investigation: 2, implementation: 5 });
+  assert.deepEqual(data.lever, { spend: "high", autonomy_cap: "L2" });
   assert.deepEqual(data.tasks, example.tasks);
   assert.deepEqual(JSON.parse(await readFile(file, "utf8")), data);
   const events = (await readFile(join(directory, "owner.repo-factory-events.jsonl"), "utf8")).trim().split("\n")
     .map((line) => JSON.parse(line));
-  assert.deepEqual(events.map(({ type, task, source, data }) => [type, task, source, data]),
-    [["budget.updated", null, "dashboard", { max_parallel_workers: 4 }]]);
-  const stale = await budget(url, { max_parallel_workers: 5, expected: 10 });
-  assert.equal(stale.status, 409);
-  assert.match((await stale.json()).error, /Budget changed since it was read/);
-  const { budget: _, ...old } = example;
-  await writeFile(file, JSON.stringify(old));
-  assert.equal((await budget(url, { max_parallel_workers: 5, expected: 4 })).status, 409);
-  const added = await budget(url, { max_parallel_workers: 5, expected: null });
-  assert.equal(added.status, 200, await added.clone().text());
-  assert.deepEqual((await added.json()).budget, { max_parallel_workers: 5 });
+  assert.deepEqual(events.map(({ type, task, source, data }) => [type, task, source, data]), [
+    ["budget.updated", null, "dashboard", { max_parallel_workers: 4 }],
+    ["limits.updated", null, "dashboard", { investigation: 2, implementation: 5 }],
+    ["lever.updated", null, "dashboard", { spend: "high", autonomy_cap: "L2" }],
+  ]);
+  const cleared = await settings(url, {
+    set: { lever: { spend: null } }, expected: { lever: { spend: "high" } },
+  });
+  assert.equal(cleared.status, 200, await cleared.clone().text());
+  assert.deepEqual((await cleared.json()).lever, { spend: null, autonomy_cap: "L2" });
+  const one = await settings(url, { set: { limits: { implementation: 1 } }, expected: { limits: { implementation: 5 } } });
+  assert.deepEqual((await one.json()).limits, { investigation: 2, implementation: 1 });
 });
 
-test("budget endpoint rejects foreign pages and bad input without writes", async (t) => {
+test("each settings section reports a stale read as a conflict, and old files still save", async (t) => {
   const { url, directory } = await server(t);
   const file = join(directory, factoryFile);
   const original = await readFile(file, "utf8");
-  const good = { max_parallel_workers: 4, expected: 10 };
+  const stale = [
+    [{ budget: 5 }, { budget: 9 }, /Budget changed since it was read/],
+    [{ limits: { investigation: 1 } }, { limits: { investigation: 2 } }, /limits changed since it was read/],
+    [{ lever: { spend: "max" } }, { lever: { spend: "high" } }, /lever changed since it was read/],
+  ];
+  for (const [set, expected, message] of stale) {
+    const response = await settings(url, { set, expected });
+    assert.equal(response.status, 409, await response.clone().text());
+    assert.match((await response.json()).error, message);
+    assert.equal(await readFile(file, "utf8"), original);
+  }
+  const { budget: _, ...old } = example;
+  await writeFile(file, JSON.stringify(old));
+  assert.equal((await settings(url, { set: { budget: 5 }, expected: { budget: 4 } })).status, 409);
+  const added = await settings(url, { set: { budget: 5, lever: { autonomy_cap: "L0" } }, expected: { budget: null, lever: { autonomy_cap: null } } });
+  assert.equal(added.status, 200, await added.clone().text());
+  const data = await added.json();
+  assert.deepEqual(data.budget, { max_parallel_workers: 5 });
+  assert.deepEqual(data.lever, { autonomy_cap: "L0" });
+});
+
+test("settings endpoint rejects foreign pages and bad input without writes", async (t) => {
+  const { url, directory } = await server(t);
+  const file = join(directory, factoryFile);
+  const original = await readFile(file, "utf8");
+  const good = { set: { budget: 4 }, expected: seen };
+  const withSet = (set, expected = seen) => ({ set, expected });
   const cases = [
     { headers: { Origin: "https://evil.example" }, status: 403 },
     { headers: { "Sec-Fetch-Site": "cross-site" }, status: 403 },
     { headers: { "Content-Type": "text/plain" }, status: 415 },
     { body: { ...good, padding: "x".repeat(20000) }, status: 413 },
-    { body: { ...good, max_parallel_workers: 0 }, status: 400 },
-    { body: { ...good, max_parallel_workers: 101 }, status: 400 },
-    { body: { ...good, max_parallel_workers: 1.5 }, status: 400 },
-    { body: { ...good, max_parallel_workers: "4" }, status: 400 },
-    { body: { max_parallel_workers: 4 }, status: 400 },
-    { body: { ...good, expected: -1 }, status: 400 },
-    { body: { ...good, limits: {} }, status: 400 },
+    { body: withSet({ budget: 0 }), status: 400 },
+    { body: withSet({ budget: 101 }), status: 400 },
+    { body: withSet({ budget: 1.5 }), status: 400 },
+    { body: withSet({ budget: "4" }), status: 400 },
+    { body: withSet({ limits: { investigation: 0 } }), status: 400 },
+    { body: withSet({ limits: { implementation: 101 } }), status: 400 },
+    { body: withSet({ limits: { investigation: 1.5 } }), status: 400 },
+    { body: withSet({ limits: { review: 2 } }), status: 400 },
+    { body: withSet({ limits: {} }), status: 400 },
+    { body: withSet({ lever: { spend: "unlimited" } }), status: 400 },
+    { body: withSet({ lever: { autonomy_cap: "L6" } }), status: 400 },
+    { body: withSet({ lever: { autonomy_level: "L5" } }), status: 400 },
+    { body: withSet({ lever: { grants: [] } }), status: 400 },
+    { body: withSet({ autonomy_level: "L5" }), status: 400 },
+    { body: withSet({ status: "active" }), status: 400 },
+    { body: withSet({ rules: [] }), status: 400 },
+    { body: withSet({}), status: 400 },
+    { body: { expected: seen }, status: 400 },
+    { body: { set: { budget: 4 } }, status: 400 },
+    { body: withSet({ limits: { investigation: 1 } }, { limits: {} }), status: 400 },
+    { body: withSet({ budget: 4 }, { budget: -1 }), status: 400 },
+    { body: { ...good, max_parallel_workers: 4 }, status: 400 },
+    { body: { max_parallel_workers: 4, expected: 10 }, status: 400 },
     { body: null, status: 400 },
     { file: "../owner.repo-factory.json", status: 400 },
     { file: "unrelated-notes.md", status: 400 },
   ];
   for (const item of cases) {
-    const response = await budget(url, "body" in item ? item.body : good, item.file, item.headers);
+    const response = await settings(url, "body" in item ? item.body : good, item.file, item.headers);
     assert.equal(response.status, item.status, JSON.stringify({ item, body: await response.text() }));
     assert.equal(await readFile(file, "utf8"), original);
   }
 });
 
-test("the CLI and the dashboard share the write lock for budget writes", async (t) => {
+test("the CLI and the dashboard share the write lock for settings writes", async (t) => {
   const { url, directory } = await server(t);
   const file = join(directory, factoryFile);
   const original = await readFile(file, "utf8");
   await writeFile(`${file}.write.lock`, "", { flag: "wx" });
-  assert.equal((await budget(url, { max_parallel_workers: 4, expected: 10 })).status, 409);
+  assert.equal((await settings(url, { set: { budget: 4 }, expected: seen })).status, 409);
   const cli = spawnSync(process.execPath, [join(__dirname, "factory.mjs"), file,
     "--budget", '{"max_parallel_workers":4}'], { encoding: "utf8" });
   assert.equal(cli.status, 1, cli.stderr);
@@ -429,7 +483,7 @@ async function dashboard(t, { reducedMotion = true, confirm = () => true, now = 
   for (const [, tag, id] of html.matchAll(/<(\w+)[^>]*\bid="([^"]+)"/g)) elements.set(id, new Element(tag));
   elements.get("detail").append(...["detail-title", "close-detail", "task-list", "detail-empty"]
     .map((id) => elements.get(id)));
-  elements.get("budget-dialog").append(...["budget-title", "close-budget", "budget-body"].map((id) => elements.get(id)));
+  elements.get("settings-dialog").append(...["settings-title", "close-settings", "settings-body"].map((id) => elements.get(id)));
   elements.get("move-dialog").append(...["move-title", "close-move", "move-body"].map((id) => elements.get(id)));
   const location = new URL(`?file=${factoryFile}`, url);
   class ClockDate extends Date {
@@ -1256,37 +1310,81 @@ test("the header shows running workers against the budget and refreshes with the
   assert.equal(ui.get("budget-state").textContent, "3 running / no total cap");
 });
 
-test("the budget dialog keeps its draft across refresh, reports a conflict, and saves", async (t) => {
+test("the cog opens one settings dialog and the old budget button is gone", async (t) => {
+  assert.doesNotMatch(html, /edit-budget|Edit budget|budget-dialog/);
+  assert.match(html, /<h2 id="goal"><\/h2>\s*<button id="open-settings"[^>]*aria-label="Settings"[^>]*title="Settings"/);
+  const ui = await dashboard(t);
+  await ui.get("open-settings").fire("click");
+  assert.equal(ui.get("settings-dialog").open, true);
+  const form = ui.get("settings-body").querySelector("form");
+  assert.deepEqual(form.querySelectorAll("input").map((input) => input.value), ["10", "3", "3"]);
+  const [spend, cap] = form.querySelectorAll("select");
+  assert.deepEqual([spend.value, cap.value], ["", ""]);
+  assert.deepEqual(spend.options.map((option) => option.value), ["", "standard", "high", "max"]);
+  assert.deepEqual(cap.options.map((option) => option.value), ["", "L0", "L1", "L2", "L3", "L4", "L5"]);
+  assert.match(form.textContent, /Latest recorded autonomy: L4 \(issue-3\)/);
+  ui.get("detail").hidden = false;
+  ui.press("Escape");
+  assert.equal(ui.get("detail").hidden, false, "Escape must not close the task panel behind the dialog.");
+});
+
+test("the settings dialog keeps its draft across refresh, reports a conflict, and sends only changed fields", async (t) => {
   const confirms = [];
   const ui = await dashboard(t, { confirm: (message) => { confirms.push(message); return false; } });
   const file = join(ui.directory, factoryFile);
-  await ui.get("edit-budget").fire("click");
-  assert.equal(ui.get("budget-dialog").open, true);
-  const form = ui.get("budget-body").querySelector("form");
-  const input = form.querySelector("input");
-  assert.equal(input.value, "10");
-  assert.equal(ui.document.activeElement, input);
-  input.value = "6";
+  await ui.get("open-settings").fire("click");
+  const form = ui.get("settings-body").querySelector("form");
+  const [budget, investigation, implementation] = form.querySelectorAll("input");
+  const [, cap] = form.querySelectorAll("select");
+  assert.equal(ui.document.activeElement, budget);
+  budget.value = "6";
+  cap.value = "L2";
   const { update } = await import("./factory.mjs");
-  await update(file, { budget: '{"max_parallel_workers":8}' });
+  await update(file, { budget: '{"max_parallel_workers":8}', limits: '{"implementation":4}' });
   await ui.run("refresh()");
-  assert.equal(ui.get("budget-body").querySelector("input"), input);
-  assert.equal(input.value, "6");
+  assert.equal(ui.get("settings-body").querySelector("input"), budget);
+  assert.equal(budget.value, "6");
   assert.equal(ui.get("budget-state").textContent, "3 running / budget 8");
   await form.fire("submit");
   assert.match(form.querySelector(".save-error").textContent, /Budget changed since it was read/);
-  assert.equal(ui.get("budget-dialog").open, true);
+  assert.equal(ui.get("settings-dialog").open, true);
   assert.equal(JSON.parse(await readFile(file, "utf8")).budget.max_parallel_workers, 8);
-  await ui.get("close-budget").fire("click");
+  await ui.get("close-settings").fire("click");
   assert.equal(confirms.length, 1, "A changed value asks before discarding.");
-  assert.equal(ui.get("budget-dialog").open, true);
-  const reload = form.querySelectorAll("button").find((button) => button.textContent === "Reload budget");
+  assert.equal(ui.get("settings-dialog").open, true);
+  const reload = form.querySelectorAll("button").find((button) => button.textContent === "Reload settings");
   await reload.fire("click");
-  assert.equal(input.value, "6", "Reload keeps the draft.");
+  assert.equal(budget.value, "6", "Reload keeps the draft.");
+  assert.equal(cap.value, "L2");
+  assert.equal(implementation.value, "4", "Reload refreshes fields the user did not touch.");
   await form.fire("submit");
-  assert.equal(JSON.parse(await readFile(file, "utf8")).budget.max_parallel_workers, 6);
-  assert.equal(ui.get("budget-dialog").open, false);
+  const saved = JSON.parse(await readFile(file, "utf8"));
+  assert.equal(saved.budget.max_parallel_workers, 6);
+  assert.deepEqual(saved.limits, { investigation: 3, implementation: 4 });
+  assert.deepEqual(saved.lever, { autonomy_cap: "L2" });
+  assert.equal(investigation.value, "3");
+  assert.equal(ui.get("settings-dialog").open, false);
   assert.equal(ui.get("budget-state").textContent, "3 running / budget 6");
+});
+
+test("the settings dialog validates numbers before sending and saves nothing when nothing changed", async (t) => {
+  const ui = await dashboard(t);
+  const file = join(ui.directory, factoryFile);
+  const original = await readFile(file, "utf8");
+  await ui.get("open-settings").fire("click");
+  const form = ui.get("settings-body").querySelector("form");
+  const [budget, investigation] = form.querySelectorAll("input");
+  for (const [input, value, back] of [[budget, "0", "10"], [budget, "", "10"], [budget, "101", "10"],
+    [investigation, "1.5", "3"], [investigation, "", "3"]]) {
+    input.value = value;
+    await form.fire("submit");
+    assert.match(form.querySelector(".save-error").textContent, /must be a whole number from 1 to 100/, value);
+    assert.equal(await readFile(file, "utf8"), original);
+    input.value = back;
+  }
+  await form.fire("submit");
+  assert.equal(ui.get("settings-dialog").open, false);
+  assert.equal(await readFile(file, "utf8"), original);
 });
 
 test("the delegate-always rule is present in the agent, skill, and plugin rules", () => {

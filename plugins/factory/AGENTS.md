@@ -123,12 +123,19 @@ workers are safely rebriefed or parked. CLI writes after dashboard feedback need
 `--expected-revision` plus `--ack-feedback` or `--feedback-id`.
 The factory waits on dashboard events even when all workers are blocked.
 Dashboard changes do not stop workers, resume a paused run, or grant authority.
-The dashboard can also edit the optional root `budget.max_parallel_workers` (the
-most workers running at once over all roles; absent means no total cap, a new
-file gets 10) through `POST /api/budget` and the shared writer. A write carries
-the budget the browser saw (`--expected-budget`); a different current value is a
-conflict. It emits `budget.updated` with source `dashboard`. The coordinator
-reads the budget from the file and never exceeds it; lowering it stops no worker.
+The cog beside the factory name opens one settings dialog. It edits the optional
+root `budget.max_parallel_workers` (the most workers running at once over all
+roles; absent means no total cap, a new file gets 10), `limits.investigation`
+and `limits.implementation` (integers 1 to 100), and the optional root `lever`
+ceilings `spend` (`standard`, `high`, `max`) and `autonomy_cap` (`L0` to `L5`).
+It saves through `POST /api/settings` and the shared writer. A write carries,
+for each changed field, the value the browser saw (`--expected-budget`,
+`--expected-limits`, `--expected-lever`); a different current value is a
+conflict for that field. It emits `budget.updated`, `limits.updated`, and
+`lever.updated` with source `dashboard`. The coordinator reads these from the
+file and never exceeds the budget or a ceiling; lowering one stops no worker. Lever values are
+ceilings only: they narrow the resolved dials, never raise them, and `null`
+means no ceiling. The dashboard never writes grants or Lever's dials files.
 
 Implementation workers use `pr-shepherd` and are the sole landing writers.
 They run `autonomy-dial`'s `may_merge` before every landing attempt. There is no
@@ -174,7 +181,7 @@ times, and "idle" means time between turns.
 The factory waits with `broker.mjs wait`, not `wait.mjs`. The broker keeps one
 append-only JSONL log, `<owner.repo>-factory-events.jsonl` (mode 0600), beside
 the factory file. Events are typed notifications (`task.moved`, `task.updated`,
-`feedback.pending`, `budget.updated`, `worker.result`, `worker.blocked`, `pr.merged`; `rule.due` is computed by
+`feedback.pending`, `budget.updated`, `limits.updated`, `lever.updated`, `worker.result`, `worker.blocked`, `pr.merged`; `rule.due` is computed by
 `wait --due` and never stored), each with a `source`. A cursor is a byte offset,
 so no event is lost between two `wait` calls. `factory.mjs` emits after every
 successful write (source `coordinator`, or `dashboard` for operator moves), and

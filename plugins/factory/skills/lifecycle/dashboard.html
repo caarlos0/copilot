@@ -154,9 +154,14 @@
         color: var(--fg); background: var(--bg); border: 1px solid var(--border); border-radius: 12px; }
       dialog:focus { outline: none; }
       dialog::backdrop { background: rgb(0 0 0 / .5); }
-      #move-dialog, #budget-dialog { width: min(560px, calc(100% - 32px)); }
-      #budget-line { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; }
-      .budget-form input { display: block; width: 100%; margin-top: 4px; font-weight: 400; }
+      #move-dialog, #settings-dialog { width: min(560px, calc(100% - 32px)); }
+      #title-row { display: flex; align-items: center; gap: 8px; }
+      #open-settings { width: 32px; height: 32px; padding: 0; font-size: 18px; line-height: 28px;
+        color: var(--fg-muted); background: transparent; border-color: transparent; }
+      #budget-line { margin: 0 0 8px; }
+      .settings-form h3 { margin: 16px 0 4px; font-size: 14px; }
+      .settings-form h3:first-child { margin-top: 0; }
+      .settings-form input { display: block; width: 100%; margin-top: 4px; font-weight: 400; }
       #producers-dialog { width: min(720px, calc(100% - 32px)); }
       #rule-list, #improve-list, #ignored-list { list-style: none; margin: 0; padding: 0; }
       #producers-note { margin: 16px 24px 0; }
@@ -266,11 +271,13 @@
     <div class="layout">
     <nav id="factories" aria-label="Factories"></nav>
     <main>
-      <h2 id="goal"></h2>
+      <div id="title-row">
+        <h2 id="goal"></h2>
+        <button id="open-settings" type="button" aria-label="Settings" title="Settings">&#9881;&#xFE0E;</button>
+      </div>
       <p id="run-state" class="muted"></p>
       <p id="budget-line" class="muted" hidden>
         <span id="budget-state"></span>
-        <button id="edit-budget" type="button">Edit budget</button>
       </p>
       <p id="discovery-error" role="alert" hidden></p>
       <details id="skipped" hidden>
@@ -287,13 +294,13 @@
         </div>
         <div id="move-body"></div>
       </dialog>
-      <dialog id="budget-dialog" aria-labelledby="budget-title">
+      <dialog id="settings-dialog" aria-labelledby="settings-title">
         <div class="detail-head">
-          <h2 id="budget-title">Worker budget</h2>
-          <button id="close-budget" class="close-button" type="button" tabindex="-1"
-            aria-label="Cancel budget change" title="Cancel budget change">&times;</button>
+          <h2 id="settings-title">Settings</h2>
+          <button id="close-settings" class="close-button" type="button" tabindex="-1"
+            aria-label="Cancel settings change" title="Cancel settings change">&times;</button>
         </div>
-        <div id="budget-body"></div>
+        <div id="settings-body"></div>
       </dialog>
       <dialog id="producers-dialog" aria-labelledby="producers-title" tabindex="-1">
         <div class="detail-head">
@@ -323,7 +330,7 @@
     </div>
     <noscript>Enable JavaScript to read the factory.</noscript>
     <script type="module">
-      import { states, outcomes, artifactName, githubURL, validate, countByState, isIdle, hopsSince, entered, byRecency, cyclesOf, operatorStates, operatorOutcomes, unblockState, unblockChoice, nextRun, nextDue, budgetText } from "./factory-data.mjs";
+      import { states, outcomes, artifactName, githubURL, validate, countByState, isIdle, hopsSince, entered, byRecency, cyclesOf, operatorStates, operatorOutcomes, unblockState, unblockChoice, nextRun, nextDue, budgetText, leverSpends, leverAutonomyCaps, maxParallelWorkers, maxRoleLimit } from "./factory-data.mjs";
 
       const SVG = "http://www.w3.org/2000/svg";
       const NODE = { w: 160, h: 110 };
@@ -398,7 +405,7 @@
       const flow = document.getElementById("flow");
       const panel = document.getElementById("detail");
       const moveDialog = document.getElementById("move-dialog");
-      const budgetDialog = document.getElementById("budget-dialog");
+      const settingsDialog = document.getElementById("settings-dialog");
       const producers = document.getElementById("producers-dialog");
       function element(tag, value, className) {
         const node = document.createElement(tag);
@@ -817,63 +824,119 @@
         moveDialog.querySelector("select").focus();
       }
 
-      function closeBudget() {
-        const input = budgetDialog.querySelector("input");
-        if (input && input.value !== input.defaultValue && !window.confirm("Discard your unsaved budget?")) return;
-        budgetDialog.close();
+      function closeSettings() {
+        const form = settingsDialog.querySelector("form");
+        if (form?.dirty() && !window.confirm("Discard your unsaved settings?")) return;
+        settingsDialog.close();
       }
 
-      function openBudget() {
-        const form = budgetForm();
-        document.getElementById("budget-body").replaceChildren(form);
-        budgetDialog.showModal();
+      function openSettings() {
+        const form = settingsForm();
+        document.getElementById("settings-body").replaceChildren(form);
+        settingsDialog.showModal();
         form.querySelector("input").focus();
       }
 
-      function budgetForm() {
+      // One section per stored object. Each field is saved only when its value changed.
+      const settingFields = [
+        { section: "budget", label: "Total workers running at the same time", blank: "No total cap", min: 1, max: maxParallelWorkers },
+        { section: "limits", key: "investigation", label: "Investigation workers", min: 1, max: maxRoleLimit },
+        { section: "limits", key: "implementation", label: "Implementation workers", min: 1, max: maxRoleLimit },
+        { section: "lever", key: "spend", label: "Spend ceiling", choices: leverSpends },
+        { section: "lever", key: "autonomy_cap", label: "Autonomy ceiling", choices: leverAutonomyCaps },
+      ];
+      const settingHeadings = {
+        budget: ["Workers", "The factory reads these on its next pass and never starts a worker past them. Lowering them does not stop running workers."],
+        lever: ["Lever", "Ceilings only: they lower what Lever resolves and never raise it. They grant nothing."],
+      };
+
+      function seenSettings(data) {
+        return {
+          budget: data.budget?.max_parallel_workers ?? null,
+          limits: { investigation: data.limits.investigation ?? null, implementation: data.limits.implementation ?? null },
+          lever: { spend: data.lever?.spend ?? null, autonomy_cap: data.lever?.autonomy_cap ?? null },
+        };
+      }
+
+      const settingValue = (seen, field) => (field.key ? seen[field.section][field.key] : seen[field.section]);
+
+      function leverNow(data) {
+        const recorded = data.tasks.filter((task) => task.details?.lever?.effective_level)
+          .sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at))[0];
+        return recorded
+          ? `Latest recorded autonomy: ${recorded.details.lever.effective_level} (${recorded.id}). Read-only.`
+          : "No task records an autonomy level yet.";
+      }
+
+      function settingsForm() {
         const file = selection;
-        const seenBudget = () => snapshot.budget?.max_parallel_workers ?? null;
-        let expected = seenBudget();
-        const form = element("form", null, "budget-form move-form");
+        let expected = seenSettings(snapshot);
+        const form = element("form", null, "settings-form move-form");
         const fields = element("fieldset");
-        const label = element("label", "Maximum workers running at the same time");
-        const input = element("input");
-        input.type = "number";
-        input.name = "max_parallel_workers";
-        input.min = "1";
-        input.max = "100";
-        input.step = "1";
-        input.required = true;
-        input.value = String(expected ?? "");
-        input.defaultValue = input.value;
-        label.append(input);
-        const notice = element("p",
-          "The factory reads this on its next pass and never starts a worker past it. Lowering it does not stop running workers.",
-          "muted");
+        const controls = new Map();
+        const initial = new Map();
+        for (const field of settingFields) {
+          if (settingHeadings[field.section] && (field.section === "budget" || field.key === "spend")) {
+            const [title, note] = settingHeadings[field.section];
+            fields.append(element("h3", title), element("p", note, "muted"));
+            if (field.section === "lever") fields.append(element("p", leverNow(snapshot), "muted"));
+          }
+          const label = element("label", field.label);
+          const control = element(field.choices ? "select" : "input");
+          control.name = field.key ?? field.section;
+          if (field.choices) {
+            control.append(...["", ...field.choices].map((value) => {
+              const option = element("option", value || "No cap");
+              option.value = value;
+              return option;
+            }));
+          } else {
+            control.type = "number";
+            control.min = String(field.min);
+            control.max = String(field.max);
+            control.step = "1";
+            if (field.blank) control.placeholder = field.blank;
+          }
+          control.value = String(settingValue(expected, field) ?? "");
+          controls.set(field, control);
+          initial.set(field, control.value);
+          label.append(control);
+          fields.append(label);
+        }
         const error = element("p", null, "save-error");
         error.setAttribute("role", "alert");
         error.hidden = true;
-        const reload = element("button", "Reload budget");
+        const status = element("p", null, "muted");
+        status.setAttribute("role", "status");
+        const reload = element("button", "Reload settings");
         reload.type = "button";
         reload.hidden = true;
-        const save = element("button", "Save budget", "action-primary");
+        const save = element("button", "Save settings", "action-primary");
         save.type = "submit";
         const actions = element("div", null, "controls");
         actions.append(reload, save);
-        fields.append(label, notice, error, actions);
+        fields.append(status, error, actions);
         form.append(fields);
-        const failed = (cause) => {
+        const changed = () => settingFields.filter((field) => controls.get(field).value !== initial.get(field));
+        form.dirty = () => changed().length > 0;
+        const failed = (cause, canReload = true) => {
           error.textContent = cause.message;
           error.hidden = false;
-          reload.hidden = false;
+          reload.hidden = !canReload;
         };
         reload.addEventListener("click", async () => {
           fields.disabled = true;
           try {
             const data = await requestJSON(`/api/factory?${new URLSearchParams({ file })}`);
             validate(data);
-            expected = data.budget?.max_parallel_workers ?? null;
-            notice.textContent = `Current budget: ${expected ?? "none"}. Your value is kept. Check it before saving again.`;
+            expected = seenSettings(data);
+            for (const field of settingFields) {
+              const control = controls.get(field);
+              const value = String(settingValue(expected, field) ?? "");
+              if (control.value === initial.get(field)) control.value = value;
+              initial.set(field, value);
+            }
+            status.textContent = "Reloaded. Your edits are kept. Check them before saving again.";
             error.hidden = true;
             reload.hidden = true;
             if (selection === file) load(data, file);
@@ -886,20 +949,43 @@
         form.addEventListener("submit", async (event) => {
           event.preventDefault();
           if (fields.disabled) return;
+          const set = {};
+          const saw = {};
+          for (const field of changed()) {
+            const raw = controls.get(field).value;
+            let value = raw || null;
+            if (!field.choices) {
+              value = raw === "" ? null : Number(raw);
+              if (!Number.isInteger(value) || value < field.min || value > field.max) {
+                return failed(new Error(`${field.label} must be a whole number from ${field.min} to ${field.max}.`), false);
+              }
+            }
+            if (field.key) {
+              (set[field.section] ??= {})[field.key] = value;
+              (saw[field.section] ??= {})[field.key] = expected[field.section][field.key];
+            } else {
+              set[field.section] = value;
+              saw[field.section] = expected[field.section];
+            }
+          }
+          if (!Object.keys(set).length) {
+            settingsDialog.close();
+            return;
+          }
           fields.disabled = true;
           error.hidden = true;
           mutation += 1;
           try {
-            const data = await requestJSON(`/api/budget?${new URLSearchParams({ file })}`, {
+            const data = await requestJSON(`/api/settings?${new URLSearchParams({ file })}`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ max_parallel_workers: Number(input.value), expected }),
+              body: JSON.stringify({ set, expected: saw }),
             });
             validate(data);
-            if (budgetDialog.querySelector("form") === form) budgetDialog.close();
+            if (settingsDialog.querySelector("form") === form) settingsDialog.close();
             if (selection === file) load(data, file);
           } catch (cause) {
-            failed(new Error(`Budget was not saved: ${cause.message}`));
+            failed(new Error(`Settings were not saved: ${cause.message}`));
           } finally {
             mutation += 1;
             fields.disabled = false;
@@ -1520,7 +1606,7 @@
         return refresh();
       }
       document.getElementById("refresh").addEventListener("click", refresh);
-      document.getElementById("edit-budget").addEventListener("click", openBudget);
+      document.getElementById("open-settings").addEventListener("click", openSettings);
       document.getElementById("global-filter").addEventListener("input", draw);
       document.getElementById("clear-filter").addEventListener("click", () => {
         document.getElementById("global-filter").value = "";
@@ -1530,10 +1616,10 @@
       const closeChoice = () => choose(null);
       document.getElementById("close-detail").addEventListener("click", closeChoice);
       document.addEventListener("keydown", (event) => {
-        if (event.key === "Escape" && !panel.hidden && !moveDialog.open && !budgetDialog.open && !producers.open) closeChoice();
+        if (event.key === "Escape" && !panel.hidden && !moveDialog.open && !settingsDialog.open && !producers.open) closeChoice();
       });
       wireDismiss(moveDialog, "close-move", closeMove);
-      wireDismiss(budgetDialog, "close-budget", closeBudget);
+      wireDismiss(settingsDialog, "close-settings", closeSettings);
       wireDismiss(producers, "close-producers", closeChoice);
 
       document.getElementById("logo").src = document.getElementById("icon").href;

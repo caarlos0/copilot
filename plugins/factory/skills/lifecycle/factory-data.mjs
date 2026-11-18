@@ -21,6 +21,9 @@ const everyUnits = { m: 60_000, h: 3_600_000, d: 86_400_000 };
 export const defaultLimits = { investigation: 3, implementation: 3 };
 export const defaultBudget = { max_parallel_workers: 10 };
 export const maxParallelWorkers = 100;
+export const maxRoleLimit = 100;
+export const leverSpends = ["standard", "high", "max"];
+export const leverAutonomyCaps = ["L0", "L1", "L2", "L3", "L4", "L5"];
 
 export function isObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -376,6 +379,7 @@ export function validate(data) {
     if (!Number.isInteger(limit) || limit < 1) throw new Error(`limits.${role} must be a positive integer.`);
   }
   if (data.budget !== undefined) validateBudget(data.budget);
+  if (data.lever !== undefined) validateLever(data.lever);
   if (!Array.isArray(data.tasks)) throw new Error("tasks must be an array.");
   const seen = { ids: new Set(), issue: new Set(), pr: new Set() };
   for (const task of data.tasks) validateTask(task, seen);
@@ -387,6 +391,15 @@ export function validateBudget(budget) {
   const value = budget.max_parallel_workers;
   if (!Number.isInteger(value) || value < 1 || value > maxParallelWorkers) {
     throw new Error(`budget.max_parallel_workers must be an integer from 1 to ${maxParallelWorkers}.`);
+  }
+}
+
+// Ceilings only: null or a missing key means no cap. They can lower what Lever resolves, never raise it.
+export function validateLever(lever) {
+  if (!isObject(lever)) throw new Error("lever must be an object.");
+  for (const [key, value] of Object.entries(lever)) {
+    oneOf(key, ["spend", "autonomy_cap"], "lever key");
+    if (value !== null) oneOf(value, key === "spend" ? leverSpends : leverAutonomyCaps, `lever.${key}`);
   }
 }
 

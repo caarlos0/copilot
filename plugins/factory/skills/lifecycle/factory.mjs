@@ -6,7 +6,8 @@ import { parseArgs } from "node:util";
 import { archiveDirectory, findArchived, readArchive, removeArchived, saveArchive } from "./archive.mjs";
 import { emit, resolveFactory } from "./broker.mjs";
 import {
-  checkTransition, defaultBudget, defaultLimits, format, isObject, operatorOutcomes, outcomes, parseBlocker, validate,
+  checkTransition, defaultBudget, defaultLimits, format, isObject, maxRoleLimit, operatorOutcomes, outcomes,
+  parseBlocker, validate,
 } from "./factory-data.mjs";
 import { recordSessions, registryFile, sessionID } from "./sessions.mjs";
 
@@ -160,6 +161,23 @@ function checkInvestigation(patch, state) {
   }
 }
 
+const settingOptions = ["budget", "expected-budget", "limits", "expected-limits", "lever", "expected-lever"];
+
+// Each key a write changes must match what the caller saw; null means unset. A dashboard write needs it.
+function checkExpected(name, patch, expectedJson, present, operator) {
+  if (expectedJson === undefined) {
+    if (operator) throw new ConflictError(`A ${name} change needs --expected-${name} from a fresh read.`);
+    return;
+  }
+  const expected = json(expectedJson, `expected-${name}`, isObject);
+  for (const key of Object.keys(patch)) {
+    if (!Object.hasOwn(expected, key)) throw new Error(`--expected-${name} must include ${key}.`);
+    if (expected[key] !== (present?.[key] ?? null)) {
+      throw new ConflictError(`The ${name} changed since it was read. Reload it and reconcile before saving.`);
+    }
+  }
+}
+
 // The state is already saved, so a failed notification only warns.
 async function announce(file, source, events) {
   for (const event of events) {
@@ -204,8 +222,26 @@ async function writeFactory(file, values, operator, source) {
   }
   if (values["rex-session"] !== undefined) rootPatch.rex_session = nullable(values["rex-session"]);
   if (values.rules !== undefined) rootPatch.rules = json(values.rules, "rules", Array.isArray);
-  if (values.limits !== undefined) rootPatch.limits = json(values.limits, "limits", isObject);
   const events = [];
+  if (values.limits !== undefined) {
+    rootPatch.limits = json(values.limits, "limits", isObject);
+    if (operator) {
+      for (const [role, limit] of Object.entries(rootPatch.limits)) {
+        if (!Number.isInteger(limit) || limit < 1 || limit > maxRoleLimit) {
+          throw new Error(`limits.${role} must be an integer from 1 to ${maxRoleLimit}.`);
+        }
+      }
+    }
+  }
+  if (values.lever !== undefined) rootPatch.lever = json(values.lever, "lever", isObject);
+  for (const name of ["limits", "lever"]) {
+    if (values[`expected-${name}`] !== undefined && values[name] === undefined) {
+      throw new Error(`--expected-${name} needs --${name}.`);
+    }
+    if (values[name] !== undefined) {
+      checkExpected(name, rootPatch[name], values[`expected-${name}`], current[name], operator);
+    }
+  }
   if (values["expected-budget"] !== undefined && values.budget === undefined) {
     throw new Error("--expected-budget needs --budget.");
   }
@@ -225,8 +261,8 @@ async function writeFactory(file, values, operator, source) {
     }
   }
   if (operator && values.task === undefined &&
-      Object.keys(values).some((key) => !["budget", "expected-budget"].includes(key))) {
-    throw new Error("A dashboard write without a task may only set the budget.");
+      Object.keys(values).some((key) => !settingOptions.includes(key))) {
+    throw new Error("A dashboard write without a task may only set the budget, limits, or Lever ceilings.");
   }
   if (values.ignored !== undefined) rootPatch.ignored = json(values.ignored, "ignored", Array.isArray);
   const sessions = [];
@@ -361,6 +397,16 @@ async function writeFactory(file, values, operator, source) {
   if (values.budget !== undefined) {
     events.push({ type: "budget.updated", data: { max_parallel_workers: current.budget.max_parallel_workers } });
   }
+  if (values.limits !== undefined) {
+    events.push({ type: "limits.updated", data: {
+      investigation: current.limits.investigation ?? null, implementation: current.limits.implementation ?? null,
+    } });
+  }
+  if (values.lever !== undefined) {
+    events.push({ type: "lever.updated", data: {
+      spend: current.lever.spend ?? null, autonomy_cap: current.lever.autonomy_cap ?? null,
+    } });
+  }
   let stale = [];
   if (inserting) {
     const cutoff = Date.parse(now) - 7 * 24 * 60 * 60 * 1000;
@@ -447,6 +493,9 @@ async function main() {
         limits: { type: "string" },
         budget: { type: "string" },
         "expected-budget": { type: "string" },
+        lever: { type: "string" },
+        "expected-limits": { type: "string" },
+        "expected-lever": { type: "string" },
         "updated-at": { type: "string" },
         task: { type: "string" },
         restore: { type: "boolean" },
@@ -502,7 +551,14 @@ Run options:
   --session UUID        Record the factory's own Copilot session in FILE's sessions registry
                         (<owner.repo>-factory-sessions.jsonl). Worker sessions are recorded
                         automatically from --workers and --rule-worker records that have a session
-  --limits JSON         Merge worker caps, e.g. '{"investigation":2}' (default 3 each)
+  --limits JSON         Merge worker caps, e.g. '{"investigation":2}' (default 3 each; the dashboard
+                        accepts 1 to 100). Emits limits.updated
+  --expected-limits JSON  Caps the write was based on, e.g. '{"investigation":3}'. Every key in
+                        --limits must be listed and match the current value, or the write is a conflict
+  --lever JSON          Merge Lever ceilings, e.g. '{"spend":"high","autonomy_cap":"L2"}'. spend:
+                        standard, high, max. autonomy_cap: L0 to L5. null means no cap. A ceiling
+                        only lowers what Lever resolves; it never raises it. Emits lever.updated
+  --expected-lever JSON   Ceilings the write was based on (null for unset); same rule as --expected-limits
   --budget JSON         Merge the total worker budget, e.g. '{"max_parallel_workers":10}' (1 to 100).
                         The coordinator never runs more workers than this, over all roles. A new
                         factory gets 10; a file without a budget has no total cap. Emits budget.updated
