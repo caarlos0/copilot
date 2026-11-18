@@ -536,8 +536,13 @@ test("the task list is docked on the right of the flow, and the flow shrinks or 
   assert.equal(layout.split('id="detail"').length, 2, "The panel appears once.");
   assert.match(html, /\.layout \{[^}]*grid-template-columns: 240px minmax\(0, 1fr\) auto/);
   assert.match(html, /main \{[^}]*grid-column: 2/);
-  assert.match(html, /#detail \{[^}]*grid-column: 3;[^}]*position: sticky;[^}]*width: clamp\(420px, 34vw, 520px\)[^}]*border-left: 1px solid var\(--border\)/);
-  assert.match(html, /main \{[^}]*overflow-x: auto/);
+  assert.match(html, /#detail \{[^}]*grid-column: 3;[^}]*width: clamp\(420px, 34vw, 520px\)[^}]*border-left: 1px solid var\(--border\)/);
+  assert.match(html, /main \{[^}]*overflow: auto/);
+  assert.match(html, /\.layout \{[^}]*grid-template-rows: minmax\(0, 1fr\);[^}]*flex: 1; min-height: 0/);
+  assert.doesNotMatch(html, /\.layout \{[^}]*align-items: start/);
+  assert.match(html, /body \{[^}]*height: 100vh/);
+  assert.match(html, /#factories \{[^}]*overflow-y: auto/);
+  assert.match(html, /#detail \{[^}]*overflow-y: auto/);
   assert.match(html, /#flow \{[^}]*min-width: 720px/);
 });
 
