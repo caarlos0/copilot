@@ -427,7 +427,7 @@ async function dashboard(t, { reducedMotion = true, confirm = () => true, now = 
     }
   }
   for (const [, tag, id] of html.matchAll(/<(\w+)[^>]*\bid="([^"]+)"/g)) elements.set(id, new Element(tag));
-  elements.get("detail").append(...["detail-title", "close-detail", "detail-status", "task-list", "detail-empty"]
+  elements.get("detail").append(...["detail-title", "close-detail", "task-list", "detail-empty"]
     .map((id) => elements.get(id)));
   elements.get("budget-dialog").append(...["budget-title", "close-budget", "budget-body"].map((id) => elements.get(id)));
   elements.get("move-dialog").append(...["move-title", "close-move", "move-body"].map((id) => elements.get(id)));
@@ -1059,7 +1059,6 @@ test("Move opens a separate popup whose draft survives refresh and conflict", as
   assert.equal(ui.get("detail").dataset.state, "blocked", "The list must stay on the state it showed.");
   assert.equal(ui.get("task-list").children.length, 0);
   assert.equal(ui.document.activeElement, ui.get("detail"), "After saving, focus must stay in the task panel.");
-  assert.match(ui.get("detail-status").textContent, /to Initial\. Comment saved; awaiting factory acknowledgement/);
 });
 
 test("a pending move response does not close another task's draft", async (t) => {
@@ -1157,9 +1156,10 @@ test("a saved move fades out before its row is removed, even during refresh", as
   const row = list.children[0];
   const animation = {};
   let fades = 0;
-  row.animate = (frames) => {
+  row.animate = (frames, options) => {
     fades += 1;
     assert.deepEqual(Array.from(frames.opacity), [1, 0]);
+    assert.equal(options.duration, 300);
     return animation;
   };
   await row.querySelector(".move").fire("click");
@@ -1233,7 +1233,6 @@ test("the popup can resolve an initial task with an outcome and comment", async 
   assert.equal(saved.resolution.note, comment.value);
   assert.equal(saved.feedback.acknowledged_id, null);
   assert.equal(ui.get("detail").dataset.state, "initial");
-  assert.match(ui.get("detail-status").textContent, /to Resolved\./);
 });
 
 test("runningWorkers and budgetText count every running worker against the budget", async () => {
