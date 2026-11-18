@@ -82,9 +82,7 @@
       .factory-item kbd { flex: none; font: 11px/10px var(--mono); padding: 3px 5px; color: var(--fg-muted);
         background: var(--btn-bg); border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 6px; }
       .factory-item .count { color: var(--fg-muted); font-size: 12px; }
-      .update-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--accent);
-        animation: blink 1.2s ease-in-out infinite; }
-      @keyframes blink { 50% { opacity: .2; } }
+      .update-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
       main { grid-column: 2; padding: 24px 32px; max-width: 1280px; overflow: auto; }
       #detail { grid-column: 3; width: clamp(420px, 34vw, 520px); overflow-y: auto; border-left: 1px solid var(--border); }
       #detail:focus { outline: none; }
@@ -117,16 +115,16 @@
         border-radius: 6px; background: color-mix(in srgb, var(--danger) 10%, var(--bg)); }
 
       #flow { width: 100%; min-width: 720px; height: auto; max-height: 70vh; display: block; }
-      .edge { fill: none; stroke: var(--border-emphasis); stroke-width: 2; stroke-dasharray: 8 6;
-        animation: flow 1s linear infinite; transition: opacity .4s; }
-      .edge.idle { opacity: .35; animation: none; }
-      .arrow { fill: var(--border-emphasis); }
-      @keyframes flow { to { stroke-dashoffset: -28; } }
+      .edge { fill: none; stroke: var(--border-emphasis); stroke-width: 1.5; opacity: .6; }
+      .edge.lit { stroke: var(--accent); stroke-width: 2; opacity: 1; }
+      .port { fill: var(--border-emphasis); stroke: var(--bg); stroke-width: 1; pointer-events: none; opacity: .6; }
+      .port.lit { fill: var(--accent); opacity: 1; }
 
       .node { cursor: pointer; }
       .node .box { fill: color-mix(in srgb, var(--c) 8%, var(--bg)); stroke: color-mix(in srgb, var(--c) 45%, var(--border));
-        stroke-width: 1; transition: stroke-width .2s, fill .2s; }
+        stroke-width: 1; }
       .node:hover .box { fill: color-mix(in srgb, var(--c) 14%, var(--bg)); }
+      .node.active .box { stroke: var(--c); }
       .node.selected .box { stroke: var(--c); stroke-width: 2; fill: color-mix(in srgb, var(--c) 14%, var(--bg)); }
       .node .bar { fill: var(--c); pointer-events: none; }
       .node .name { fill: var(--c); font-size: 14px; font-weight: 600; text-anchor: middle; }
@@ -139,20 +137,6 @@
       .outcome text { fill: var(--fg-muted); font-size: 12px; }
       .outcome.selected text { fill: var(--resolved); }
       .outcome .outcome-count { fill: var(--fg); font-weight: 600; text-anchor: end; font-variant-numeric: tabular-nums; }
-      .ring { fill: none; stroke: var(--c); stroke-width: 2; opacity: 0; transform-box: fill-box; transform-origin: center; }
-      .active .ring { animation: ring 2s ease-out infinite; }
-      .node.bump { animation: bump .6s ease-out; transform-box: fill-box; transform-origin: center; }
-      .pop { animation: pop .6s cubic-bezier(.2, 1.4, .4, 1) both; animation-delay: calc(var(--i, 0) * 90ms);
-        transform-box: fill-box; transform-origin: center; }
-      @keyframes ring { 0% { opacity: .8; transform: scale(1); } 100% { opacity: 0; transform: scale(1.18); } }
-      @keyframes bump { 0% { transform: scale(1); } 35% { transform: scale(1.08); } 100% { transform: scale(1); } }
-      @keyframes pop { from { opacity: 0; transform: scale(.7); } to { opacity: 1; transform: scale(1); } }
-      .token { stroke: var(--bg); stroke-width: 2; }
-      @media (prefers-reduced-motion: reduce) {
-        .edge, .active .ring, .node.bump, .pop, .update-dot { animation: none; }
-        .ring { display: none; }
-      }
-      #flow.calm .edge, #flow.calm .ring { animation: none; }
 
       dialog { width: min(960px, calc(100% - 32px)); max-height: 85vh; padding: 0;
         color: var(--fg); background: var(--bg); border: 1px solid var(--border); border-radius: 12px; }
@@ -358,7 +342,7 @@
     </div>
     <noscript>Enable JavaScript to read the factory.</noscript>
     <script type="module">
-      import { states, outcomes, artifactName, githubURL, validate, countByState, isIdle, hopsSince, entered, byRecency, rankTasks, sortReferences, cyclesOf, operatorStates, operatorOutcomes, unblockState, unblockChoice, stripRecommended, nextRun, nextDue, leverSpends, leverAutonomyCaps, maxParallelWorkers, maxRoleLimit, digitIndex } from "./factory-data.mjs";
+      import { states, outcomes, transitions, artifactName, githubURL, validate, countByState, entered, byRecency, rankTasks, sortReferences, cyclesOf, operatorStates, operatorOutcomes, unblockState, unblockChoice, stripRecommended, nextRun, nextDue, leverSpends, leverAutonomyCaps, maxParallelWorkers, maxRoleLimit, digitIndex } from "./factory-data.mjs";
 
       const SVG = "http://www.w3.org/2000/svg";
       const NODE = { w: 160, h: 110 };
@@ -394,35 +378,28 @@
           [centre("review").x, rowTop - 60], [centre("review").x, rowTop],
         ],
         "investigation>implementation": across("investigation", "implementation"),
-        "implementation>review": across("implementation", "review", row - 20),
-        "review>implementation": across("implementation", "review", row + 20).reverse(),
+        "implementation>review": across("implementation", "review"),
         "review>resolved": across("review", "resolved"),
       };
-      // Each state has one edge into Blocked and one back out, side by side 20 apart so the arrowheads
-      // do not overlap. Slots on Blocked are 20 apart in the same order as the states, and the
-      // outer lane of each pair takes the lower bus, so no line crosses another.
+      // One line joins each state to Blocked. Slots on Blocked are 20 apart in the same order as
+      // the states, and the farther a state is from Blocked, the lower its bus, so no line crosses another.
       const blockedLanes = {
-        initial: { out: { dx: -10, bus: bottom + 85, slot: 510 }, in: { dx: 10, bus: bottom + 70, slot: 530 } },
-        investigation: { out: { dx: -10, bus: bottom + 55, slot: 550 }, in: { dx: 10, bus: bottom + 40, slot: 570 } },
-        implementation: { out: { dx: 10, slot: 590 }, in: { dx: 30, slot: 610 } },
-        review: { out: { dx: -10, bus: bottom + 40, slot: 630 }, in: { dx: 10, bus: bottom + 55, slot: 650 } },
+        initial: { bus: bottom + 70, slot: 540 },
+        investigation: { bus: bottom + 40, slot: 560 },
+        implementation: { slot: centre("blocked").x },
+        review: { bus: bottom + 40, slot: 600 },
       };
-      for (const [state, lanes] of Object.entries(blockedLanes)) {
-        for (const [direction, { dx, bus, slot }] of Object.entries(lanes)) {
-          const x = centre(state).x + dx;
-          const down = bus === undefined
-            ? [[x, bottom], [x, places.blocked.y]]
-            : [[x, bottom], [x, bus], [slot, bus], [slot, places.blocked.y]];
-          if (direction === "out") flowRoutes[`${state}>blocked`] = down;
-          else flowRoutes[`blocked>${state}`] = [...down].reverse();
-        }
+      for (const [state, { bus, slot }] of Object.entries(blockedLanes)) {
+        const x = centre(state).x;
+        flowRoutes[`${state}>blocked`] = bus === undefined
+          ? [[x, bottom], [x, places.blocked.y]]
+          : [[x, bottom], [x, bus], [slot, bus], [slot, places.blocked.y]];
       }
 
       let selection = new URLSearchParams(location.search).get("file") ?? "";
       let snapshot = null;
       let lastSource = null;
       let lastRead = null;
-      let cutoff = null;
       let refreshTimer = null;
       let refreshing = false;
       let pendingRefresh = false;
@@ -433,8 +410,6 @@
       let mutation = 0;
       const shown = Object.fromEntries(states.map((state) => [state, 0]));
       const targets = Object.fromEntries(states.map((state) => [state, 0]));
-      const queue = [];
-      let flying = false;
       let tweening = false;
 
       const flow = document.getElementById("flow");
@@ -520,33 +495,33 @@
       }
 
       function buildFlow() {
-        const defs = svg("defs");
-        const marker = svg("marker", { id: "arrow", markerWidth: 8, markerHeight: 8, refX: 7, refY: 4, orient: "auto-start-reverse" });
-        marker.append(svg("path", { d: "M0,0 L8,4 L0,8z", class: "arrow" }));
-        defs.append(marker);
-
         const edges = svg("g", { id: "edges" });
-        const edge = (key, route) => {
-          const node = svg("path", { d: pathOf(route), class: "edge", "marker-end": "url(#arrow)" });
+        const ports = svg("g", { id: "ports" });
+        // `links` lists the states whose hover or focus lights the line; it defaults to its two ends.
+        const edge = (key, route, links = key.split(">")) => {
+          const node = svg("path", { d: pathOf(route), class: "edge link" });
           node.dataset.edge = key;
+          node.dataset.links = links.join(" ");
           edges.append(node);
-          return node;
+          for (const [x, y] of [route[0], route.at(-1)]) {
+            const port = svg("circle", { cx: x, cy: y, r: 3, class: "port link" });
+            port.dataset.links = node.dataset.links;
+            ports.append(port);
+          }
         };
         edge("initial>investigation", flowRoutes["initial>investigation"]);
         edge("initial>review", flowRoutes["initial>review"]);
         edge("investigation>implementation", flowRoutes["investigation>implementation"]);
         edge("implementation>review", flowRoutes["implementation>review"]);
-        edge("review>implementation", flowRoutes["review>implementation"]);
         edge("review>resolved", flowRoutes["review>resolved"]);
-        edge("shortcut", SHORTCUT);
-        edge("source>initial", SOURCE_ROUTE);
-        for (const state of Object.keys(blockedLanes)) {
-          edge(`${state}>blocked`, flowRoutes[`${state}>blocked`]);
-          edge(`blocked>${state}`, flowRoutes[`blocked>${state}`]);
-        }
+        // The long line over the top stands for every move to Resolved that has no line of its own.
+        edge("shortcut", SHORTCUT, ["resolved", ...states.filter((state) =>
+          state !== "review" && state !== "blocked" && transitions[state].includes("resolved"))]);
+        edge("source>initial", SOURCE_ROUTE, ["source", "initial"]);
+        for (const state of Object.keys(blockedLanes)) edge(`${state}>blocked`, flowRoutes[`${state}>blocked`]);
         const nodes = svg("g", { id: "nodes" });
         const source = svg("g", {
-          class: "node source pop", tabindex: 0, role: "button", style: "--c: var(--accent); --i: 0",
+          class: "node source", tabindex: 0, role: "button", style: "--c: var(--accent)",
         });
         source.dataset.source = "producers";
         source.append(
@@ -557,15 +532,15 @@
           svg("text", { class: "sub", x: SOURCE.x + SOURCE.w / 2, y: SOURCE.y + 98 }, ""),
         );
         activateOnKey(source, chooseProducers);
+        lightOnHover(source, "source");
         nodes.append(source);
-        states.forEach((state, index) => {
+        for (const state of states) {
           const place = places[state];
           const group = svg("g", {
-            class: "node pop", tabindex: 0, role: "button", style: `--c: var(--${state}); --i: ${index}`,
+            class: "node", tabindex: 0, role: "button", style: `--c: var(--${state})`,
           });
           group.dataset.state = state;
           group.append(
-            svg("rect", { class: "ring", x: place.x, y: place.y, width: NODE.w, height: NODE.h }),
             svg("rect", { class: "box", x: place.x, y: place.y, width: NODE.w, height: NODE.h }),
             svg("rect", { class: "bar", x: place.x, y: place.y, width: NODE.w, height: 4 }),
             svg("text", { class: "name", x: place.x + NODE.w / 2, y: place.y + 28 }, place.title),
@@ -573,8 +548,9 @@
             svg("text", { class: "sub", x: place.x + NODE.w / 2, y: place.y + 98 }, ""),
           );
           activateOnKey(group, () => choose(state));
+          lightOnHover(group, state);
           nodes.append(group);
-        });
+        }
 
         const resolutions = svg("g", { role: "group", "aria-label": "Resolved tasks by outcome" });
         outcomes.forEach((outcome, index) => {
@@ -591,7 +567,20 @@
           resolutions.append(group);
         });
 
-        flow.replaceChildren(defs, edges, nodes, resolutions, svg("g", { id: "tokens" }));
+        flow.replaceChildren(edges, nodes, ports, resolutions);
+      }
+
+      // Lights the lines a state can take, and the moves back into it, while it has the pointer or focus.
+      function lightOnHover(node, state) {
+        const light = (on) => {
+          for (const link of flow.querySelectorAll(".link")) {
+            link.classList.toggle("lit", on && link.dataset.links.split(" ").includes(state));
+          }
+        };
+        node.addEventListener("mouseenter", () => light(true));
+        node.addEventListener("mouseleave", () => light(false));
+        node.addEventListener("focus", () => light(true));
+        node.addEventListener("blur", () => light(false));
       }
 
       function nodeOf(state) {
@@ -600,7 +589,6 @@
 
       function draw() {
         if (!snapshot) return;
-        flow.classList.toggle("calm", isIdle(snapshot.tasks));
         const tasks = filteredTasks();
         renderFilterStatus(tasks.length);
         const chosen = openState();
@@ -627,16 +615,8 @@
           group.setAttribute("aria-label",
             `Resolved: ${outcomeTitles[outcome]}, ${count} ${count === 1 ? "task" : "tasks"}`);
         }
-        const counts = countByState(tasks);
-        Object.assign(targets, counts);
+        Object.assign(targets, countByState(tasks));
         const enabled = snapshot.rules.filter((rule) => rule.enabled && isFinder(rule));
-        for (const edge of flow.querySelectorAll(".edge")) {
-          const key = edge.dataset.edge;
-          const [from] = key.split(">");
-          const source = key === "shortcut" ? counts.investigation + counts.implementation + counts.initial
-            : key === "source>initial" ? enabled.length : counts[from];
-          edge.classList.toggle("idle", !source);
-        }
         drawSource(enabled);
         tween();
         renderDetail(chosen, tasks);
@@ -666,60 +646,6 @@
           else tweening = false;
         };
         requestAnimationFrame(step);
-      }
-
-      function routeFor(hop) {
-        if (hop.from === null) return pathOf([[-40, centre(hop.to).y], [places[hop.to].x, centre(hop.to).y]]);
-        const key = `${hop.from}>${hop.to}`;
-        if (flowRoutes[key]) return pathOf(flowRoutes[key]);
-        if (hop.to === "resolved") return pathOf(SHORTCUT);
-        const a = centre(hop.from);
-        const b = centre(hop.to);
-        return pathOf([[a.x, a.y], [b.x, a.y], [b.x, b.y]]);
-      }
-
-      function bump(state) {
-        const group = nodeOf(state);
-        group.classList.remove("bump");
-        void group.getBoundingClientRect();
-        group.classList.add("bump");
-      }
-
-      function flyNext() {
-        const hop = queue.shift();
-        if (!hop) {
-          flying = false;
-          return;
-        }
-        flying = true;
-        const layer = flow.querySelector("#tokens");
-        const path = svg("path", { d: routeFor(hop), fill: "none", visibility: "hidden" });
-        const token = svg("circle", { r: 8, class: "token", fill: `var(--${hop.to})` });
-        layer.append(path, token);
-        const length = path.getTotalLength();
-        const started = performance.now();
-        const duration = 1300;
-        const step = (now) => {
-          const progress = Math.min(1, (now - started) / duration);
-          const point = path.getPointAtLength(length * (1 - (1 - progress) ** 3));
-          token.setAttribute("cx", point.x);
-          token.setAttribute("cy", point.y);
-          if (progress < 1) {
-            requestAnimationFrame(step);
-          } else {
-            path.remove();
-            token.remove();
-            bump(hop.to);
-          }
-        };
-        requestAnimationFrame(step);
-        setTimeout(flyNext, 350);
-      }
-
-      function animate(hops) {
-        if (reduced) return;
-        queue.push(...hops.slice(-20));
-        if (!flying) flyNext();
       }
 
       function age(time) {
@@ -1738,30 +1664,17 @@
 
       function load(data, file) {
         const sameSource = file === lastSource;
-        const before = sameSource ? snapshot : null;
-        const hops = before ? hopsSince(data.tasks, cutoff) : [];
         snapshot = data;
         lastSource = file;
         lastRead = Date.now();
         document.getElementById("error").hidden = true;
-        cutoff = data.tasks.flatMap((task) => task.history.map((item) => item.at))
-          .reduce((latest, at) => (Date.parse(at) > Date.parse(latest) ? at : latest), "1970-01-01T00:00:00Z");
-        if (!sameSource) {
-          for (const state of states) shown[state] = 0;
-          queue.length = 0;
-          for (const group of flow.querySelectorAll(".pop")) {
-            group.classList.remove("pop");
-            void group.getBoundingClientRect();
-            group.classList.add("pop");
-          }
-        }
+        if (!sameSource) for (const state of states) shown[state] = 0;
         document.getElementById("goal").textContent = data.project;
         const runStatus = document.getElementById("run-status");
         runStatus.textContent = data.status;
         runStatus.hidden = data.status === "active";
         document.title = `${data.project} - Factory`;
         draw();
-        animate(hops);
         freshness();
       }
 

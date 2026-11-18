@@ -1,7 +1,7 @@
 export const format = "factory/v1";
 export const archiveFormat = "factory-archive/v1";
 export const states = ["initial", "investigation", "implementation", "review", "blocked", "resolved"];
-const transitions = {
+export const transitions = {
   initial: ["investigation", "blocked", "resolved"],
   investigation: ["implementation", "blocked", "resolved"],
   implementation: ["review", "blocked", "resolved"],
@@ -454,20 +454,9 @@ export function countByState(tasks) {
   return counts;
 }
 
-export const isIdle = (tasks) => tasks.every((task) => task.state === "resolved");
-
 // Plain digits 1-9 pick the Nth of `count` sidebar items; -1 when the key is not a hotkey.
 export function digitIndex({ key, metaKey, ctrlKey, altKey, shiftKey }, count) {
   if (metaKey || ctrlKey || altKey || shiftKey || !/^[1-9]$/.test(key)) return -1;
   const index = Number(key) - 1;
   return index < count ? index : -1;
-}
-
-export function hopsSince(tasks, since) {
-  const cutoff = Date.parse(since);
-  return tasks.flatMap((task) => task.history.flatMap((item, index) =>
-    Date.parse(item.at) > cutoff
-      ? [{ id: task.id, from: task.history[index - 1]?.state ?? null, to: item.state, at: item.at }]
-      : []))
-    .sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
 }

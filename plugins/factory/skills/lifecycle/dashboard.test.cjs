@@ -606,8 +606,7 @@ async function dashboard(t, { reducedMotion = true, confirm = () => true, now = 
   const script = html.match(/<script type="module">([\s\S]*?)<\/script>/)[1]
     .replace(/^\s*import .+;\s*/m, "").replace(/\s*buildFlow\(\);\s*refresh\(\);\s*$/, "");
   vm.runInContext(script, context);
-  // Token flight is outside these interaction tests; counters finish in one frame.
-  vm.runInContext("animate = () => {}; buildFlow();", context);
+  vm.runInContext("buildFlow();", context);
   const run = (source) => vm.runInContext(source, context);
   await run("refresh()");
   const press = (key, event = {}) => {
@@ -808,8 +807,7 @@ test("only the first nine sidebar items get a kbd badge", async (t) => {
   assert.equal(items[0].querySelector("kbd").textContent, "1");
 });
 
-test("the dot never animates for reduced motion and the header shows a short refresh label", async (t) => {
-  assert.match(html, /prefers-reduced-motion: reduce\) \{[^}]*\.update-dot \{ animation: none; \}/);
+test("the header shows a short refresh label", async (t) => {
   assert.doesNotMatch(html, /Search all fields|<select id="factory"/);
   const ui = await dashboard(t, { now: Date.parse("2026-05-01T12:05:00Z") });
   assert.equal(ui.get("freshness").textContent, "refreshed just now");
@@ -860,13 +858,10 @@ test("global task filters search any field, combine terms, and survive refresh a
   assert.equal(rows().length, example.tasks.filter((task) => task.state === "implementation").length);
 });
 
-test("flow edges and token routes use only straight horizontal and vertical segments", async (t) => {
+test("flow edges use only straight horizontal and vertical segments", async (t) => {
   const ui = await dashboard(t);
   const paths = ui.get("flow").querySelectorAll(".edge").map((edge) => edge.d);
-  for (const hop of [{ from: null, to: "initial" }, { from: "blocked", to: "review" }, { from: "initial", to: "review" }]) {
-    paths.push(ui.run(`routeFor(${JSON.stringify(hop)})`));
-  }
-  assert.equal(paths.length, 19);
+  assert.equal(paths.length, 11);
   for (const path of paths) {
     assert.match(path, /^M[\d.,-]+( L[\d.,-]+)+$/, `Only M and L commands: ${path}`);
     const points = path.slice(1).split(" L").map((point) => point.split(",").map(Number));
@@ -877,25 +872,43 @@ test("flow edges and token routes use only straight horizontal and vertical segm
   }
 });
 
-test("the flow stops its continuous animations while every task is resolved", async (t) => {
+test("the flow is static: no animation, arrowheads or moving token", async (t) => {
+  assert.doesNotMatch(html, /@keyframes (flow|blink|ring|bump|pop)\b|\.update-dot[^}]*animation|marker-end|<marker|\.token|flyNext/);
   const ui = await dashboard(t);
-  const calm = () => ui.get("flow").className.split(" ").includes("calm");
-  const write = (tasks) => writeFile(join(ui.directory, factoryFile), JSON.stringify({ ...example, tasks }));
-  const resolved = example.tasks.filter((task) => task.state === "resolved");
-  assert.equal(calm(), false, "The example has open tasks.");
+  const flow = ui.get("flow");
+  assert.equal(flow.querySelectorAll(".edge").every((edge) => edge["marker-end"] === undefined), true);
+  assert.equal(flow.querySelectorAll(".port").length, 22, "Each line has a port at both ends.");
+});
 
-  await write(resolved);
-  await ui.run("refresh()");
-  assert.equal(calm(), true);
+test("hovering or focusing a state lights its lines and clears on leave or blur", async (t) => {
+  const ui = await dashboard(t);
+  const flow = ui.get("flow");
+  const lit = () => flow.querySelectorAll(".edge").filter((edge) => edge.className.split(" ").includes("lit"))
+    .map((edge) => edge.dataset.edge).sort();
+  const node = (state) => ui.run(`nodeOf('${state}')`);
 
-  await write(example.tasks);
-  await ui.run("refresh()");
-  assert.equal(calm(), false, "Any open task resumes the animations.");
+  assert.deepEqual(lit(), []);
+  await node("review").fire("mouseenter");
+  assert.deepEqual(lit(), ["implementation>review", "initial>review", "review>blocked", "review>resolved"].sort());
+  assert.equal(flow.querySelectorAll(".port").filter((port) => port.className.split(" ").includes("lit")).length, 8);
+  await node("review").fire("mouseleave");
+  assert.deepEqual(lit(), []);
 
-  await write([]);
-  await ui.run("refresh()");
-  assert.equal(calm(), true, "A factory with no tasks is idle.");
-  assert.match(html, /#flow\.calm \.edge, #flow\.calm \.ring \{ animation: none; \}/);
+  await node("implementation").fire("focus");
+  assert.deepEqual(lit(), [
+    "implementation>blocked", "implementation>review", "investigation>implementation", "shortcut",
+  ].sort());
+  await node("implementation").fire("blur");
+  assert.deepEqual(lit(), []);
+
+  await node("resolved").fire("mouseenter");
+  assert.deepEqual(lit(), ["review>resolved", "shortcut"]);
+  await node("resolved").fire("mouseleave");
+
+  await flow.querySelector(".source").fire("mouseenter");
+  assert.deepEqual(lit(), ["source>initial"]);
+  await flow.querySelector(".source").fire("mouseleave");
+  assert.deepEqual(lit(), []);
 });
 
 test("global filters update state totals, resolution outcomes, and every opened list", async (t) => {
@@ -1233,25 +1246,23 @@ test("resolution counts and sublists update when a task is resolved and reopened
   assert.equal(ui.get("detail-empty").hidden, false);
 });
 
-test("Blocked has a separate one-way edge in each direction that never overlaps another", async (t) => {
+test("Blocked has one line per state that never overlaps another", async (t) => {
   const ui = await dashboard(t);
   const edges = ui.get("flow").querySelectorAll(".edge");
   const keys = edges.map((edge) => edge.dataset.edge);
   const parse = (path) => path.slice(1).split(" L").map((point) => point.split(",").map(Number));
   const lanes = [];
   for (const state of ["initial", "investigation", "implementation", "review"]) {
-    for (const key of [`${state}>blocked`, `blocked>${state}`]) {
-      const edge = edges.find((item) => item.dataset.edge === key);
-      assert.ok(edge, `Missing edge ${key}`);
-      assert.equal(edge["marker-start"], undefined, `${key} has one arrowhead`);
-      assert.equal(edge["marker-end"], "url(#arrow)");
-      const points = parse(edge.d);
-      const into = key.endsWith(">blocked");
-      assert.equal(into ? points.at(-1)[1] : points[0][1], 430, `${key} meets the top of Blocked`);
-      assert.equal(into ? points[0][1] : points.at(-1)[1], 320, `${key} meets the bottom of its state`);
-      lanes.push({ key, points });
-    }
+    const key = `${state}>blocked`;
+    const edge = edges.find((item) => item.dataset.edge === key);
+    assert.ok(edge, `Missing edge ${key}`);
+    const points = parse(edge.d);
+    assert.equal(points.at(-1)[1], 430, `${key} meets the top of Blocked`);
+    assert.equal(points[0][1], 320, `${key} meets the bottom of its state`);
+    lanes.push({ key, points });
   }
+  assert.equal(keys.some((key) => key.startsWith("blocked>") || key === "review>implementation"), false,
+    "A line joins two states once, not once per direction.");
   assert.equal(new Set(keys).size, keys.length, "Edge keys are unique");
 
   const segments = (points) => points.slice(1).map(([x, y], index) => {
@@ -1268,28 +1279,12 @@ test("Blocked has a separate one-way edge in each direction that never overlaps 
   }));
 });
 
-test("only edges out of populated states keep animating", async (t) => {
-  const ui = await dashboard(t);
-  const counts = {};
-  for (const task of example.tasks) counts[task.state] = (counts[task.state] ?? 0) + 1;
-  const edges = ui.get("flow").querySelectorAll(".edge")
-    .filter((edge) => !["shortcut", "source>initial"].includes(edge.dataset.edge));
-  assert.ok(edges.length > 0);
-  for (const edge of edges) {
-    const from = edge.dataset.edge.split(">")[0];
-    assert.equal(edge.className.includes("idle"), !counts[from], edge.dataset.edge);
-  }
-  assert.match(html, /\.edge\.idle \{[^}]*animation: none;/);
-});
-
 test("Find work lists rules, user links and skipped work without changing task states", async (t) => {
   const ui = await dashboard(t);
   const source = ui.get("flow").querySelector(".source");
   assert.equal(source["aria-label"], "Find work: 2 enabled rules");
   assert.equal(source.querySelector(".count").textContent, "2");
   assert.equal(source.querySelector(".sub").textContent, "due now");
-  assert.equal(ui.get("flow").querySelectorAll(".edge")
-    .find((edge) => edge.dataset.edge === "source>initial").className.includes("idle"), false);
   await source.fire("click");
   assert.equal(ui.run("location.hash"), "#producers");
   assert.equal(ui.get("detail").hidden, false, "Find work uses the docked panel.");

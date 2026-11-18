@@ -717,27 +717,11 @@ test("usage errors exit 2 and malformed JSON flags exit 1", async (t) => {
   f.fails(/Unexpected token|JSON/, "--task", "issue-1", "--links", "{");
 });
 
-test("hopsSince lists history moves after a time, oldest first, with null for creation", async () => {
-  const { hopsSince, countByState } = await import("./factory-data.mjs");
-  const tasks = example.tasks;
-  const hops = hopsSince(tasks, "2026-05-01T11:00:00Z");
-  assert.deepEqual(hops.map((hop) => [hop.id, hop.from, hop.to]), [
-    ["issue-12", null, "initial"],
-    ["issue-7", "implementation", "review"],
-    ["issue-9", "investigation", "implementation"],
-  ]);
-  assert.deepEqual(countByState(tasks), {
+test("countByState counts tasks per state", async () => {
+  const { countByState } = await import("./factory-data.mjs");
+  assert.deepEqual(countByState(example.tasks), {
     initial: 1, investigation: 0, implementation: 1, review: 1, blocked: 1, resolved: 1,
   });
-});
-
-test("isIdle is true only when every task is resolved", async () => {
-  const { isIdle } = await import("./factory-data.mjs");
-  const task = (state) => ({ state });
-  assert.equal(isIdle([]), true);
-  assert.equal(isIdle([task("resolved"), task("resolved")]), true);
-  assert.equal(isIdle([task("resolved"), task("blocked")]), false);
-  assert.equal(isIdle([task("resolved"), task("initial")]), false);
 });
 
 test("digitIndex maps plain 1-9 to a sidebar index within the count", async () => {
