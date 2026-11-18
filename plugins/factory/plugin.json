@@ -1,6 +1,6 @@
 {
   "name": "factory",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Lever-backed task lifecycle, Rex workers, and a flowchart dashboard.",
   "repository": "https://github.com/caarlos0/copilot",
   "license": "MIT"
