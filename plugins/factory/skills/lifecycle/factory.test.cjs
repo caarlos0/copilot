@@ -160,6 +160,38 @@ test("blocked needs a reason that is cleared on leaving; resolved needs an outco
   assert.equal(resolved.resolution.note, "Same as 9");
 });
 
+test("a blocker may carry validated options; plain text and old blockers stay valid", async (t) => {
+  const f = await started(t);
+  const options = [{ label: "Use token A", state: "implementation", recommended: true }, { label: "Cancel it" }];
+  f.ok("--task", "issue-1", "--state", "blocked", "--blocker", JSON.stringify({ reason: "Pick one", options }));
+  let blocker = (await f.read()).tasks[0].blocker;
+  assert.deepEqual({ ...blocker, since: undefined }, { from: "initial", reason: "Pick one", since: undefined, options });
+  f.ok("--task", "issue-1", "--blocker", "Plain reason now");
+  blocker = (await f.read()).tasks[0].blocker;
+  assert.equal(blocker.reason, "Plain reason now");
+  assert.equal(blocker.options, undefined, "Editing with plain text replaces the options.");
+  f.ok("--task", "issue-1", "--blocker", JSON.stringify({ reason: "Again", options }));
+  f.ok("--task", "issue-1", "--state", "investigation");
+  assert.equal((await f.read()).tasks[0].blocker, null);
+
+  const before = await readFile(f.file, "utf8");
+  const bad = (reason, blockerValue) => {
+    f.fails(reason, "--task", "issue-1", "--state", "blocked", "--blocker", JSON.stringify(blockerValue));
+  };
+  bad(/reason must be a non-empty string/, { options });
+  bad(/unknown keys/, { reason: "R", extra: 1 });
+  bad(/1 to 8 options/, { reason: "R", options: [] });
+  bad(/1 to 8 options/, { reason: "R", options: Array.from({ length: 9 }, (_, i) => ({ label: `L${i}` })) });
+  bad(/label must be a non-empty string/, { reason: "R", options: [{ label: " " }] });
+  bad(/at most 300 characters/, { reason: "R", options: [{ label: "x".repeat(301) }] });
+  bad(/state must be one of/, { reason: "R", options: [{ label: "A", state: "blocked" }] });
+  bad(/recommended must be a boolean/, { reason: "R", options: [{ label: "A", recommended: "yes" }] });
+  bad(/at most one recommended/, { reason: "R", options: [{ label: "A", recommended: true }, { label: "B", recommended: true }] });
+  assert.equal(await readFile(f.file, "utf8"), before, "Invalid options must not change the file.");
+  f.ok("--task", "issue-1", "--state", "blocked", "--blocker", "{not json");
+  assert.equal((await f.read()).tasks[0].blocker.reason, "{not json");
+});
+
 test("a task can be reopened unless it was merged", async (t) => {
   const f = await started(t);
   f.ok("--task", "issue-1", "--state", "resolved", "--resolution", "completed");
@@ -241,6 +273,25 @@ test("operator moves do not broaden worker transitions or bypass prerequisites",
   assert.deepEqual(operatorStates({ ...blocked, pr: pull(99) }),
     ["initial", "investigation", "implementation", "review", "resolved"]);
   assert.deepEqual(operatorStates(example.tasks.find((item) => item.state === "resolved")), []);
+});
+
+test("the Unblock popup preselects the blocked-from state and fills option text verbatim", async () => {
+  const { unblockState, unblockChoice, validate } = await import("./factory-data.mjs");
+  const blocked = example.tasks.find((item) => item.state === "blocked");
+  assert.deepEqual(blocked.blocker.options.map((option) => option.label),
+    ["Add the docs token to the CI secrets", "Skip the docs build in CI"]);
+  assert.equal(unblockState(blocked), "investigation");
+  const review = { ...blocked, blocker: { ...blocked.blocker, from: "review" } };
+  assert.equal(unblockState(review), "initial", "review needs a PR on an issue task, so fall back to the first state");
+  assert.equal(unblockState({ ...review, issue: null }), "review");
+  const [recommended, plain] = blocked.blocker.options;
+  assert.deepEqual(unblockChoice(blocked, recommended), { state: "implementation", comment: recommended.label });
+  assert.deepEqual(unblockChoice(blocked, plain), { state: "investigation", comment: plain.label });
+  assert.equal(unblockChoice(review, { label: "Go to review", state: "review" }).state, "initial",
+    "a state that the task cannot move to is ignored");
+  const old = structuredClone(example);
+  delete old.tasks.find((item) => item.state === "blocked").blocker.options;
+  validate(old);
 });
 
 test("a new head clears the merge authorization and a stale one is rejected", async (t) => {

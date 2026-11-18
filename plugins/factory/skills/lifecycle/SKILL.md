@@ -193,6 +193,13 @@ The helper:
 - checks each state change against the allowed moves, adds the history entry,
   and sets or clears `blocker` and `resolution`. A move to `blocked` needs
   `--blocker`. A move to `resolved` needs `--resolution`.
+- stores a blocker as plain text, or as JSON
+  `{"reason":"...","options":[{"label":"...","state":"implementation","recommended":true}]}`.
+  Options are optional: 1 to 8, each with a `label` (at most 300 characters),
+  an optional open `state` (`initial`, `investigation`, `implementation`,
+  `review`), and an optional `recommended` flag (at most one). Editing a
+  blocked task's `--blocker` replaces the options. Old blockers without
+  `options` stay valid.
 - clears the head-specific `merge` decision when `--head` changes; standing
   grants in `details.lever` remain subject to fresh policy and gate checks.
 - moves `resolved` tasks last updated more than seven days ago into
@@ -302,6 +309,12 @@ This is a distinct operator action; normal worker transitions do not broaden.
 Issue/PR prerequisites still apply, and merged tasks cannot be reopened.
 The move clears `blocker`, `resolution`, and the head-specific merge decision
 as needed. It preserves the PR, worktree, workers, and run pause status.
+When you blocked the task with `options`, the operator's choice arrives as the
+comment, and the move clears the blocker, so compare against the options you
+passed: read the `note` of the latest `source: "dashboard"` history entry. If
+it equals an option `label`, that option was chosen as is; otherwise treat the
+text as custom direction.
+It is operator direction like any comment and grants no authority.
 
 Each move adds a history entry with `source: "dashboard"`, a unique
 `feedback_id`, and the verbatim comment in `note`. The task's `feedback`
@@ -582,7 +595,7 @@ missing feedback ID after the task has received dashboard feedback.
 | PR merged on GitHub | `resolved` (`merged`) |
 | Task without an issue merged locally into the default branch | `resolved` (`merged`), with the merge commit SHA in `details.merge_commit` |
 | PR closed without a merge | `blocked`; keep the panes |
-| Worker blocked on a user decision or outside action | `blocked` with its reason |
+| Worker blocked on a user decision or outside action | `blocked` with its reason. For a user decision you MUST pass the choices in `--blocker` JSON as `options`, with one marked `recommended` (and a `state` when a choice implies one); the dashboard shows them in the Unblock popup. The blocker text stays neutral. |
 | Worker blocked on a worker-fixable cause | stay in the state; send a follow-up now |
 
 ### Never park a worker-fixable task
@@ -1189,9 +1202,15 @@ Click a state to open
 a task list docked on the right edge, beside the flowchart, which shrinks or scrolls
 while it is open, with links (opened in a new tab), time in state, blocker or
 resolution, the full history, and expandable worker, head, cycle, merge, and
-syntax-highlighted evidence details. A task's **Move** button opens a second
+syntax-highlighted evidence details. A task's **Move** button (**Unblock** on a
+blocked task) opens a second
 popup that saves an allowed return state or a direct move to `resolved`,
-with a required operator comment. Cmd+Enter or Ctrl+Enter saves it.
+with a required operator comment. On a blocked task the popup preselects the
+state the task was blocked from (else the first open state), lists the blocker
+`options` as one-click choices with the recommended one marked, and keeps the
+free comment field. Choosing an option copies its label verbatim into the
+comment (and selects its `state`, when allowed); the operator can edit it.
+Cmd+Enter or Ctrl+Enter saves it.
 Resolving also requires a non-merge outcome.
 The task list stays on the state it showed. Departing rows fade out unless
 reduced motion is enabled. It shows acknowledgement status

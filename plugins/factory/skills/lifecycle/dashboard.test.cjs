@@ -792,6 +792,58 @@ test("Find work shows a paused factory and disabled or unscheduled rules", async
   assert.equal(ui.get("ignored-empty").hidden, false);
 });
 
+test("Unblock lists options, fills the comment verbatim and saves through the move path", async (t) => {
+  const ui = await dashboard(t);
+  ui.run("choose('blocked')");
+  const row = ui.get("task-list").querySelector(".move");
+  assert.equal(row.textContent, "Unblock");
+  assert.match(ui.get("task-list").textContent, /Add the docs token to the CI secrets \(recommended\)/);
+  await row.fire("click");
+  assert.match(ui.get("move-title").textContent, /^Unblock: /);
+  const form = ui.get("move-body").querySelector("form");
+  const state = form.querySelector("select");
+  const comment = form.querySelector("textarea");
+  assert.equal(state.value, "investigation", "The state the task was blocked from is preselected.");
+  assert.equal(comment.value, "");
+  const choices = form.querySelectorAll(".option");
+  assert.deepEqual(choices.map((choice) => choice.children[0]), ["Add the docs token to the CI secrets", "Skip the docs build in CI"]);
+  assert.match(choices[0].textContent, /Recommended/);
+  assert.doesNotMatch(choices[1].textContent, /Recommended/);
+  await choices[0].fire("click");
+  assert.equal(comment.value, "Add the docs token to the CI secrets");
+  assert.equal(state.value, "implementation");
+  await choices[1].fire("click");
+  assert.equal(comment.value, "Skip the docs build in CI");
+  assert.equal(state.value, "investigation");
+  comment.value = "Use a custom token instead.";
+  await form.fire("submit");
+  const saved = JSON.parse(await readFile(join(ui.directory, factoryFile), "utf8")).tasks.find((task) => task.id === "issue-5");
+  assert.equal(saved.state, "investigation");
+  assert.equal(saved.blocker, null);
+  assert.equal(saved.history.at(-1).note, "Use a custom token instead.");
+  assert.equal(saved.history.at(-1).source, "dashboard");
+  assert.equal(saved.history.at(-1).feedback_id, saved.feedback.id);
+  assert.equal(saved.feedback.acknowledged_id, null);
+});
+
+test("Unblock without options shows only the state and the comment; other rows keep Move", async (t) => {
+  const ui = await dashboard(t);
+  const data = structuredClone(example);
+  const task = data.tasks.find((item) => item.id === "issue-5");
+  task.blocker = { from: "implementation", reason: "<b>Old</b> blocker", since: task.blocker.since };
+  await writeFile(join(ui.directory, factoryFile), JSON.stringify(data));
+  await ui.run("refresh()");
+  ui.run("choose('blocked')");
+  await ui.get("task-list").querySelector(".move").fire("click");
+  const form = ui.get("move-body").querySelector("form");
+  assert.equal(form.querySelector("select").value, "implementation");
+  assert.equal(form.querySelectorAll(".option").length, 0);
+  assert.equal(form.querySelector(".unblock-options").hidden, true);
+  await ui.get("close-move").fire("click");
+  ui.run("choose('initial')");
+  assert.equal(ui.get("task-list").querySelector(".move").textContent, "Move");
+});
+
 test("Move opens a separate popup whose draft survives refresh and conflict", async (t) => {
   const ui = await dashboard(t);
   ui.run("choose('blocked')");
