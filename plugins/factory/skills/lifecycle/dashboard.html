@@ -222,6 +222,11 @@
       .move-form label + label { margin-top: 12px; }
       .move-form label[hidden] { display: none; }
       .move-form select, .move-form textarea { display: block; width: 100%; margin-top: 4px; font-weight: 400; }
+      .unblock-context { margin: 0 0 12px; padding: 8px 12px; border-left: 3px solid var(--attention); background: var(--bg-muted); }
+      .unblock-context p { margin: 0; }
+      .unblock-context .unblock-reason { margin-top: 4px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 40vh; overflow: auto; }
+      .unblock-notes { margin: 8px 0 0; padding: 0; list-style: none; font-size: 12px; color: var(--fg-muted);
+        white-space: pre-wrap; overflow-wrap: anywhere; }
       .unblock-options { display: flex; flex-direction: column; gap: 8px; margin: 12px 0; }
       .unblock-options p { margin: 0; }
       .unblock-options button { display: block; width: 100%; text-align: left; font-weight: 400;
@@ -1158,12 +1163,33 @@
         return form;
       }
 
+      function blockContext(task) {
+        const { from, reason, since } = task.blocker;
+        const heading = element("p", `Blocked in ${from} for `, "muted");
+        heading.append(elapsedLabel(since));
+        const body = rich("p", reason, "unblock-reason");
+        body.tabIndex = 0;
+        body.setAttribute("role", "region");
+        body.setAttribute("aria-label", "Blocker reason");
+        const nodes = [heading, body];
+        if (!/^(none\.?)?$/i.test(task.next_action?.trim() ?? "")) nodes.push(rich("p", `Next: ${task.next_action}`, "muted"));
+        const notes = task.history.filter((item) => item.note && item.note !== reason).slice(-3).reverse();
+        if (notes.length) {
+          const list = element("ul", null, "unblock-notes");
+          list.append(...notes.map((item) => rich("li", `${item.state} ${shortTime(item.at)}: ${item.note}`)));
+          nodes.push(list);
+        }
+        return nodes;
+      }
+
       function moveForm(task) {
         const file = selection;
         let current = task;
         const form = element("form", null, "move-form");
         const fields = element("fieldset");
         const unblock = task.state === "blocked";
+        const context = element("section", null, "unblock-context");
+        context.setAttribute("aria-label", "Why this task is blocked");
         const stateLabel = element("label", "Move to");
         const state = element("select");
         state.name = "state";
@@ -1201,7 +1227,10 @@
         options.setAttribute("role", "group");
         options.setAttribute("aria-label", "Suggested answers");
         const renderOptions = () => {
-          const suggested = unblock && current.state === "blocked" ? current.blocker?.options ?? [] : [];
+          const blocked = unblock && current.state === "blocked" && current.blocker;
+          context.hidden = !blocked;
+          context.replaceChildren(...(blocked ? blockContext(current) : []));
+          const suggested = blocked ? current.blocker.options ?? [] : [];
           options.hidden = !suggested.length;
           options.replaceChildren(...(suggested.length ? [element("p", "Suggested answers. Pick one, then edit or write your own below.", "muted")] : []),
             ...suggested.map((option) => {
@@ -1244,7 +1273,7 @@
         reload.hidden = true;
         const actions = element("div", null, "controls");
         actions.append(reload, save);
-        fields.append(stateLabel, resolutionLabel, options, commentLabel, notice, error, actions);
+        fields.append(...(unblock ? [context] : []), stateLabel, resolutionLabel, options, commentLabel, notice, error, actions);
         form.append(fields);
         const failed = (cause) => {
           error.textContent = cause.message;

@@ -1257,7 +1257,14 @@ test("Unblock lists options, fills the comment verbatim and saves through the mo
   const form = ui.get("move-body").querySelector("form");
   const state = form.querySelector("select");
   const comment = form.querySelector("textarea");
-  assert.equal(state.value, "investigation", "The state the task was blocked from is preselected.");
+  const context = form.querySelector(".unblock-context");
+  assert.equal(context.children[0].textContent.startsWith("Blocked in investigation for "), true);
+  const reason = context.querySelector(".unblock-reason");
+  assert.equal(reason.textContent, "The docs build needs a token that the worker cannot read.");
+  assert.equal(reason.tabIndex, 0);
+  assert.equal(reason.role, "region");
+  assert.match(context.textContent, /Next: Ask the user for the docs token\./);
+  assert.match(context.querySelector(".unblock-notes").textContent, /blocked .*: Needs a token\./);
   assert.equal(comment.value, "");
   const choices = form.querySelectorAll(".option");
   assert.deepEqual(choices.map((choice) => choice.children[0]), ["Add the docs token to the CI secrets", "Skip the docs build in CI"]);
@@ -1293,9 +1300,52 @@ test("Unblock without options shows only the state and the comment; other rows k
   assert.equal(form.querySelector("select").value, "implementation");
   assert.equal(form.querySelectorAll(".option").length, 0);
   assert.equal(form.querySelector(".unblock-options").hidden, true);
+  const reason = form.querySelector(".unblock-reason");
+  assert.equal(reason.textContent, "<b>Old</b> blocker");
+  assert.equal(reason.querySelectorAll("b").length, 0);
+  assert.match(form.querySelector(".unblock-context").textContent, /^Blocked in implementation for /);
   await ui.get("close-move").fire("click");
   ui.run("choose('initial')");
   assert.equal(ui.get("task-list").querySelector(".move").textContent, "Move");
+  await ui.get("task-list").querySelector(".move").fire("click");
+  assert.equal(ui.get("move-body").querySelector(".unblock-context"), null);
+});
+
+test("Unblock shows a long reason in full and only the last three history notes, newest first", async (t) => {
+  const ui = await dashboard(t);
+  const data = structuredClone(example);
+  const task = data.tasks.find((item) => item.id === "issue-5");
+  const reason = `${"x".repeat(2500)}\n${"y".repeat(2500)}`;
+  task.blocker.reason = reason;
+  task.next_action = "None.";
+  task.history = ["one", "two", "three", "four"].map((note, index) => ({
+    state: index === 3 ? "blocked" : "investigation", at: `2026-05-01T0${index}:00:00Z`, note,
+  }));
+  await writeFile(join(ui.directory, factoryFile), JSON.stringify(data));
+  await ui.run("refresh()");
+  ui.run("choose('blocked')");
+  await ui.get("task-list").querySelector(".move").fire("click");
+  const context = ui.get("move-body").querySelector(".unblock-context");
+  assert.equal(context.querySelector(".unblock-reason").textContent, reason);
+  assert.doesNotMatch(context.textContent, /Next:/);
+  const notes = context.querySelector(".unblock-notes").children.map((item) => item.textContent.replace(/^.*: /, ""));
+  assert.deepEqual(notes, ["four", "three", "two"]);
+});
+
+test("Reload task refreshes the blocker reason and keeps the comment draft", async (t) => {
+  const ui = await dashboard(t);
+  ui.run("choose('blocked')");
+  await ui.get("task-list").querySelector(".move").fire("click");
+  const form = ui.get("move-body").querySelector("form");
+  form.querySelector("textarea").value = "My draft";
+  const { update } = await import("./factory.mjs");
+  await update(join(ui.directory, factoryFile), {
+    task: "issue-5", blocker: JSON.stringify({ reason: "A new reason." }),
+  });
+  await form.fire("submit");
+  await form.querySelectorAll("button").find((button) => button.textContent === "Reload task").fire("click");
+  assert.equal(form.querySelector(".unblock-reason").textContent, "A new reason.");
+  assert.equal(form.querySelector("textarea").value, "My draft");
 });
 
 test("Move opens a separate popup whose draft survives refresh and conflict", async (t) => {

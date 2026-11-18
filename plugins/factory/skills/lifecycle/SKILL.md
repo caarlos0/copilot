@@ -614,7 +614,7 @@ missing feedback ID after the task has received dashboard feedback.
 | PR merged on GitHub | `resolved` (`merged`) |
 | Task without an issue merged locally into the default branch | `resolved` (`merged`), with the merge commit SHA in `details.merge_commit` |
 | PR closed without a merge | `blocked`; keep the panes |
-| Worker blocked on a user decision or outside action | `blocked` with its reason. For a user decision you MUST pass the choices in `--blocker` JSON as `options`, with one marked `recommended` (and a `state` when a choice implies one); the dashboard shows them in the Unblock popup. Never write "(recommended)" in a label; set the `recommended` flag. The blocker text stays neutral. |
+| Worker blocked on a user decision or outside action | `blocked` with its reason. For a user decision you MUST pass the choices in `--blocker` JSON as `options`, with one marked `recommended` (and a `state` when a choice implies one); the dashboard shows them in the Unblock popup. Never write "(recommended)" in a label; set the `recommended` flag. The blocker text stays neutral. The `reason` is shown alone in the Unblock popup, so write it self-contained: what is needed, why, what each option does; never refer to chat, a result file, or "above". |
 | Worker blocked on a worker-fixable cause | stay in the state; send a follow-up now |
 
 ### Never park a worker-fixable task
@@ -1225,8 +1225,9 @@ syntax-highlighted evidence details. A task's **Move** button (**Unblock** on a
 blocked task) opens a second
 popup that saves an allowed return state or a direct move to `resolved`,
 with a required operator comment. On a blocked task the popup preselects the
-state the task was blocked from (else the first open state), lists the blocker
-`options` as one-click choices with the recommended one marked, and keeps the
+state the task was blocked from (else the first open state), shows the blocker
+reason, the state it came from, the next action and the last three history notes,
+lists the blocker `options` as one-click choices with the recommended one marked, and keeps the
 free comment field. Choosing an option copies its label verbatim into the
 comment (and selects its `state`, when allowed); the operator can edit it.
 Cmd+Enter or Ctrl+Enter saves it.
