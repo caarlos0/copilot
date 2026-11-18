@@ -397,18 +397,24 @@
         "review>implementation": across("implementation", "review", row + 20).reverse(),
         "review>resolved": across("review", "resolved"),
       };
-      // Each state drops to its own bus level and slot on Blocked, nested so no line crosses another.
+      // Each state has one edge into Blocked and one back out, side by side 20 apart so the arrowheads
+      // do not overlap. Slots on Blocked are 20 apart in the same order as the states, and the
+      // outer lane of each pair takes the lower bus, so no line crosses another.
       const blockedLanes = {
-        initial: { bus: bottom + 75, slot: 520 },
-        investigation: { bus: bottom + 45, slot: 550 },
-        implementation: { slot: 580 },
-        review: { bus: bottom + 45, slot: 610 },
+        initial: { out: { dx: -10, bus: bottom + 85, slot: 510 }, in: { dx: 10, bus: bottom + 70, slot: 530 } },
+        investigation: { out: { dx: -10, bus: bottom + 55, slot: 550 }, in: { dx: 10, bus: bottom + 40, slot: 570 } },
+        implementation: { out: { dx: 10, slot: 590 }, in: { dx: 30, slot: 610 } },
+        review: { out: { dx: -10, bus: bottom + 40, slot: 630 }, in: { dx: 10, bus: bottom + 55, slot: 650 } },
       };
-      for (const [state, { bus, slot }] of Object.entries(blockedLanes)) {
-        const x = centre(state).x;
-        flowRoutes[`${state}>blocked`] = bus === undefined
-          ? [[x, bottom], [x, places.blocked.y]]
-          : [[x, bottom], [x, bus], [slot, bus], [slot, places.blocked.y]];
+      for (const [state, lanes] of Object.entries(blockedLanes)) {
+        for (const [direction, { dx, bus, slot }] of Object.entries(lanes)) {
+          const x = centre(state).x + dx;
+          const down = bus === undefined
+            ? [[x, bottom], [x, places.blocked.y]]
+            : [[x, bottom], [x, bus], [slot, bus], [slot, places.blocked.y]];
+          if (direction === "out") flowRoutes[`${state}>blocked`] = down;
+          else flowRoutes[`blocked>${state}`] = [...down].reverse();
+        }
       }
 
       let selection = new URLSearchParams(location.search).get("file") ?? "";
@@ -535,8 +541,8 @@
         edge("shortcut", SHORTCUT);
         edge("source>initial", SOURCE_ROUTE);
         for (const state of Object.keys(blockedLanes)) {
-          const node = edge(`${state}>blocked`, flowRoutes[`${state}>blocked`]);
-          node.setAttribute("marker-start", "url(#arrow)");
+          edge(`${state}>blocked`, flowRoutes[`${state}>blocked`]);
+          edge(`blocked>${state}`, flowRoutes[`blocked>${state}`]);
         }
         const nodes = svg("g", { id: "nodes" });
         const source = svg("g", {
@@ -668,10 +674,6 @@
         const key = `${hop.from}>${hop.to}`;
         if (flowRoutes[key]) return pathOf(flowRoutes[key]);
         if (hop.to === "resolved") return pathOf(SHORTCUT);
-        if (hop.from === "blocked") {
-          const reverse = flowRoutes[`${hop.to}>blocked`];
-          if (reverse) return pathOf([...reverse].reverse());
-        }
         const a = centre(hop.from);
         const b = centre(hop.to);
         return pathOf([[a.x, a.y], [b.x, a.y], [b.x, b.y]]);

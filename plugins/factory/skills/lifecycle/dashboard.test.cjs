@@ -778,7 +778,7 @@ test("flow edges and token routes use only straight horizontal and vertical segm
   for (const hop of [{ from: null, to: "initial" }, { from: "blocked", to: "review" }, { from: "initial", to: "review" }]) {
     paths.push(ui.run(`routeFor(${JSON.stringify(hop)})`));
   }
-  assert.equal(paths.length, 15);
+  assert.equal(paths.length, 19);
   for (const path of paths) {
     assert.match(path, /^M[\d.,-]+( L[\d.,-]+)+$/, `Only M and L commands: ${path}`);
     const points = path.slice(1).split(" L").map((point) => point.split(",").map(Number));
@@ -1070,6 +1070,41 @@ test("resolution counts and sublists update when a task is resolved and reopened
   assert.equal(ui.run("location.hash"), "#resolved/completed");
   assert.equal(ui.get("task-list").children.length, 0);
   assert.equal(ui.get("detail-empty").hidden, false);
+});
+
+test("Blocked has a separate one-way edge in each direction that never overlaps another", async (t) => {
+  const ui = await dashboard(t);
+  const edges = ui.get("flow").querySelectorAll(".edge");
+  const keys = edges.map((edge) => edge.dataset.edge);
+  const parse = (path) => path.slice(1).split(" L").map((point) => point.split(",").map(Number));
+  const lanes = [];
+  for (const state of ["initial", "investigation", "implementation", "review"]) {
+    for (const key of [`${state}>blocked`, `blocked>${state}`]) {
+      const edge = edges.find((item) => item.dataset.edge === key);
+      assert.ok(edge, `Missing edge ${key}`);
+      assert.equal(edge["marker-start"], undefined, `${key} has one arrowhead`);
+      assert.equal(edge["marker-end"], "url(#arrow)");
+      const points = parse(edge.d);
+      const into = key.endsWith(">blocked");
+      assert.equal(into ? points.at(-1)[1] : points[0][1], 430, `${key} meets the top of Blocked`);
+      assert.equal(into ? points[0][1] : points.at(-1)[1], 320, `${key} meets the bottom of its state`);
+      lanes.push({ key, points });
+    }
+  }
+  assert.equal(new Set(keys).size, keys.length, "Edge keys are unique");
+
+  const segments = (points) => points.slice(1).map(([x, y], index) => {
+    const [px, py] = points[index];
+    return { x1: Math.min(x, px), x2: Math.max(x, px), y1: Math.min(y, py), y2: Math.max(y, py) };
+  });
+  const touch = (a, b) => a.x1 <= b.x2 && b.x1 <= a.x2 && a.y1 <= b.y2 && b.y1 <= a.y2;
+  lanes.forEach((a, index) => lanes.slice(index + 1).forEach((b) => {
+    for (const first of segments(a.points)) {
+      for (const second of segments(b.points)) {
+        assert.equal(touch(first, second), false, `${a.key} touches ${b.key}`);
+      }
+    }
+  }));
 });
 
 test("only edges out of populated states keep animating", async (t) => {
