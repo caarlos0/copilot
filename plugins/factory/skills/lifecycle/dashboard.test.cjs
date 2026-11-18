@@ -567,7 +567,7 @@ test("flow edges and token routes use only straight horizontal and vertical segm
   for (const hop of [{ from: null, to: "initial" }, { from: "blocked", to: "review" }, { from: "initial", to: "review" }]) {
     paths.push(ui.run(`routeFor(${JSON.stringify(hop)})`));
   }
-  assert.equal(paths.length, 14);
+  assert.equal(paths.length, 15);
   for (const path of paths) {
     assert.match(path, /^M[\d.,-]+( L[\d.,-]+)+$/, `Only M and L commands: ${path}`);
     const points = path.slice(1).split(" L").map((point) => point.split(",").map(Number));

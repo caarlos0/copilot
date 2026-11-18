@@ -146,7 +146,10 @@ or autopilot merely because factory is running.
 
 The producer ("Find work") is not a task state. It feeds `initial` from three
 sources: user links, `search` rules, and `backlog` rules (a one-shot read-only
-worker using `keep-the-pool-full`). A rule with `every` runs on a schedule only
+worker using `keep-the-pool-full`). A PR the user gives for review skips
+`initial`: the task is created in `review` with `--pr`, and a review worker
+launches at once (`initial` to `review` is allowed only with a PR). A rule with
+`every` runs on a schedule only
 while the factory is active and running; `broker.mjs wait --due` returns a
 `rule.due` event when one is due. The factory stamps `--rule ID --ran` before it
 dispatches. The `ignored` list holds skipped archive matches. The dashboard

@@ -92,6 +92,7 @@ test("a task without an issue moves through every state and merges without a pr"
 test("moves follow the flow and each move adds history", async (t) => {
   const f = await started(t);
   f.fails(/cannot move from initial to review/, "--task", "issue-1", "--state", "review");
+  f.fails(/cannot move from initial to review/, "--task", "issue-1", "--state", "review", "--pr", "null");
   f.ok("--task", "issue-1", "--state", "investigation", "--note", "go");
   f.ok("--task", "issue-1", "--state", "implementation");
   f.fails(/needs a pr/, "--task", "issue-1", "--state", "review");
@@ -105,6 +106,34 @@ test("moves follow the flow and each move adds history", async (t) => {
   const { cyclesOf, entered } = await import("./factory-data.mjs");
   assert.equal(cyclesOf(task), 1);
   assert.equal(entered(task), task.history.at(-1).at);
+});
+
+test("a task with a PR can skip initial: created in review, or moved from initial", async (t) => {
+  const f = await started(t);
+  f.fails(/only with --pr/, "--task", "pr-5", "--title", "Review it", "--issue", issue(5),
+    "--next-action", "Review", "--state", "review");
+  f.fails(/only with --pr/, "--task", "pr-5", "--title", "Review it", "--issue", issue(5),
+    "--next-action", "Review", "--state", "review", "--pr", "null");
+  f.fails(/starts in the initial state/, "--task", "pr-5", "--title", "Review it", "--issue", issue(5),
+    "--next-action", "Review", "--state", "implementation", "--pr", pull(5));
+  f.ok("--task", "pr-5", "--title", "Review it", "--issue", issue(5), "--next-action", "Review",
+    "--state", "review", "--pr", pull(5), "--head", sha("a"));
+  const created = (await f.read()).tasks.find((item) => item.id === "pr-5");
+  assert.equal(created.state, "review");
+  assert.equal(created.pr, pull(5));
+  assert.deepEqual(created.history.map((item) => item.state), ["review"]);
+
+  f.ok("--task", "pr-6", "--title", "Review too", "--issue", "null", "--next-action", "Review", "--pr", pull(6));
+  f.ok("--task", "pr-6", "--state", "review", "--note", "User gave the PR for review");
+  const moved = (await f.read()).tasks.find((item) => item.id === "pr-6");
+  assert.deepEqual(moved.history.map((item) => item.state), ["initial", "review"]);
+
+  f.ok("--task", "pr-7", "--title", "And this", "--issue", issue(7), "--next-action", "Review");
+  f.ok("--task", "pr-7", "--state", "review", "--pr", pull(7));
+  assert.equal((await f.read()).tasks.find((item) => item.id === "pr-7").state, "review");
+  f.ok("--task", "issue-1", "--state", "investigation");
+  f.fails(/cannot move from investigation to review/, "--task", "issue-1", "--state", "review",
+    "--pr", pull(8));
 });
 
 test("a rejected move leaves the file unchanged", async (t) => {

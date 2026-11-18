@@ -68,13 +68,17 @@ function newTask(values, now) {
       throw new Error(`A new task needs --${option}. Use --issue null for work without a GitHub issue.`);
     }
   }
-  if (values.state !== undefined && values.state !== "initial") {
-    throw new Error("A new task starts in the initial state.");
+  const state = values.state ?? "initial";
+  if (state !== "initial" && state !== "review") {
+    throw new Error("A new task starts in the initial state, or in review when it has a --pr.");
+  }
+  if (state === "review" && (values.pr === undefined || values.pr === "null")) {
+    throw new Error("A new task starts in review only with --pr URL.");
   }
   return {
     id: values.task,
     title: values.title,
-    state: "initial",
+    state,
     updated_at: now,
     next_action: values["next-action"],
     issue: null,
@@ -87,14 +91,14 @@ function newTask(values, now) {
     merge: null,
     workers: {},
     worktree: null,
-    history: [{ state: "initial", at: now, note: values.note ?? null }],
+    history: [{ state, at: now, note: values.note ?? null }],
     details: {},
   };
 }
 
 function changeState(task, values, now, operator) {
   const to = values.state;
-  checkTransition(task, to, operator);
+  checkTransition(values.pr === undefined ? task : { ...task, pr: nullable(values.pr) }, to, operator);
   const from = task.state;
   if (values.resolution !== undefined && to !== "resolved") {
     throw new Error("--resolution is allowed only when moving to resolved.");
@@ -507,7 +511,8 @@ Task options:
                         Use only with --task and --expected-revision
   --feedback-id ID      Feedback ID from the worker result; required after acknowledgement
 
-Allowed moves: initial to investigation, investigation to implementation, implementation to
+Allowed moves: initial to investigation, initial to review (only with a PR; a new task may also
+start in review with --state review --pr URL), investigation to implementation, implementation to
 review, review to implementation, any open state to blocked or resolved, blocked to any open
 state, and resolved to initial (reopen, not after a merge). A task with an issue needs a PR in
 review and for a merge decision. A task without an issue (--issue null) uses every state without a
