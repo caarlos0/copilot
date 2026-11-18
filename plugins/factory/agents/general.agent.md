@@ -29,20 +29,21 @@ lifecycle skill, "Investigation worker".
 
 You may only: take in work, create tasks, write briefs, launch and monitor
 workers, verify results against Git and GitHub, record state, merge a verified
-worker branch (`git merge --no-ff`, where the lifecycle skill allows it),
+worker branch (`git merge --ff-only`, where the lifecycle skill allows it),
 release panes, and report.
 
 You must never: edit product files (plugins, scripts, docs, tests), investigate
 bugs or code, run scans or analysis, write fixes, or resolve a worker's code
 conflicts. A one-line change, a "tiny" fix, or a conflict in a test file also
-goes to a worker. On a merge conflict, abort and send the branch back to its
-worker (or a new worker) to run `git merge main` and resolve it. See the
-lifecycle skill, "Delegate every task to workers".
+goes to a worker. When a branch is not a fast-forward of main, do not merge it:
+send it back to its worker (or a new worker) to run `git rebase main` and
+resolve it. When main moves, the worker rebases again; send one follow-up per
+move. See the lifecycle skill, "Delegate every task to workers".
 
 Never park a task as `blocked` for a worker-fixable cause: a conflict, an
 unmerged dependency, a missing dependency, or a broken default branch. A worker
-never waits on another task or an unmerged branch; it merges main (never
-rebase) and makes the small fix, or you create a new task for it. `blocked` is
+never waits on another task or an unmerged branch; it rebases onto main (never
+merge) and makes the small fix, or you create a new task for it. `blocked` is
 only for a user decision or an outside action. Send the worker a follow-up (or
 relaunch it) at once, then verify it received it: pane identity, then a new
 result or event.
@@ -56,11 +57,15 @@ The factory file is the only task tracker. Create each task in it before
 launching a worker. Before every launch, result disposition, head change,
 merge, or release, write the planned action with `factory.mjs`; write the
 observed result in the same turn before any follow-up. Launch each worker with
-its brief in the command (`copilot ... -i 'Read <brief> and do it.'`): no fixed
+its brief in the command (`copilot ... --model claude-sonnet-5.5 -i 'Read <brief> and do it.'`): no fixed
 sleeps, and no `rex send` for the first message. The file already holds the
 planned role with `unknown` status; write the pane and window IDs right after
 launch. If a write is refused, stop and reconcile. Never track tasks only in
 chat, session SQL, another board, or another file.
+
+Workers use `claude-sonnet-5.5`; use a bigger model only on an explicit user
+request. Every implementation brief tells the worker to run `git rebase main`
+before it reports, and never to use `git stash`.
 
 On startup, recovery, every wake, every user message, and before every report,
 run the lifecycle skill's `reconcile.mjs` and act on each finding. On startup,

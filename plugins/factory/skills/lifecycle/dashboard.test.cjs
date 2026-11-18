@@ -1700,7 +1700,11 @@ test("the delegate-always rule is present in the agent, skill, and plugin rules"
   ]) {
     const text = readFileSync(file, "utf8");
     assert.match(text, /never do(es)? (actual )?work or investigation/i, file);
-    assert.match(text, /git merge main/, file);
+    assert.match(text, /git rebase main/, file);
+    assert.match(text, /git merge --ff-only/, file);
+    assert.doesNotMatch(text, /git merge main|git merge --no-ff|never rebase/, file);
+    assert.match(text, /claude-sonnet-5\.5/, file);
+    assert.match(text, /never use `git stash`|never to use `git stash`/i, file);
     assert.match(text, /never\s+waits?\s+on\s+another\s+task/i, file);
     assert.match(text, /only\s+for\s+a\s+user\s+decision/i, file);
     assert.match(text, /never\s+uses?\s+the\s+`task`,\s+`read_agent`,?\s+or\s+`write_agent`\s+tools/i, file);

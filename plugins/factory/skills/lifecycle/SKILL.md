@@ -26,7 +26,7 @@ The coordinator may only:
 - launch and monitor workers;
 - verify results against Git and GitHub evidence;
 - record state with `factory.mjs`;
-- merge a verified, committed worker branch with `git merge --no-ff`, only
+- merge a verified, committed worker branch with `git merge --ff-only`, only
   where "Merge" and the autonomy dial allow it;
 - release panes and report.
 
@@ -40,8 +40,10 @@ The coordinator must never:
 
 Size does not matter. A one-line change, a "tiny" fix, a dashboard label, or
 a conflict in a test file goes to a worker: the owning worker, or a new task.
-When a merge conflicts, abort it and send the branch back to its worker (or a
-new worker) to run `git merge main` and resolve the conflict there. When a
+When a branch is not a fast-forward of the default branch, do not merge it:
+send it back to its worker (or a new worker) to run `git rebase main` and
+resolve the conflict there. When the default branch moves, the worker rebases
+again; send one follow-up per move. When a
 check fails or a result is unclear, create or reopen a task for a worker to
 investigate. Do not investigate it yourself.
 
@@ -630,8 +632,9 @@ worker-fixable, so they never justify `blocked`, a wait, or a schedule:
 - a missing dependency;
 - a broken default branch.
 
-A worker never waits on another task or an unmerged branch. It merges the
-default branch into its branch (never rebase) and makes the small fix. If the
+A worker never waits on another task or an unmerged branch. It rebases its
+branch onto the default branch (`git rebase main`, never merge) and makes the
+small fix. If the
 fix is not small, or does not belong to the task, the coordinator creates a new
 task for it. Conflicts go back to the owning worker, as above.
 
@@ -682,6 +685,12 @@ before the first edit. If either differs from the brief, the worker stops,
 writes a `blocked` result, and does not edit. Every brief also has this
 standing line: "Read `plugins/factory/AGENTS.md` before the first edit." Skip
 that line only when the repo has no such file.
+
+Every implementation brief has these standing rules: "Run `git rebase main`
+(never merge main) before you report, and again each time the factory tells you
+main moved. Never use `git stash`: the stash list is shared by all worktrees.
+To compare against the base, use a scratch worktree or
+`git diff > $TMPDIR/x.patch`."
 
 An investigation brief has one more hard line, in these words: "You are an
 investigation worker. Do not change anything. You are forbidden to write
@@ -830,7 +839,7 @@ investigation result with `verdict: implement`. It is the only worker that
 edits, commits, or pushes. Use a new worktree for every task:
 
 ```sh
-wt fix-login -- copilot --agent coding:caarlos0 --name 'Fix login redirect' --yolo --sandbox -i 'Read /abs/brief.md and do it.'
+wt fix-login -- copilot --agent coding:caarlos0 --model claude-sonnet-5.5 --name 'Fix login redirect' --yolo --sandbox -i 'Read /abs/brief.md and do it.'
 ```
 
 Run `wt` inside the new tab, without `--tab` or `--split`, and without
@@ -847,9 +856,11 @@ It reproduces the problem, makes the smallest complete change, validates it,
 and opens the PR when authorized. For iterative performance or quality work,
 use `find-the-loop` first. Once the PR exists, use `pr-shepherd` to own CI,
 review threads, conflicts, and landing at the inherited autonomy level.
-Follow the repository's merge-not-rebase rule when updating from the base.
+Follow the factory's rebase policy when updating from the base: run
+`git rebase main` (never merge main) before every report, so the branch is a
+fast-forward of the default branch.
 It never waits on another task or an unmerged branch. If the default branch is
-broken or a dependency is missing, it merges the default branch (never rebase)
+broken or a dependency is missing, it rebases onto the default branch
 and makes the small fix, or reports it so the coordinator creates a new task.
 It writes `blocked` only for a user decision or an outside action.
 
@@ -874,8 +885,8 @@ evidence and stops.
 
 When concurrent tasks' changed-file lists overlap, record each task's validated
 default-branch SHA in `details.validated_base_sha`. After an overlapping task
-lands, the remaining worker merges the new default-branch tip into its branch
-(never rebase), reruns checks affected by the combined code, and refreshes the
+lands, the remaining worker rebases onto the new default-branch tip
+(never merges it), reruns checks affected by the combined code, and refreshes the
 base SHA and head-specific check/review evidence before landing. For local-only
 tasks, use the current local default branch, not `origin`. Keep independent
 tasks parallel.
@@ -927,9 +938,13 @@ entries. Check `copilot instruction list` in that cwd and environment. If the
 launch loses these instructions, record a blocker. Never start an unconstrained
 worker. Do not edit the product worktree or a shared instructions directory.
 
+Every worker launch (implementation, investigation, review, backlog, and
+improve) uses `--model claude-sonnet-5.5`. Use a bigger model only on an
+explicit user request: two opus sessions caused 32% of spend.
+
 Open the tab in the factory's session with the task title as its label. Verify
 the visible label. Pass the first message in the launch command with
-`-i`/`--interactive`: `copilot ... -i 'Read <absolute brief path> and do it.'`.
+`-i`/`--interactive`: `copilot ... --model claude-sonnet-5.5 -i 'Read <absolute brief path> and do it.'`.
 It starts the interactive session and runs the prompt at once. Use no fixed
 sleep, no wait for the input prompt, and no `rex send` for the first message.
 Use `rex send` only for follow-ups to an idle worker you created. Run the launch
@@ -1132,11 +1147,13 @@ worktree, write the planned release; after it is closed or removed, record that
 fact with `factory.mjs` before any other action. If a write has an unknown
 outcome, reconcile it before any further attempt.
 
-For a task without an issue or PR, the implementation worker lands with a
-local `git merge` (never rebase) into the default branch, after the same
-`may_merge` check on the exact `head`. There is no GitHub verification. Verify
-the merge with `git merge-base --is-ancestor HEAD_SHA DEFAULT_BRANCH`, store the
-merge commit SHA in `details.merge_commit`, then resolve it as `merged`.
+For a task without an issue or PR, the implementation worker rebases its branch
+onto the default branch, then lands it with a local `git merge --ff-only` into
+the default branch, after the same `may_merge` check on the exact `head`. There
+is no GitHub verification. If `--ff-only` refuses because the default branch
+moved, the worker rebases again; no merge commit is ever created. Verify
+the landing with `git merge-base --is-ancestor HEAD_SHA DEFAULT_BRANCH`, store the
+landed head SHA in `details.merge_commit`, then resolve it as `merged`.
 
 ## Release panes
 

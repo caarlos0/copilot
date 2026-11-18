@@ -9,7 +9,8 @@ It may only take in work, create tasks, write briefs, launch and monitor
 workers, verify results, record state, merge verified worker branches, release
 panes, and report. It never edits product files, investigates, scans, writes
 fixes, or resolves a worker's code conflicts, even for a one-line change. A
-conflicting merge goes back to a worker to run `git merge main`. It never uses
+branch that is not a fast-forward of the default branch goes back to a worker
+to run `git rebase main`. It never uses
 the `task`, `read_agent` or `write_agent` tools for factory work. Every worker,
 including backlog, discovery, and improve workers, is a Copilot session in a
 Rex tab with a brief, a result file, and `broker.mjs emit`. Keep this rule
@@ -18,10 +19,24 @@ workers" section in sync.
 
 `blocked` is only for a user decision or an outside action. A worker never waits
 on another task or an unmerged branch: for a conflict, a missing dependency, or
-a broken default branch it merges the default branch (never rebase) and makes
-the small fix, or the coordinator creates a new task. The coordinator sends a
-follow-up (or relaunches) at once for a blocked task with a worker-fixable
-cause, and verifies receipt by pane identity, then a new result or event.
+a broken default branch it rebases onto the default branch (`git rebase main`,
+never merge) and makes the small fix, or the coordinator creates a new task.
+The coordinator sends a follow-up (or relaunches) at once for a blocked task
+with a worker-fixable cause, and verifies receipt by pane identity, then a new
+result or event.
+
+Task branches keep a linear history. A worker runs `git rebase main` (never
+merge main) before it reports a head, and the factory lands a local branch with
+`git merge --ff-only`, so no merge commit is created. When the default branch
+moves, the worker rebases again, and the factory sends one follow-up per move.
+The root rule that humans merge, not rebase, when integrating upstream into a
+feature branch does not apply to factory task branches.
+
+Standing worker rules: never use `git stash`, because the stash list is shared
+by all worktrees. To compare against the base, use a scratch worktree or
+`git diff > $TMPDIR/x.patch`. Workers use `claude-sonnet-5.5`
+(`--model claude-sonnet-5.5` in the launch command); use a bigger model only
+when the user asks for it. Two opus sessions caused 32% of spend.
 
 `factory:general` is a thin agent over
 `plugins/factory/skills/lifecycle/SKILL.md`. It preloads `lifecycle`, which
@@ -42,7 +57,7 @@ plain `wt NAME` in the main checkout, never `wt NAME --main`, which uses
 `origin/<default>` and loses unpushed local commits.
 
 Workers start with their brief in the launch command
-(`copilot ... -i 'Read <brief> and do it.'`), so there is no fixed sleep and no
+(`copilot ... --model claude-sonnet-5.5 -i 'Read <brief> and do it.'`), so there is no fixed sleep and no
 `rex send` for the first message; `rex send` is only for follow-ups to idle
 workers. The planned role with `unknown` status is in the factory file before
 launch, and the pane and window IDs are written right after it. The short gap
@@ -81,8 +96,8 @@ state flow (`initial`, `investigation`, `implementation`, `review`, `blocked`,
 `resolved`), keeps history, and replaces the file atomically. A task links a
 GitHub issue, or has `issue: null` for work without one. An issue-less task
 uses every state without a PR: review covers its local branch `head`, and a
-local `git merge` resolves it as `merged` with the merge commit SHA in
-`details`. Tasks with an issue keep the PR flow. `factory-data.mjs` holds the
+local `git merge --ff-only` resolves it as `merged` with the landed head SHA in
+`details.merge_commit`. Tasks with an issue keep the PR flow. `factory-data.mjs` holds the
 schema and is shared by the writer,
 `migrate.mjs`, `serve.mjs` (port 8766, lists only `*-factory.json`), and
 `dashboard.html`. `state-dir.mjs` resolves per file, not per directory: a
@@ -152,8 +167,8 @@ decision, not the standing grant. Legacy `comment` and `factory-session`
 records remain readable but are not authority on recovery.
 
 When task file lists overlap, record each task's validated default-branch SHA
-in `details.validated_base_sha`. After one lands, the remaining worker merges
-the new base (never rebases), reruns affected checks on the combined code, and
+in `details.validated_base_sha`. After one lands, the remaining worker rebases
+onto the new base (never merges it), reruns affected checks on the combined code, and
 refreshes head-specific evidence before landing. Prefer an existing repository
 merge queue. For local-only tasks, use the current local default branch, not
 `origin`; independent tasks stay parallel.
