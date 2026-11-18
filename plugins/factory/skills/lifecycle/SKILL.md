@@ -1237,7 +1237,7 @@ acknowledgement status without claiming that a worker stopped or restarted. Clos
 its button or Escape; it stays open while you click other states. Close a popup
 with its button, Escape, or a click outside it. The move popup retains its draft and
 original revision during refresh; on conflict, reload the task,
-review the destination, and save again. It rereads the file every 10
+review the destination, and save again. It rereads the file every 30
 seconds and keeps the last good snapshot when a read fails. It lists only
 `*-factory.json` files; the old board lists the old formats. It shows saved
 state, not live worker status. The server accepts writes only from its own
