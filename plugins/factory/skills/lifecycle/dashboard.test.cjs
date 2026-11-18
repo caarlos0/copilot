@@ -411,6 +411,7 @@ async function dashboard(t, { reducedMotion = true, confirm = () => true, now = 
     createElementNS: (_, tag) => new Element(tag),
     listeners: new Map(),
     addEventListener(name, callback) { this.listeners.set(name, callback); },
+    body: { closest: () => null },
   };
   class Element {
     constructor(tag) {
@@ -461,6 +462,7 @@ async function dashboard(t, { reducedMotion = true, confirm = () => true, now = 
     }
     getBoundingClientRect() { return { left: 100, right: 900, top: 100, bottom: 700 }; }
     focus() { document.activeElement = this; }
+    closest() { return ["input", "textarea", "select"].includes(this.tag) || this.editable ? this : null; }
     requestSubmit() { this.submitted = this.fire("submit"); }
     showModal() { this.open = true; }
     close() { this.open = false; }
@@ -515,7 +517,11 @@ async function dashboard(t, { reducedMotion = true, confirm = () => true, now = 
   vm.runInContext("animate = () => {}; buildFlow();", context);
   const run = (source) => vm.runInContext(source, context);
   await run("refresh()");
-  const press = (key) => document.listeners.get("keydown")({ key });
+  const press = (key, event = {}) => {
+    const pressed = { key, target: document.body, ...event, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; } };
+    document.listeners.get("keydown")(pressed);
+    return pressed;
+  };
   return { run, document, directory, press, get: (id) => elements.get(id), setNow: (value) => { now = value; } };
 }
 
@@ -598,6 +604,33 @@ test("the task list is docked on the right of the flow, and the flow shrinks or 
   assert.match(html, /#factories \{[^}]*overflow-y: auto/);
   assert.match(html, /#detail \{[^}]*overflow-y: auto/);
   assert.match(html, /#flow \{[^}]*min-width: 720px/);
+});
+
+test("the slash key focuses the filter unless a field, modifier, or popup owns it", async (t) => {
+  const ui = await dashboard(t);
+  const filter = ui.get("global-filter");
+  const other = ui.document.createElement("div");
+  other.focus();
+  const slash = ui.press("/");
+  assert.equal(ui.document.activeElement, filter);
+  assert.equal(slash.defaultPrevented, true, "The slash must not be typed into the filter.");
+
+  const ignored = (event, why) => {
+    other.focus();
+    const pressed = ui.press("/", event);
+    assert.equal(ui.document.activeElement, other, why);
+    assert.equal(pressed.defaultPrevented, false, why);
+  };
+  for (const tag of ["input", "textarea", "select"]) ignored({ target: ui.document.createElement(tag) }, `Slash in ${tag}.`);
+  const editable = ui.document.createElement("div");
+  editable.editable = true;
+  ignored({ target: editable }, "Slash in a contenteditable element.");
+  for (const key of ["ctrlKey", "metaKey", "altKey"]) ignored({ [key]: true }, `Slash with ${key}.`);
+  for (const id of ["move-dialog", "settings-dialog", "producers-dialog"]) {
+    ui.get(id).open = true;
+    ignored({}, `Slash with ${id} open.`);
+    ui.get(id).open = false;
+  }
 });
 
 test("Escape leaves the task list open while a popup owns the key", async (t) => {
