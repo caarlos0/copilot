@@ -959,12 +959,12 @@ test("a row puts the title and Move button on one line and the links on their ow
   assert.match(html, /\.move \{[^}]*flex: none/);
 });
 
-test("reference links get an issue or pull request glyph and keep the #N text", async (t) => {
+test("reference links get an issue or pull request glyph and show the bare number", async (t) => {
   const ui = await dashboard(t);
   const issue = ui.run(`reference("https://github.com/owner/repo/issues/12")`);
   const pull = ui.run(`reference("https://github.com/owner/repo/pull/21")`);
-  assert.equal(issue.textContent, "#12");
-  assert.equal(pull.textContent, "#21");
+  assert.equal(issue.textContent, "12");
+  assert.equal(pull.textContent, "21");
   assert.equal(issue.children[0].tag, "svg");
   assert.equal(issue.children[0]["aria-label"], "Issue");
   assert.equal(pull.children[0]["aria-label"], "Pull request");
@@ -1216,7 +1216,7 @@ test("Find work lists rules, user links and skipped work without changing task s
   assert.equal(ui.get("improve-heading").hidden, false);
   assert.deepEqual(ui.get("improve-list").children.map((row) => row.querySelector("h3").textContent), ["self-improve"]);
   assert.match(ui.get("improve-list").children[0].textContent, /improve.*enabled.*Every 7d, last run .* ago, due now/);
-  assert.match(ui.get("ignored-list").textContent, /#2 2026-04-30: Archived duplicate/);
+  assert.match(ui.get("ignored-list").textContent, /2 2026-04-30: Archived duplicate/);
   assert.equal(ui.get("ignored-empty").hidden, true);
   assert.equal(ui.get("producers-note").textContent, "");
   await ui.get("close-producers").fire("click");

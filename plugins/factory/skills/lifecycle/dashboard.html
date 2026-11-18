@@ -769,7 +769,7 @@
       function reference(href) {
         const url = githubURL(href);
         const parts = url.pathname.split("/");
-        const node = link(`#${parts.pop()}`, url.href);
+        const node = link(parts.pop(), url.href);
         node.prepend(glyph(parts.pop()));
         node.className = "ref";
         node.title = url.href;
@@ -910,7 +910,7 @@
         for (const href of [task.issue, task.pr]) {
           if (!href) continue;
           const parts = githubURL(href).pathname.split("/");
-          const number = element("span", `#${parts.pop()}`, "ref");
+          const number = element("span", parts.pop(), "ref");
           number.prepend(glyph(parts.pop()));
           meta.append(number);
         }
