@@ -8,6 +8,8 @@ import { dueRules, isObject, nextDue } from "./factory-data.mjs";
 
 const maxTimer = 2 ** 31 - 1;
 const maxLine = 64 * 1024;
+const reconcileEvery = "5m";
+const reconcileMs = 5 * 60_000;
 const workerOutcomes = ["working", "waiting", "complete", "blocked"];
 
 // Each type lists whether it needs --task and the data keys it must carry.
@@ -162,20 +164,20 @@ async function readEvents(file, offset) {
   }
 }
 
-async function waitForEvents(factory, { since, timeout, exclude = [], due = false }) {
+export async function waitForEvents(factory, { since, timeout, exclude = [], due = false, reconcile = reconcileMs }) {
   await claimWaiter(factory);
   const release = () => releaseWaiter(factory);
   process.on("exit", release);
   for (const [signal, code] of [["SIGINT", 130], ["SIGTERM", 143]]) process.once(signal, () => process.exit(code));
   try {
-    return await armedWait(factory, { since, timeout, exclude, due });
+    return await armedWait(factory, { since, timeout, exclude, due, reconcile });
   } finally {
     release();
     process.off("exit", release);
   }
 }
 
-async function armedWait(factory, { since, timeout, exclude, due }) {
+async function armedWait(factory, { since, timeout, exclude, due, reconcile }) {
   const file = eventsFile(factory);
   let cursor = since ?? await size(file);
   const state = async () => JSON.parse(await readFile(factory, "utf8"));
@@ -184,6 +186,9 @@ async function armedWait(factory, { since, timeout, exclude, due }) {
   const timers = [];
   let dueTimers = [];
   let dueAt = null;
+  // Each waiter starts its own window, so a wake never fires the tick at once.
+  const reconcileTimers = [];
+  let reconcileAt = Date.now() + reconcile;
   let stopped = false;
   try {
     return await new Promise((complete, fail) => {
@@ -205,6 +210,11 @@ async function armedWait(factory, { since, timeout, exclude, due }) {
         dueTimers = [];
         if (next !== null) after(Math.max(next - Date.now(), 0), () => void check(next), dueTimers);
       };
+      const armReconcile = () => {
+        for (const timer of reconcileTimers.splice(0)) clearTimeout(timer);
+        const at = reconcileAt;
+        after(Math.max(at - Date.now(), 0), () => void check(at), reconcileTimers);
+      };
       async function check(now = Date.now()) {
         dirty = true;
         if (checking || stopped) return;
@@ -222,6 +232,14 @@ async function armedWait(factory, { since, timeout, exclude, due }) {
               const rules = dueRules(data, now);
               if (rules.length) {
                 events.push({ id: null, at: new Date(now).toISOString(), type: "rule.due", task: null, source: "broker", data: { rules } });
+              }
+              const tick = Math.max(now, Date.now());
+              if (tick >= reconcileAt) {
+                if (data.status === "active") {
+                  events.push({ id: null, at: new Date(now).toISOString(), type: "reconcile.due", task: null, source: "broker", data: { every: reconcileEvery } });
+                }
+                reconcileAt = tick + reconcile;
+                armReconcile();
               }
             }
             if (events.length) finish({ events, cursor: String(cursor) });
@@ -251,12 +269,13 @@ async function armedWait(factory, { since, timeout, exclude, due }) {
         tick(ms);
       }
       if (timeout !== undefined) after(timeout * 1000, () => finish({ events: [], cursor: String(cursor), timeout: true }));
+      if (due) armReconcile();
       console.error("Watching events.");
       void check();
     });
   } finally {
     stopped = true;
-    for (const timer of [...timers, ...dueTimers]) clearTimeout(timer);
+    for (const timer of [...timers, ...dueTimers, ...reconcileTimers]) clearTimeout(timer);
     for (const watcher of watchers) watcher.close();
   }
 }
@@ -282,6 +301,9 @@ wait    Blocks until an event exists after the cursor, prints {"events":[...],"c
         rule with "every" is due. It follows the factory file, so run-status and rule edits made
         while it waits move the due time. Stamp it with factory.mjs --rule ID --ran, or the next wait
         returns it again. Leave --due off while no slot is free for the rule.
+        --due also returns a synthetic reconcile.due event (data.every = "5m") every 5 minutes
+        after the waiter starts, while the run is active. The window is per waiter, so a wake
+        does not fire it at once. On it, run reconcile.mjs and re-arm.
 emit    Appends one event and prints it. Types: ${Object.keys(eventTypes).join(", ")}.
         Needed data keys: ${Object.entries(eventTypes).map(([type, { data }]) => `${type}: ${data.join(", ")}`).join("; ")}.
         worker.result outcome: ${workerOutcomes.join(", ")}. --source defaults to worker.

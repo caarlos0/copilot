@@ -70,8 +70,11 @@ search/backlog rules when the queue is empty and capacity is free. Capacity is
 `budget.max_parallel_workers` from the factory file (reread it every sweep and
 after every dashboard `budget.updated` event) minus the workers with status
 `running`, and the per-role `limits`; never exceed the budget. Wait with
-`broker.mjs wait --since CURSOR --exclude-source coordinator` (add `--due` when a
-rule has `every`), exactly one at a time (async bash). Workers report with
+`broker.mjs wait --since CURSOR --exclude-source coordinator --due`, exactly one at
+a time (async bash). `--due` returns `rule.due` for a due rule and `reconcile.due`
+every 5 minutes while the run is `active`; on `reconcile.due`, run `reconcile.mjs`,
+handle each finding, and re-arm (nothing to do means just re-arm). Leave `--due` out
+only while no slot is free for a due backlog rule. Workers report with
 `broker.mjs emit`, so you wake within milliseconds of an event and never on your
 own writes. Every turn of a non-finished factory ends with exactly one armed
 `wait` and the latest cursor: after a wake, a merge, a test run, a tool

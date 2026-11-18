@@ -187,7 +187,7 @@ times, and "idle" means time between turns.
 The factory waits with `broker.mjs wait`. The broker keeps one
 append-only JSONL log, `<owner.repo>-factory-events.jsonl` (mode 0600), beside
 the factory file. Events are typed notifications (`task.moved`, `task.updated`,
-`feedback.pending`, `budget.updated`, `limits.updated`, `lever.updated`, `worker.result`, `worker.blocked`, `pr.merged`; `rule.due` is computed by
+`feedback.pending`, `budget.updated`, `limits.updated`, `lever.updated`, `worker.result`, `worker.blocked`, `pr.merged`; `rule.due` and `reconcile.due` are computed by
 `wait --due` and never stored), each with a `source`. A cursor is a byte offset,
 so no event is lost between two `wait` calls. `factory.mjs` emits after every
 successful write (source `coordinator`, or `dashboard` for operator moves), and
@@ -196,7 +196,9 @@ wake it. Workers write their result file atomically, then run
 `broker.mjs emit worker.result` (or `worker.blocked`). After a PR merge, the
 implementation worker also emits `pr.merged`, a hint: the factory verifies the
 merge on GitHub, resolves the task, and releases its panes and worktree, and
-`reconcile.mjs` stays the backstop for a missed event. The factory JSON stays the
+`reconcile.mjs` stays the backstop for a missed event, and while the run is
+`active`, `wait --due` returns `reconcile.due` every 5 minutes per waiter so the
+factory runs it even when no event arrives. The factory JSON stays the
 only task tracker and the result files stay evidence; events are only
 notifications and the worker-to-factory channel. The factory must re-arm
 `wait` immediately after handling events. A failed

@@ -320,3 +320,40 @@ test("a stale waiter file counts as no waiter and is replaced by the next wait",
   await writeFile(pidFile, "garbage\n");
   assert.equal(f.run("armed", f.factory).status, 1);
 });
+
+test("--due returns reconcile.due after the injected interval while the run is active", async (t) => {
+  const f = await fixture(t);
+  await writeFile(f.factory, JSON.stringify({ status: "active", rules: [] }));
+  const { waitForEvents } = await import(script);
+  const started = Date.now();
+  const out = await waitForEvents(f.factory, { due: true, reconcile: 150, timeout: 10 });
+  assert.ok(Date.now() - started >= 140, "the tick must wait for its window");
+  assert.deepEqual(out.events.map(({ id, type, task, source, data }) => [id, type, task, source, data]),
+    [[null, "reconcile.due", null, "broker", { every: "5m" }]]);
+  assert.equal(await stat(f.log).catch(() => null), null, "the tick is never stored");
+
+  // A new waiter starts a fresh window instead of firing at once.
+  const second = Date.now();
+  await waitForEvents(f.factory, { due: true, reconcile: 150, timeout: 10 });
+  assert.ok(Date.now() - second >= 140);
+});
+
+test("reconcile.due does not fire while paused or without --due, and resumes when active", async (t) => {
+  const f = await fixture(t);
+  await writeFile(f.factory, JSON.stringify({ status: "paused", rules: [] }));
+  const { waitForEvents } = await import(script);
+  let out = await waitForEvents(f.factory, { due: true, reconcile: 50, timeout: 0.4 });
+  assert.equal(out.timeout, true);
+  assert.deepEqual(out.events, []);
+
+  await writeFile(f.factory, JSON.stringify({ status: "active", rules: [] }));
+  out = await waitForEvents(f.factory, { due: false, reconcile: 50, timeout: 0.4 });
+  assert.equal(out.timeout, true);
+
+  const pending = waitForEvents(f.factory, { due: true, reconcile: 100, timeout: 10 });
+  await writeFile(f.factory, JSON.stringify({ status: "paused", rules: [] }));
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  await writeFile(f.factory, JSON.stringify({ status: "active", rules: [] }));
+  out = await pending;
+  assert.deepEqual(out.events.map(({ type }) => type), ["reconcile.due"]);
+});

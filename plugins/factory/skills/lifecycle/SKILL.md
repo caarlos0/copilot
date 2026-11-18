@@ -995,6 +995,7 @@ the cursor. Each event has `id`, `at`, `type`, `task`, `source`, and `data`:
 | `worker.blocked` | a worker that cannot continue | `role`, `reason` |
 | `pr.merged` | the implementation worker after its final `merged: true` result | `role`, `pr`, `merge_commit`, `head` |
 | `rule.due` | `wait --due` itself, never stored | `rules`: due rule IDs |
+| `reconcile.due` | `wait --due` itself, every 5 minutes while the run is `active`, never stored | `every`: `"5m"` |
 
 Rules:
 
@@ -1032,23 +1033,28 @@ Rules:
    (`--run-status`, `--rules`, `--rule --ran`) and moves its timer, even for
    your own `coordinator` writes, so it still wakes at the new due time. Handle
    each due rule as in "Find more work", which stamps it first. Leave out
-   `--due` when no rule has `every`, or while no slot is free for a due backlog
-   worker; otherwise it returns the due rule again at once. This is the only
-   timer.
-6. `--timeout S` makes `wait` exit with `"events":[]` and `"timeout":true`;
+   `--due` only while no slot is free for a due backlog worker; otherwise it
+   returns the due rule again at once. Pass `--due` on every other wait: it
+   also returns `reconcile.due`.
+6. `reconcile.due` wakes you every 5 minutes while the run is `active`, even
+   when no worker event arrives (a crashed worker, a closed pane, a missed
+   wake). Each waiter starts its own 5 minute window, so a wake does not fire
+   it again at once. On it, run `reconcile.mjs`, handle each finding, then
+   re-arm. If there is nothing to do, just re-arm.
+7. `--timeout S` makes `wait` exit with `"events":[]` and `"timeout":true`;
    use it only for a bounded check, never as a poll loop.
-7. If nothing needs action, re-arm without writing a timestamp or an
+8. If nothing needs action, re-arm without writing a timestamp or an
    acknowledgement; do not create a wake/write loop.
-8. A lane whose result is `waiting` for a rate limit is not stuck and not
+9. A lane whose result is `waiting` for a rate limit is not stuck and not
    blocked. On the next wake, reconcile it: once its reset time has passed,
    re-arm the lane by telling the worker to resume `gh wait` (`rex send`
    reaches idle workers only). Do not start a timed loop to check the reset.
 
 Events do not prove a worker is alive. If a worker crashed before it emitted,
-nothing wakes you; every turn still runs `reconcile.mjs`, which reads result
-files, branches, and panes. Record this limit and reconcile on the next user
-request. Do not start a timed loop. Stop the waiter when the factory session
-ends. If the factory is not running, comments remain pending until its next
+no worker event wakes you; `reconcile.due` (every 5 minutes) and rule `every`
+are the only timed backstops, and every turn still runs `reconcile.mjs`, which
+reads result files, branches, and panes. Do not start another timed loop. Stop
+the waiter when the factory session ends. If the factory is not running, comments remain pending until its next
 start.
 
 ## Merge
