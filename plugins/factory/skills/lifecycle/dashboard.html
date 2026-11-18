@@ -410,9 +410,6 @@
       let listed = [];
       const seen = {};
       let mutation = 0;
-      const shown = Object.fromEntries(states.map((state) => [state, 0]));
-      const targets = Object.fromEntries(states.map((state) => [state, 0]));
-      let tweening = false;
 
       const flow = document.getElementById("flow");
       const panel = document.getElementById("detail");
@@ -594,8 +591,10 @@
         const tasks = filteredTasks();
         renderFilterStatus(tasks.length);
         const chosen = openState();
+        const counts = countByState(tasks);
         for (const state of states) {
           const group = nodeOf(state);
+          group.querySelector(".count").textContent = String(counts[state]);
           group.classList.toggle("selected", chosen === state);
           const stateTasks = tasks.filter((task) => task.state === state);
           const running = stateTasks.reduce((sum, task) => sum + Object.values(task.workers)
@@ -617,10 +616,8 @@
           group.setAttribute("aria-label",
             `Resolved: ${outcomeTitles[outcome]}, ${count} ${count === 1 ? "task" : "tasks"}`);
         }
-        Object.assign(targets, countByState(tasks));
         const enabled = snapshot.rules.filter((rule) => rule.enabled && isFinder(rule));
         drawSource(enabled);
-        tween();
         renderDetail(chosen, tasks);
       }
 
@@ -631,23 +628,6 @@
         group.querySelector(".count").textContent = String(enabled.length);
         group.querySelector(".sub").textContent = due === null ? "on request" : dueIn(due);
         group.setAttribute("aria-label", `Find work: ${enabled.length} enabled ${enabled.length === 1 ? "rule" : "rules"}`);
-      }
-
-      function tween() {
-        if (tweening) return;
-        tweening = true;
-        const started = performance.now();
-        const origin = { ...shown };
-        const step = (now) => {
-          const progress = reduced ? 1 : Math.min(1, (now - started) / 700);
-          for (const state of states) {
-            shown[state] = Math.round(origin[state] + (targets[state] - origin[state]) * progress);
-            nodeOf(state).querySelector(".count").textContent = String(shown[state]);
-          }
-          if (progress < 1) requestAnimationFrame(step);
-          else tweening = false;
-        };
-        requestAnimationFrame(step);
       }
 
       function age(time) {
@@ -1663,12 +1643,10 @@
       }
 
       function load(data, file) {
-        const sameSource = file === lastSource;
         snapshot = data;
         lastSource = file;
         lastRead = Date.now();
         document.getElementById("error").hidden = true;
-        if (!sameSource) for (const state of states) shown[state] = 0;
         document.getElementById("goal").textContent = data.project;
         const runStatus = document.getElementById("run-status");
         runStatus.textContent = data.status;

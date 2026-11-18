@@ -572,8 +572,6 @@ async function dashboard(t, { reducedMotion = true, confirm = () => true, now = 
     history: { replaceState: (_, __, value) => { location.href = new URL(value, location).href; } },
     window: { addEventListener() {}, confirm },
     matchMedia: () => ({ matches: reducedMotion }),
-    performance: { now: () => 0 },
-    requestAnimationFrame: (callback) => callback(2000),
     setTimeout() {}, clearTimeout() {}, setInterval() {},
     fetch: (path, options = {}) => {
       const init = {
