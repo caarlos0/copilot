@@ -426,7 +426,7 @@ test("accepts only GET on loopback host names", async (t) => {
   assert.equal(status, 403);
 });
 
-test("a 304 skips load and redraw but still updates the freshness label", async (t) => {
+test("a 304 skips load and redraw", async (t) => {
   const answers = [];
   const ui = await dashboard(t, {
     fetchRequest: async (path, _, request) => {
@@ -437,13 +437,10 @@ test("a 304 skips load and redraw but still updates the freshness label", async 
   });
   ui.run("let loads = 0; const original = load; load = (...args) => { loads += 1; return original(...args); }");
   answers.length = 0;
-  ui.run("lastRead = Date.now() - 20000; freshness()");
-  assert.equal(ui.get("freshness").textContent, "refreshed 20s ago");
 
   await ui.run("refresh()");
   assert.deepEqual(answers, [["/api/factories", 304], ["/api/factory", 304]]);
   assert.equal(ui.run("loads"), 0);
-  assert.equal(ui.get("freshness").textContent, "refreshed just now");
   assert.equal(ui.get("factories").children.length, 1, "the sidebar keeps its last listing");
 
   const data = structuredClone(example);
@@ -745,7 +742,7 @@ test("the sidebar lists every factory and blinks a dot on one that changed until
   await items()[0].fire("click");
   assert.equal(dots().length, 0, "Selecting a factory clears its dot.");
   assert.match(ui.run("location.href"), /file=other\.repo-factory\.json/);
-  assert.equal(ui.get("goal").textContent, "other/repo");
+  assert.equal(ui.get("project-name").textContent, "other/repo");
 
   await write("2026-05-01T14:00:00Z");
   await ui.run("refresh()");
@@ -800,15 +797,10 @@ test("only the first nine sidebar items get a kbd badge", async (t) => {
   assert.equal(items[0].querySelector("kbd").textContent, "1");
 });
 
-test("the header shows a short refresh label", async (t) => {
-  const ui = await dashboard(t, { now: Date.parse("2026-05-01T12:05:00Z") });
-  assert.equal(ui.get("freshness").textContent, "refreshed just now");
-  ui.setNow(Date.parse("2026-05-01T12:05:07Z"));
-  ui.run("freshness()");
-  assert.equal(ui.get("freshness").textContent, "refreshed 7s ago");
-  ui.setNow(Date.parse("2026-05-01T12:08:00Z"));
-  ui.run("freshness()");
-  assert.equal(ui.get("freshness").textContent, "refreshed 3m ago");
+test("the header has no refreshed label and no split title button", () => {
+  assert.doesNotMatch(html, /freshness|refreshed/i);
+  assert.doesNotMatch(html, /title-pill|id="goal"/);
+  assert.match(html, /<button id="refresh"/, "The refresh button stays.");
 });
 
 test("global task filters search any field, combine terms, and survive refresh and move dialogs", async (t) => {
@@ -1728,8 +1720,8 @@ test("the header shows the run status only when the factory is not active", asyn
   assert.equal(ui.get("run-status").textContent, "paused");
 });
 
-test("the chevron beside the factory name opens one settings dialog", async (t) => {
-  assert.match(html, /<div id="title-pill">\s*<h2 id="goal"><\/h2>\s*<button id="open-settings"[^>]*type="button"[^>]*aria-label="Settings"[^>]*title="Settings"/);
+test("the Settings item at the bottom of the sidebar opens one settings dialog", async (t) => {
+  assert.match(html, /<nav id="factories"[^>]*><\/nav>\s*<div id="sidebar-footer">\s*<button id="open-settings" class="factory-item" type="button" aria-label="Settings">[\s\S]*?<span class="name">Settings<\/span>/);
   const ui = await dashboard(t);
   await ui.get("open-settings").fire("click");
   assert.equal(ui.get("settings-dialog").open, true);
@@ -2150,7 +2142,6 @@ test("the page works on a phone: viewport, safe areas, touch sizes and contained
   };
   const narrow = blocks("(max-width: 700px)");
   const touch = blocks("(max-width: 700px), (pointer: coarse)");
-  assert.match(narrow, /#freshness \{ display: none; \}/, "The refreshed label is hidden on a phone.");
   assert.match(narrow, /#open-palette, #refresh \{[^}]*width: 44px;/, "Icon-only buttons are 44px wide.");
   assert.match(narrow, /#open-palette \.label, #refresh \.label \{ display: none; \}/, "The button text is hidden on a phone.");
   assert.doesNotMatch(touch, /\.label/, "Touch screens wider than a phone keep the text.");
@@ -2174,7 +2165,7 @@ test("the page works on a phone: viewport, safe areas, touch sizes and contained
 test("on a phone the project switcher is a dropdown beside a settings button, and desktop keeps the sidebar", () => {
   const narrow = html.slice(html.indexOf("@media (max-width: 700px) {\n        .bar"));
   assert.match(html, /\n {6}#project-bar \{ display: none; \}/, "The switcher is hidden on desktop.");
-  assert.match(narrow, /\.brand, #title-pill, #factories \{ display: none; \}/, "The title, the other dropdown and the sidebar are hidden.");
+  assert.match(narrow, /\.brand, #sidebar \{ display: none; \}/, "The brand and the sidebar, with its Settings item, are hidden.");
   assert.match(narrow, /#project-bar \{ display: flex;/);
   assert.match(html, /<div id="project-bar">\s*<div id="project-switch">\s*<button id="project-toggle"[^>]*aria-expanded="false"[^>]*aria-controls="project-menu"[^>]*aria-label="Switch project"/);
   assert.match(html, /<nav id="project-menu"[^>]*hidden><\/nav>\s*<\/div>\s*<button id="bar-settings"[^>]*aria-label="Settings"/, "The settings button follows the dropdown.");

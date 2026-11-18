@@ -206,8 +206,8 @@ outcome; it does not merge or close GitHub items. Cmd+K or Ctrl+K opens a task
 palette (`rankTasks` in `factory-data.mjs`) that docks the chosen task's list and
 focuses its row; the shortcut is ignored while another dialog is open. The header
 shows "Go to task" and "Refresh now" with an icon and text; at 700px wide or less
-they are icon-only 44px buttons and the "refreshed Xs ago" label is hidden. At that width the
-sidebar and the factory title give way to a project dropdown (the sidebar list, same sort order) with a
+they are icon-only 44px buttons. The header has no freshness label. At that width the
+sidebar gives way to a project dropdown (the sidebar list, same sort order) with a
 settings button beside it. Resolved tasks with pending
 feedback are not archived. Archived tasks go to
 `<owner.repo>-factory-archive/YYYY-MM-DD.json`, are never deleted, and come
@@ -220,7 +220,7 @@ workers are safely rebriefed or parked. CLI writes after dashboard feedback need
 `--expected-revision` plus `--ack-feedback` or `--feedback-id`.
 The factory waits on dashboard events even when all workers are blocked.
 Dashboard changes do not stop workers, resume a paused run, or grant authority.
-The chevron segment joined to the factory name opens one settings dialog. It edits the optional
+The "Settings" item pinned at the bottom of the sidebar opens one settings dialog. It edits the optional
 root `budget.max_parallel_workers` (the most workers running at once over all
 roles; absent means no total cap, a new file gets 10), `limits.investigation`
 and `limits.implementation` (integers 1 to 100), and the optional root `lever`
