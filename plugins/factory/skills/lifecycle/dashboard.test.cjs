@@ -487,7 +487,7 @@ test("the page script parses, never renders data as HTML, and finds its elements
 });
 
 // Model only the DOM operations used by the task list; HTTP and the page script are real.
-async function dashboard(t, { reducedMotion = true, confirm = () => true, now = Date.now(), fetchRequest } = {}) {
+async function dashboard(t, { reducedMotion = true, confirm = () => true, now = Date.now(), fetchRequest, phoneWidth = 0 } = {}) {
   const { url, directory } = await server(t);
   const elements = new Map();
   const document = {
@@ -573,6 +573,8 @@ async function dashboard(t, { reducedMotion = true, confirm = () => true, now = 
     }
   }
   for (const [, tag, id] of html.matchAll(/<(\w+)[^>]*\bid="([^"]+)"/g)) elements.set(id, new Element(tag));
+  elements.get("flow-wrap").clientWidth = phoneWidth;
+  const resizeListeners = [];
   elements.get("detail").append(...["detail-title", "close-detail", "task-list", "detail-empty"]
     .map((id) => elements.get(id)));
   elements.get("settings-dialog").append(...["settings-title", "close-settings", "settings-body"].map((id) => elements.get(id)));
@@ -586,8 +588,8 @@ async function dashboard(t, { reducedMotion = true, confirm = () => true, now = 
     ...await import("./factory-data.mjs"),
     document, location, URL, URLSearchParams, Date: ClockDate,
     history: { replaceState: (_, __, value) => { location.href = new URL(value, location).href; } },
-    window: { addEventListener() {}, confirm },
-    matchMedia: () => ({ matches: reducedMotion }),
+    window: { addEventListener: (name, callback) => { if (name === "resize") resizeListeners.push(callback); }, confirm },
+    matchMedia: (query) => ({ matches: /reduce/.test(query) ? reducedMotion : phoneWidth > 0 }),
     setTimeout() {}, clearTimeout() {}, setInterval() {},
     fetch: (path, options = {}) => {
       const init = {
@@ -609,7 +611,7 @@ async function dashboard(t, { reducedMotion = true, confirm = () => true, now = 
     document.listeners.get("keydown")(pressed);
     return pressed;
   };
-  return { run, document, directory, press, get: (id) => elements.get(id), setNow: (value) => { now = value; } };
+  return { run, document, directory, press, resize: (width) => { elements.get("flow-wrap").clientWidth = width; resizeListeners.forEach((callback) => callback()); }, get: (id) => elements.get(id), setNow: (value) => { now = value; } };
 }
 
 test("unchanged refresh updates elapsed labels without replacing expanded rows or move drafts", async (t) => {
@@ -865,9 +867,87 @@ test("the flow draws plain lines with a port at each end", async (t) => {
   assert.equal(flow.querySelectorAll(".port").length, 26, "Each line has a port at both ends.");
 });
 
-test("hovering or focusing a state lights only its direct moves and the states they reach", async (t) => {
+test("both charts draw the same lines, and they are the allowed moves", async (t) => {
+  const { transitions } = await import("./factory-data.mjs");
+  const ui = await dashboard(t);
+  const drawn = (width) => {
+    ui.run(`buildFlow(${width})`);
+    return ui.get("flow").querySelectorAll(".edge").map((edge) => edge.dataset.edge).sort();
+  };
+  const horizontal = drawn(0);
+  assert.deepEqual(drawn(390), horizontal);
+  assert.deepEqual(horizontal, [
+    "implementation>blocked", "implementation>resolved", "implementation>review", "initial>blocked", "initial>investigation",
+    "initial>resolved", "initial>review", "investigation>blocked", "investigation>implementation", "investigation>resolved",
+    "review>blocked", "review>resolved", "source>initial",
+  ]);
+  const moves = { ...transitions, source: ["initial"], initial: [...transitions.initial, "review"] };
+  for (const edge of horizontal) {
+    const [from, to] = edge.split(">");
+    assert.ok(moves[from].includes(to) || moves[to]?.includes(from), `${edge} is not an allowed move`);
+  }
+});
+
+test("on a phone the flow is one column at the screen width, drawn at scale 1", async (t) => {
+  const { states, outcomes } = await import("./factory-data.mjs");
+  const ui = await dashboard(t, { phoneWidth: 390 });
+  ui.run(`load(${JSON.stringify(example)}, ${JSON.stringify(factoryFile)})`);
+  const flow = ui.get("flow");
+  const classes = () => flow.className.split(" ");
+  assert.ok(classes().includes("vertical"));
+  const [, , width, height] = flow.viewBox.split(" ").map(Number);
+  assert.equal(width, 390, "One chart unit is one screen pixel, so the text keeps its size.");
+
+  const boxes = flow.querySelectorAll(".box").map((box) => ({ x: +box.x, y: +box.y, w: +box.width, h: +box.height }));
+  assert.equal(boxes.length, states.length + 1);
+  for (const box of boxes) {
+    assert.ok(box.x >= 0 && box.x + box.w <= width, "No box leaves the screen.");
+    assert.ok(box.w >= width - 80, "Boxes are full width, less the lanes.");
+    assert.ok(box.y >= 0 && box.y + box.h <= height);
+  }
+  const rows = flow.querySelectorAll(".outcome").map((group) => group.children[0]).map((rect) => ({ y: +rect.y, h: +rect.height }));
+  assert.equal(rows.length, outcomes.length);
+  const stacked = [...boxes, ...rows.map((row) => ({ ...row, x: 0, w: width }))].sort((a, b) => a.y - b.y);
+  stacked.slice(1).forEach((box, index) => assert.ok(box.y >= stacked[index].y + stacked[index].h, "Nothing overlaps."));
+
+  const order = ["source", "initial", "investigation", "implementation", "review", "resolved", "blocked"];
+  const topOf = (group) => +group.querySelector(".box").y;
+  const tops = order.map((state) => topOf(state === "source" ? flow.querySelector(".source") : ui.run(`nodeOf('${state}')`)));
+  assert.deepEqual(tops, [...tops].sort((a, b) => a - b), "States run top to bottom in flow order.");
+
+  const points = flow.querySelectorAll(".edge").flatMap((edge) => edge.d.slice(1).split(" L").map((point) => point.split(",").map(Number)));
+  assert.ok(points.every(([x, y]) => x >= 0 && x <= width && y >= 0 && y <= height), "Every line stays on the chart.");
+
+  const segments = (edge) => {
+    const route = edge.d.slice(1).split(" L").map((point) => point.split(",").map(Number));
+    return route.slice(1).map(([x, y], index) => ({ edge: edge.dataset.edge, from: route[index], to: [x, y] }));
+  };
+  const all = flow.querySelectorAll(".edge").flatMap(segments);
+  const between = (value, a, b) => value > Math.min(a, b) && value < Math.max(a, b);
+  const crossings = new Set();
+  for (const a of all.filter(({ from, to }) => from[1] === to[1])) {
+    for (const b of all.filter(({ from, to }) => from[0] === to[0])) {
+      if (between(b.from[0], a.from[0], a.to[0]) && between(a.from[1], b.from[1], b.to[1])) crossings.add([a.edge, b.edge].sort().join(" x "));
+    }
+  }
+  assert.deepEqual([...crossings].sort(), [
+    "implementation>resolved x initial>review",
+    "initial>review x investigation>resolved",
+  ], "Only the line from Initial to Review crosses others, where it lands.");
+
+  ui.resize(430);
+  assert.equal(flow.viewBox, `0 0 430 ${flow.viewBox.split(" ")[3]}`);
+  assert.equal(ui.run("nodeOf('blocked')").querySelector(".count").textContent, "1", "A redraw after a resize keeps the live counts.");
+
+  const desktop = await dashboard(t);
+  assert.ok(!desktop.get("flow").className.split(" ").includes("vertical"));
+  assert.equal(desktop.get("flow").viewBox, "0 0 1160 560");
+});
+
+for (const width of [0, 390]) test(`hovering or focusing a state lights only its direct moves and the states they reach (${width ? "vertical" : "horizontal"} chart)`, async (t) => {
   const { states, transitions } = await import("./factory-data.mjs");
   const ui = await dashboard(t);
+  ui.run(`buildFlow(${width})`);
   const flow = ui.get("flow");
   const has = (node, name) => node.className.split(" ").includes(name);
   const lit = () => flow.querySelectorAll(".edge").filter((edge) => has(edge, "lit")).map((edge) => edge.dataset.edge).sort();
@@ -2064,11 +2144,13 @@ test("the page works on a phone: viewport, safe areas, touch sizes and contained
   assert.match(touch, /\.icon-button \{ width: 44px; height: 44px; \}/);
   assert.match(narrow, /env\(safe-area-inset-top\)/);
   assert.match(narrow, /env\(safe-area-inset-bottom\)/);
-  assert.match(narrow, /#flow \{ min-width: 0; \}/, "The flowchart scales to the screen through its viewBox.");
+  assert.match(narrow, /#flow \{ min-width: 0; max-height: none; \}/, "The vertical chart is as tall as it needs to be.");
   assert.doesNotMatch(narrow, /#flow-wrap/, "The flowchart has no scroller on a phone.");
   assert.doesNotMatch(narrow, /overflow-x: auto/);
   assert.match(html, /<svg id="flow" viewBox="0 0 1160 560"/);
-  assert.match(narrow, /\.node \.count \{ font-size: 48px; \}/, "Text grows in chart units to offset the scale.");
+  assert.match(narrow, /#flow\.vertical \.node \.name \{ font-size: 17px;/, "Names are at least 14px, at scale 1.");
+  assert.match(narrow, /#flow\.vertical \.node \.sub \{ font-size: 14px;/);
+  assert.match(narrow, /#flow\.vertical \.outcome text \{ font-size: 14px; \}/);
   assert.match(narrow, /dialog, #move-dialog, #settings-dialog \{ width: 100%;/);
 
   const widths = [...(narrow + touch).matchAll(/(?<![-\w])(?:width|min-width): (\d+)px/g)].map((match) => Number(match[1]));

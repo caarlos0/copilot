@@ -297,11 +297,12 @@
         main { min-width: 0; padding-top: 16px; }
         #title-row { flex-wrap: wrap; }
         #title-pill { max-width: 100%; min-width: 0; }
-        /* The viewBox scales the whole flowchart to the screen width; text sizes are in chart units, so they grow to stay legible. */
-        #flow { min-width: 0; }
-        .node .name { font-size: 19px; }
-        .node .count { font-size: 48px; }
-        .node .sub, .outcome text { font-size: 16px; }
+        /* The vertical chart is drawn at the screen width, so its text is at its real size. */
+        #flow { min-width: 0; max-height: none; }
+        #flow.vertical .node .name { font-size: 17px; text-anchor: start; }
+        #flow.vertical .node .count { text-anchor: end; }
+        #flow.vertical .node .sub { font-size: 14px; text-anchor: start; }
+        #flow.vertical .outcome text { font-size: 14px; }
         .row-head, .detail-head { gap: 8px; }
         .row-head { flex-wrap: wrap; align-items: center; }
         dialog, #move-dialog, #settings-dialog { width: 100%; max-width: 100%; max-height: 90dvh; margin: auto 0 0;
@@ -471,6 +472,65 @@
           ? [[x, bottom], [x, places.blocked.y]]
           : [[x, bottom], [x, bus], [slot, bus], [slot, places.blocked.y]];
       }
+      const horizontalLayout = {
+        width: 1160,
+        height: 560,
+        source: SOURCE,
+        sourceRoute: SOURCE_ROUTE,
+        routes: flowRoutes,
+        box: (state) => ({ ...places[state], w: NODE.w, h: NODE.h }),
+        labels: ({ x, y, w }) => ({ name: [x + w / 2, y + 28], count: [x + w / 2, y + 76], sub: [x + w / 2, y + 98] }),
+        outcome: (index) => ({ x: places.resolved.x, y: places.resolved.y + NODE.h + index * 28, w: NODE.w, h: 28 }),
+      };
+
+      // Phones: the states stack in flow order, full width, at scale 1 so the text keeps its real size. The edge
+      // set matches the horizontal chart. Neighbours join with short connectors. The skips go down the sides: the
+      // lines to Resolved and from Initial to Review on the right, the lines to Blocked on the left. Lanes nest, so a
+      // line crosses another only where Initial to Review lands on Review.
+      function verticalLayout(width) {
+        const GUTTER = 36, LANE = 7, H = 64, GAP = 28, ROW = 32, TOP = 4;
+        const w = width - 2 * GUTTER;
+        const stack = ["source", ...states.filter((state) => state !== "blocked")];
+        const boxes = Object.fromEntries(stack.map((key, index) => [key, { x: GUTTER, y: TOP + index * (H + GAP), w, h: H }]));
+        boxes.blocked = { x: GUTTER, y: boxes.resolved.y + H + outcomes.length * ROW + GAP, w, h: H };
+        const right = GUTTER + w;
+        const join = (from, to) => [[GUTTER + w / 2, boxes[from].y + H], [GUTTER + w / 2, boxes[to].y]];
+        const detour = (edgeX, laneX, from, fromDy, to, toDy) => [
+          [edgeX, boxes[from].y + fromDy], [laneX, boxes[from].y + fromDy], [laneX, boxes[to].y + toDy], [edgeX, boxes[to].y + toDy],
+        ];
+        const east = (lane) => right + LANE * lane;
+        const routes = {
+          "initial>investigation": join("initial", "investigation"),
+          "investigation>implementation": join("investigation", "implementation"),
+          "implementation>review": join("implementation", "review"),
+          "review>resolved": join("review", "resolved"),
+          "initial>review": detour(right, east(3), "initial", 30, "review", 34),
+          "initial>resolved": detour(right, east(4), "initial", 16, "resolved", 44),
+          "investigation>resolved": detour(right, east(2), "investigation", 34, "resolved", 30),
+          "implementation>resolved": detour(right, east(1), "implementation", 34, "resolved", 16),
+        };
+        // The upper the state, the farther left its lane and the lower it lands on Blocked, so these lines never cross.
+        const lanes = Object.keys(blockedLanes);
+        lanes.forEach((state, index) => {
+          routes[`${state}>blocked`] = detour(GUTTER, 5 + LANE * index, state, H / 2, "blocked", 14 + 12 * (lanes.length - 1 - index));
+        });
+        return {
+          width,
+          height: boxes.blocked.y + H + TOP,
+          source: boxes.source,
+          sourceRoute: join("source", "initial"),
+          routes,
+          box: (state) => boxes[state],
+          labels: ({ x, y, w: boxWidth }) => ({ name: [x + 16, y + 26], count: [x + boxWidth - 16, y + 46], sub: [x + 16, y + 46] }),
+          outcome: (index) => ({ x: GUTTER, y: boxes.resolved.y + H + index * ROW, w, h: ROW }),
+        };
+      }
+
+      const phone = matchMedia("(max-width: 700px)");
+      const flowWrap = document.getElementById("flow-wrap");
+      // 0 draws the horizontal chart; a width draws the vertical one at that width.
+      const flowWidth = () => (phone.matches ? Math.round(flowWrap.clientWidth) : 0);
+      let flowBuiltFor = 0;
 
       let selection = new URLSearchParams(location.search).get("file") ?? "";
       let snapshot = null;
@@ -606,7 +666,11 @@
         });
       }
 
-      function buildFlow() {
+      function buildFlow(width = flowWidth()) {
+        flowBuiltFor = width;
+        const layout = width ? verticalLayout(width) : horizontalLayout;
+        flow.setAttribute("viewBox", `0 0 ${layout.width} ${layout.height}`);
+        flow.classList.toggle("vertical", width > 0);
         const edges = svg("g", { id: "edges" });
         const ports = svg("g", { id: "ports" });
         const edge = (key, route) => {
@@ -619,36 +683,33 @@
             ports.append(port);
           }
         };
-        for (const [key, route] of Object.entries(flowRoutes)) edge(key, route);
-        edge("source>initial", SOURCE_ROUTE);
+        for (const [key, route] of Object.entries(layout.routes)) edge(key, route);
+        edge("source>initial", layout.sourceRoute);
         const nodes = svg("g", { id: "nodes" });
+        const nodeParts = (box, title) => {
+          const { name, count, sub } = layout.labels(box);
+          return [
+            svg("rect", { class: "box", x: box.x, y: box.y, width: box.w, height: box.h }),
+            svg("rect", { class: "bar", x: box.x, y: box.y, width: box.w, height: 4 }),
+            svg("text", { class: "name", x: name[0], y: name[1] }, title),
+            svg("text", { class: "count", x: count[0], y: count[1] }, "0"),
+            svg("text", { class: "sub", x: sub[0], y: sub[1] }, ""),
+          ];
+        };
         const source = svg("g", {
           class: "node source", tabindex: 0, role: "button", style: "--c: var(--accent)",
         });
         source.dataset.source = "producers";
-        source.append(
-          svg("rect", { class: "box", x: SOURCE.x, y: SOURCE.y, width: SOURCE.w, height: SOURCE.h }),
-          svg("rect", { class: "bar", x: SOURCE.x, y: SOURCE.y, width: SOURCE.w, height: 4 }),
-          svg("text", { class: "name", x: SOURCE.x + SOURCE.w / 2, y: SOURCE.y + 28 }, "Find work"),
-          svg("text", { class: "count", x: SOURCE.x + SOURCE.w / 2, y: SOURCE.y + 76 }, "0"),
-          svg("text", { class: "sub", x: SOURCE.x + SOURCE.w / 2, y: SOURCE.y + 98 }, ""),
-        );
+        source.append(...nodeParts(layout.source, "Find work"));
         activateOnKey(source, chooseProducers);
         lightOnHover(source, "source");
         nodes.append(source);
         for (const state of states) {
-          const place = places[state];
           const group = svg("g", {
             class: "node", tabindex: 0, role: "button", style: `--c: var(--${state})`,
           });
           group.dataset.state = state;
-          group.append(
-            svg("rect", { class: "box", x: place.x, y: place.y, width: NODE.w, height: NODE.h }),
-            svg("rect", { class: "bar", x: place.x, y: place.y, width: NODE.w, height: 4 }),
-            svg("text", { class: "name", x: place.x + NODE.w / 2, y: place.y + 28 }, place.title),
-            svg("text", { class: "count", x: place.x + NODE.w / 2, y: place.y + 76 }, "0"),
-            svg("text", { class: "sub", x: place.x + NODE.w / 2, y: place.y + 98 }, ""),
-          );
+          group.append(...nodeParts(layout.box(state), places[state].title));
           activateOnKey(group, () => choose(state));
           lightOnHover(group, state);
           nodes.append(group);
@@ -656,20 +717,26 @@
 
         const resolutions = svg("g", { role: "group", "aria-label": "Resolved tasks by outcome" });
         outcomes.forEach((outcome, index) => {
-          const x = places.resolved.x;
-          const y = places.resolved.y + NODE.h + index * 28;
+          const { x, y, w, h } = layout.outcome(index);
           const group = svg("g", { class: "outcome", tabindex: 0, role: "button" });
           group.dataset.outcome = outcome;
           group.append(
-            svg("rect", { x, y, width: NODE.w, height: 28 }),
-            svg("text", { x: x + 12, y: y + 19 }, outcomeTitles[outcome]),
-            svg("text", { class: "outcome-count", x: x + NODE.w - 12, y: y + 19 }, "0"),
+            svg("rect", { x, y, width: w, height: h }),
+            svg("text", { x: x + 12, y: y + h / 2 + 5 }, outcomeTitles[outcome]),
+            svg("text", { class: "outcome-count", x: x + w - 12, y: y + h / 2 + 5 }, "0"),
           );
           activateOnKey(group, () => choose("resolved", outcome));
           resolutions.append(group);
         });
 
         flow.replaceChildren(edges, nodes, ports, resolutions);
+      }
+
+      function relayoutFlow() {
+        const width = flowWidth();
+        if (width === flowBuiltFor) return;
+        buildFlow(width);
+        draw();
       }
 
       // Lights the moves out of a state, and the states they reach, while it has the pointer or focus.
@@ -1897,6 +1964,7 @@
 
       document.getElementById("logo").src = document.getElementById("icon").href;
       setInterval(freshness, 1000);
+      window.addEventListener("resize", relayoutFlow);
       buildFlow();
       refresh();
     </script>
