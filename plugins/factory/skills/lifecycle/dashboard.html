@@ -1690,6 +1690,8 @@
                   lastRead = Date.now();
                   document.getElementById("error").hidden = true;
                   refreshElapsedLabels(document.getElementById("task-list"));
+                  drawSource(snapshot.rules.filter((rule) => rule.enabled && isFinder(rule)));
+                  if (producersOpen()) renderProducers();
                 } else {
                   etags.delete(path);
                 }

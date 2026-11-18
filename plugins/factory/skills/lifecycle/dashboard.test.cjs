@@ -460,6 +460,21 @@ test("a 304 skips load and redraw but still updates the freshness label", async 
   assert.equal(ui.run("loads"), 1);
 });
 
+test("a 304 still redraws the Find work countdowns", async (t) => {
+  const ui = await dashboard(t, { now: Date.parse("2026-05-01T11:35:00Z") });
+  const source = ui.get("flow").querySelector(".source");
+  assert.equal(source.querySelector(".sub").textContent, "next in 25m");
+  await source.fire("click");
+  assert.match(ui.get("rule-list").children[0].textContent, /last run 5m ago, next in 25m/);
+
+  ui.setNow(Date.parse("2026-05-01T12:05:00Z"));
+  ui.run("let loads = 0; const original = load; load = (...args) => { loads += 1; return original(...args); }");
+  await ui.run("refresh()");
+  assert.equal(ui.run("loads"), 0, "the answer was a 304");
+  assert.equal(source.querySelector(".sub").textContent, "due now");
+  assert.match(ui.get("rule-list").children[0].textContent, /last run 35m ago, due now/);
+});
+
 test("the page script parses, never renders data as HTML, and finds its elements", () => {
   const script = html.match(/<script type="module">([\s\S]*?)<\/script>/)[1].replace(/^\s*import .+;\s*/m, "");
   new vm.Script(script);
