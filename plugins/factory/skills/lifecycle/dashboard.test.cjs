@@ -2064,9 +2064,13 @@ test("the page works on a phone: viewport, safe areas, touch sizes and contained
   assert.match(touch, /\.icon-button \{ width: 44px; height: 44px; \}/);
   assert.match(narrow, /env\(safe-area-inset-top\)/);
   assert.match(narrow, /env\(safe-area-inset-bottom\)/);
-  assert.match(narrow, /#flow-wrap \{ overflow-x: auto;/);
+  assert.match(narrow, /#flow \{ min-width: 0; \}/, "The flowchart scales to the screen through its viewBox.");
+  assert.doesNotMatch(narrow, /#flow-wrap/, "The flowchart has no scroller on a phone.");
+  assert.doesNotMatch(narrow, /overflow-x: auto/);
+  assert.match(html, /<svg id="flow" viewBox="0 0 1160 560"/);
+  assert.match(narrow, /\.node \.count \{ font-size: 48px; \}/, "Text grows in chart units to offset the scale.");
   assert.match(narrow, /dialog, #move-dialog, #settings-dialog \{ width: 100%;/);
 
   const widths = [...(narrow + touch).matchAll(/(?<![-\w])(?:width|min-width): (\d+)px/g)].map((match) => Number(match[1]));
-  assert.deepEqual(widths.filter((width) => width > 430), [900], "Only the flowchart, inside its own scroller, is wider.");
+  assert.deepEqual(widths.filter((width) => width > 430), [], "Nothing on a phone is wider than the screen.");
 });
