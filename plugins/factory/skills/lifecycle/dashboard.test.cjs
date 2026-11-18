@@ -1598,6 +1598,19 @@ test("Cmd+K and Ctrl+K toggle the task palette, and other dialogs keep it closed
   }
 });
 
+test("palette rows keep the state chip on one line and give the title the free width", async (t) => {
+  const ui = await dashboard(t);
+  assert.match(html, /#palette-dialog \{[^}]*width: min\(720px, 92vw\)/);
+  assert.match(html, /#palette-list \.chip \{[^}]*flex: none;[^}]*white-space: nowrap/);
+  assert.match(html, /#palette-list \.option-title > :first-child \{[^}]*flex: 1;[^}]*min-width: 0/);
+  assert.match(html, /#palette-status \{[^}]*padding: 8px 24px 12px/);
+  ui.press("k", { metaKey: true });
+  const meta = ui.get("palette-list").children[0].querySelector(".option-meta");
+  const ref = meta.querySelector(".ref");
+  assert.equal(ref.querySelector("svg").tag, "svg", "The #N meta gets the same glyph as the links.");
+  assert.equal(meta.querySelectorAll("a").length, 0);
+});
+
 test("typing in the palette filters tasks and Escape closes it without closing the docked list", async (t) => {
   const ui = await dashboard(t);
   ui.run("choose('blocked')");
