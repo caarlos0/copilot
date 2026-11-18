@@ -847,7 +847,7 @@ test("global task filters search any field, combine terms, and survive refresh a
 test("flow edges use only straight horizontal and vertical segments", async (t) => {
   const ui = await dashboard(t);
   const paths = ui.get("flow").querySelectorAll(".edge").map((edge) => edge.d);
-  assert.equal(paths.length, 11);
+  assert.equal(paths.length, 13);
   for (const path of paths) {
     assert.match(path, /^M[\d.,-]+( L[\d.,-]+)+$/, `Only M and L commands: ${path}`);
     const points = path.slice(1).split(" L").map((point) => point.split(",").map(Number));
@@ -862,36 +862,47 @@ test("the flow draws plain lines with a port at each end", async (t) => {
   const ui = await dashboard(t);
   const flow = ui.get("flow");
   assert.equal(flow.querySelectorAll(".edge").every((edge) => edge["marker-end"] === undefined), true);
-  assert.equal(flow.querySelectorAll(".port").length, 22, "Each line has a port at both ends.");
+  assert.equal(flow.querySelectorAll(".port").length, 26, "Each line has a port at both ends.");
 });
 
-test("hovering or focusing a state lights its lines and clears on leave or blur", async (t) => {
+test("hovering or focusing a state lights only its direct moves and the states they reach", async (t) => {
+  const { states, transitions } = await import("./factory-data.mjs");
   const ui = await dashboard(t);
   const flow = ui.get("flow");
-  const lit = () => flow.querySelectorAll(".edge").filter((edge) => edge.className.split(" ").includes("lit"))
-    .map((edge) => edge.dataset.edge).sort();
+  const has = (node, name) => node.className.split(" ").includes(name);
+  const lit = () => flow.querySelectorAll(".edge").filter((edge) => has(edge, "lit")).map((edge) => edge.dataset.edge).sort();
+  const reached = () => flow.querySelectorAll(".node").filter((node) => has(node, "reach"))
+    .map((node) => node.dataset.state).sort();
   const node = (state) => ui.run(`nodeOf('${state}')`);
+  const edges = {
+    initial: ["initial>blocked", "initial>investigation", "initial>resolved", "initial>review"],
+    investigation: ["investigation>blocked", "investigation>implementation", "investigation>resolved"],
+    implementation: ["implementation>blocked", "implementation>resolved", "implementation>review"],
+    review: ["implementation>review", "review>blocked", "review>resolved"],
+    blocked: ["implementation>blocked", "initial>blocked", "investigation>blocked", "review>blocked"],
+    resolved: ["initial>resolved"],
+  };
 
   assert.deepEqual(lit(), []);
-  await node("review").fire("mouseenter");
-  assert.deepEqual(lit(), ["implementation>review", "initial>review", "review>blocked", "review>resolved"].sort());
-  assert.equal(flow.querySelectorAll(".port").filter((port) => port.className.split(" ").includes("lit")).length, 8);
-  await node("review").fire("mouseleave");
-  assert.deepEqual(lit(), []);
+  for (const state of states) {
+    const targets = [...transitions[state], ...(state === "initial" ? ["review"] : [])].sort();
+    await node(state).fire("mouseenter");
+    assert.deepEqual(lit(), edges[state], `${state} lights only its own moves`);
+    assert.deepEqual(reached(), targets, `${state} reaches only its targets`);
+    assert.equal(flow.querySelectorAll(".port").filter((port) => has(port, "lit")).length, edges[state].length * 2);
+    await node(state).fire("mouseleave");
+    assert.deepEqual(lit(), []);
+    assert.deepEqual(reached(), []);
 
-  await node("implementation").fire("focus");
-  assert.deepEqual(lit(), [
-    "implementation>blocked", "implementation>review", "investigation>implementation", "shortcut",
-  ].sort());
-  await node("implementation").fire("blur");
-  assert.deepEqual(lit(), []);
-
-  await node("resolved").fire("mouseenter");
-  assert.deepEqual(lit(), ["review>resolved", "shortcut"]);
-  await node("resolved").fire("mouseleave");
+    await node(state).fire("focus");
+    assert.deepEqual(lit(), edges[state], `${state} lights the same on focus`);
+    await node(state).fire("blur");
+    assert.deepEqual(lit(), []);
+  }
 
   await flow.querySelector(".source").fire("mouseenter");
   assert.deepEqual(lit(), ["source>initial"]);
+  assert.deepEqual(reached(), ["initial"]);
   await flow.querySelector(".source").fire("mouseleave");
   assert.deepEqual(lit(), []);
 });

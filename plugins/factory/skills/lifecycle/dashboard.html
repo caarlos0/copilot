@@ -124,7 +124,8 @@
       .node { cursor: pointer; }
       .node .box { fill: color-mix(in srgb, var(--c) 8%, var(--bg)); stroke: color-mix(in srgb, var(--c) 45%, var(--border));
         stroke-width: 1; }
-      .node:hover .box { fill: color-mix(in srgb, var(--c) 14%, var(--bg)); }
+      .node:hover .box, .node.reach .box { fill: color-mix(in srgb, var(--c) 14%, var(--bg)); }
+      .node.reach .box { stroke: var(--accent); }
       .node.active .box { stroke: var(--c); }
       .node.selected .box { stroke: var(--c); stroke-width: 2; fill: color-mix(in srgb, var(--c) 14%, var(--bg)); }
       .node .bar { fill: var(--c); pointer-events: none; }
@@ -383,10 +384,12 @@
       const rowTop = places.initial.y;
       const bottom = rowTop + NODE.h;
       const across = (from, to, y = row) => [[places[from].x + NODE.w, y], [places[to].x, y]];
-      const SHORTCUT = [
-        [centre("investigation").x, rowTop], [centre("investigation").x, rowTop - 40],
-        [centre("resolved").x, rowTop - 40], [centre("resolved").x, rowTop],
+      // Each state with a direct move to Resolved gets its own line over the top. Lines nest: the one that
+      // starts farthest left takes the highest lane and lands farthest right, so they never cross.
+      const overTheTop = (startX, lane, endX) => [
+        [startX, rowTop], [startX, rowTop - lane], [endX, rowTop - lane], [endX, rowTop],
       ];
+      const resolvedX = centre("resolved").x;
       const SOURCE_ROUTE = [[centre("initial").x, SOURCE.y + SOURCE.h], [centre("initial").x, rowTop]];
       const flowRoutes = {
         "initial>investigation": across("initial", "investigation"),
@@ -397,7 +400,13 @@
         "investigation>implementation": across("investigation", "implementation"),
         "implementation>review": across("implementation", "review"),
         "review>resolved": across("review", "resolved"),
+        "initial>resolved": overTheTop(places.initial.x + NODE.w - 50, 70, resolvedX + 20),
+        "investigation>resolved": overTheTop(centre("investigation").x, 40, resolvedX),
+        "implementation>resolved": overTheTop(centre("implementation").x, 20, resolvedX - 20),
       };
+      // Moves out of each box, as the page draws them: the table plus Initial to Review (only with a PR),
+      // and the "Find work" box, which feeds Initial.
+      const flowMoves = { ...transitions, source: ["initial"], initial: [...transitions.initial, "review"] };
       // One line joins each state to Blocked. Slots on Blocked are 20 apart in the same order as
       // the states, and the farther a state is from Blocked, the lower its bus, so no line crosses another.
       const blockedLanes = {
@@ -550,28 +559,18 @@
       function buildFlow() {
         const edges = svg("g", { id: "edges" });
         const ports = svg("g", { id: "ports" });
-        // `links` lists the states whose hover or focus lights the line; it defaults to its two ends.
-        const edge = (key, route, links = key.split(">")) => {
+        const edge = (key, route) => {
           const node = svg("path", { d: pathOf(route), class: "edge link" });
           node.dataset.edge = key;
-          node.dataset.links = links.join(" ");
           edges.append(node);
           for (const [x, y] of [route[0], route.at(-1)]) {
             const port = svg("circle", { cx: x, cy: y, r: 3, class: "port link" });
-            port.dataset.links = node.dataset.links;
+            port.dataset.edge = key;
             ports.append(port);
           }
         };
-        edge("initial>investigation", flowRoutes["initial>investigation"]);
-        edge("initial>review", flowRoutes["initial>review"]);
-        edge("investigation>implementation", flowRoutes["investigation>implementation"]);
-        edge("implementation>review", flowRoutes["implementation>review"]);
-        edge("review>resolved", flowRoutes["review>resolved"]);
-        // The long line over the top stands for every move to Resolved that has no line of its own.
-        edge("shortcut", SHORTCUT, ["resolved", ...states.filter((state) =>
-          state !== "review" && state !== "blocked" && transitions[state].includes("resolved"))]);
-        edge("source>initial", SOURCE_ROUTE, ["source", "initial"]);
-        for (const state of Object.keys(blockedLanes)) edge(`${state}>blocked`, flowRoutes[`${state}>blocked`]);
+        for (const [key, route] of Object.entries(flowRoutes)) edge(key, route);
+        edge("source>initial", SOURCE_ROUTE);
         const nodes = svg("g", { id: "nodes" });
         const source = svg("g", {
           class: "node source", tabindex: 0, role: "button", style: "--c: var(--accent)",
@@ -623,11 +622,18 @@
         flow.replaceChildren(edges, nodes, ports, resolutions);
       }
 
-      // Lights the lines a state can take, and the moves back into it, while it has the pointer or focus.
+      // Lights the moves out of a state, and the states they reach, while it has the pointer or focus.
+      // A line drawn between two states also serves the move back when the table allows it.
       function lightOnHover(node, state) {
+        const moves = flowMoves[state] ?? [];
         const light = (on) => {
           for (const link of flow.querySelectorAll(".link")) {
-            link.classList.toggle("lit", on && link.dataset.links.split(" ").includes(state));
+            const [from, to] = link.dataset.edge.split(">");
+            const taken = (from === state && moves.includes(to)) || (to === state && moves.includes(from));
+            link.classList.toggle("lit", on && taken);
+          }
+          for (const target of flow.querySelectorAll(".node")) {
+            target.classList.toggle("reach", on && moves.includes(target.dataset.state));
           }
         };
         node.addEventListener("mouseenter", () => light(true));
