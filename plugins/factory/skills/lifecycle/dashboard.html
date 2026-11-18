@@ -93,6 +93,8 @@
       p { margin: 8px 0; }
       a { color: var(--accent); text-decoration: none; }
       a:hover { text-decoration: underline; }
+      a.ref { display: inline-flex; align-items: center; gap: 4px; }
+      a.ref svg { flex: none; fill: currentColor; }
       label { display: block; margin-bottom: 4px; font-weight: 600; }
       code { font-family: var(--mono); font-size: 85%; padding: .2em .4em; border-radius: 6px; background: var(--code-bg);
         white-space: break-spaces; overflow-wrap: anywhere; }
@@ -746,9 +748,21 @@
         return due <= Date.now() ? "due now" : `next in ${span(Math.ceil((due - Date.now()) / 1000))}`;
       }
 
+      // Octicons (16px): issue-opened and git-pull-request.
+      const GLYPHS = {
+        issues: ["Issue", ["M8 9.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z", "M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0ZM1.5 8a6.5 6.5 0 1 0 13 0 6.5 6.5 0 0 0-13 0Z"]],
+        pull: ["Pull request", ["M1.5 3.25a2.25 2.25 0 1 1 3 2.122v5.256a2.251 2.251 0 1 1-1.5 0V5.372A2.25 2.25 0 0 1 1.5 3.25Zm5.677-.177L9.573.677A.25.25 0 0 1 10 .854V2.5h1A2.5 2.5 0 0 1 13.5 5v5.628a2.251 2.251 0 1 1-1.5 0V5a1 1 0 0 0-1-1h-1v1.646a.25.25 0 0 1-.427.177L7.177 3.427a.25.25 0 0 1 0-.354ZM3.75 2.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm0 9.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm8.25.75a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Z"]],
+      };
+
       function reference(href) {
         const url = githubURL(href);
-        const node = link(`#${url.pathname.split("/").pop()}`, url.href);
+        const parts = url.pathname.split("/");
+        const node = link(`#${parts.pop()}`, url.href);
+        const [label, paths] = GLYPHS[parts.pop()];
+        const glyph = svg("svg", { viewBox: "0 0 16 16", width: 16, height: 16, role: "img", "aria-label": label, title: label });
+        glyph.append(...paths.map((d) => svg("path", { d })));
+        node.prepend(glyph);
+        node.className = "ref";
         node.title = url.href;
         node.target = "_blank";
         node.rel = "noopener noreferrer";

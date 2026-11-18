@@ -439,6 +439,10 @@ async function dashboard(t, { reducedMotion = true, confirm = () => true, now = 
       for (const child of children) if (child instanceof Element) child.parentNode = this;
       this.children.push(...children);
     }
+    prepend(child) {
+      child.parentNode = this;
+      this.children.unshift(child);
+    }
     replaceChildren(...children) {
       for (const child of this.children) if (child instanceof Element) child.parentNode = null;
       this.children = [];
@@ -880,6 +884,18 @@ test("a row puts the title and Move button on one line and the links on their ow
   assert.match(html, /\.chips, \.links \{[^}]*flex-wrap: wrap/);
   assert.match(html, /\.task-row \{[^}]*overflow-wrap: anywhere/);
   assert.match(html, /\.move \{[^}]*flex: none/);
+});
+
+test("reference links get an issue or pull request glyph and keep the #N text", async (t) => {
+  const ui = await dashboard(t);
+  const issue = ui.run(`reference("https://github.com/owner/repo/issues/12")`);
+  const pull = ui.run(`reference("https://github.com/owner/repo/pull/21")`);
+  assert.equal(issue.textContent, "#12");
+  assert.equal(pull.textContent, "#21");
+  assert.equal(issue.children[0].tag, "svg");
+  assert.equal(issue.children[0]["aria-label"], "Issue");
+  assert.equal(pull.children[0]["aria-label"], "Pull request");
+  assert.notEqual(issue.children[0].children[0].d, pull.children[0].children[0].d);
 });
 
 test("a row without references has no links line", async (t) => {
