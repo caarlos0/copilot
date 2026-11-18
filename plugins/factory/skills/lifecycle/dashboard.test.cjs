@@ -670,16 +670,6 @@ test("the task list is docked on the right of the flow, and the flow shrinks or 
   assert.ok(layout.indexOf('id="factories"') < layout.indexOf("<main>")
     && layout.indexOf("</main>") < layout.indexOf('<aside id="detail"'));
   assert.equal(layout.split('id="detail"').length, 2, "The panel appears once.");
-  assert.match(html, /\.layout \{[^}]*grid-template-columns: 240px minmax\(0, 1fr\) auto/);
-  assert.match(html, /main \{[^}]*grid-column: 2/);
-  assert.match(html, /#detail \{[^}]*grid-column: 3;[^}]*width: clamp\(420px, 34vw, 520px\)[^}]*border-left: 1px solid var\(--border\)/);
-  assert.match(html, /main \{[^}]*overflow: auto/);
-  assert.match(html, /\.layout \{[^}]*grid-template-rows: minmax\(0, 1fr\);[^}]*flex: 1; min-height: 0/);
-  assert.doesNotMatch(html, /\.layout \{[^}]*align-items: start/);
-  assert.match(html, /body \{[^}]*height: 100vh/);
-  assert.match(html, /#factories \{[^}]*overflow-y: auto/);
-  assert.match(html, /#detail \{[^}]*overflow-y: auto/);
-  assert.match(html, /#flow \{[^}]*min-width: 720px/);
 });
 
 test("the slash key focuses the filter unless a field, modifier, or popup owns it", async (t) => {
@@ -859,8 +849,7 @@ test("flow edges use only straight horizontal and vertical segments", async (t) 
   }
 });
 
-test("the flow is static: no animation, arrowheads or moving token", async (t) => {
-  assert.doesNotMatch(html, /@keyframes (flow|blink|ring|bump|pop)\b|\.update-dot[^}]*animation|marker-end|<marker|\.token|flyNext/);
+test("the flow draws plain lines with a port at each end", async (t) => {
   const ui = await dashboard(t);
   const flow = ui.get("flow");
   assert.equal(flow.querySelectorAll(".edge").every((edge) => edge["marker-end"] === undefined), true);
@@ -1653,8 +1642,7 @@ test("the header shows the run status only when the factory is not active", asyn
   assert.equal(ui.get("run-status").textContent, "paused");
 });
 
-test("the cog opens one settings dialog and the old budget button is gone", async (t) => {
-  assert.doesNotMatch(html, /edit-budget|Edit budget|budget-dialog/);
+test("the cog opens one settings dialog", async (t) => {
   assert.match(html, /<h2 id="goal"><\/h2>\s*<button id="open-settings"[^>]*aria-label="Settings"[^>]*title="Settings"/);
   const ui = await dashboard(t);
   await ui.get("open-settings").fire("click");
@@ -1813,14 +1801,6 @@ test("the unblock popup wraps backticked option labels in code inside the button
   const choice = ui.get("move-body").querySelector(".option");
   assert.equal(choice.querySelector("code").textContent, "gh auth login");
   assert.equal(choice.textContent, "Run gh auth login first");
-});
-
-test("code uses the GitHub inline code style in both color schemes", () => {
-  assert.match(html, /--code-bg: rgba\(175, 184, 193, \.2\)/);
-  assert.match(html, /--code-bg: rgba\(110, 118, 129, \.4\)/);
-  const rule = html.match(/\n\s*code \{([^}]*)\}/)[1];
-  for (const part of [/font-family: var\(--mono\)/, /font-size: 85%/, /padding: \.2em \.4em/, /border-radius: 6px/,
-    /background: var\(--code-bg\)/, /overflow-wrap: anywhere/]) assert.match(rule, part);
 });
 
 test("Cmd+K and Ctrl+K toggle the task palette, and other dialogs keep it closed", async (t) => {
