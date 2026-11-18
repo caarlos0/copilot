@@ -111,7 +111,9 @@ Repair drift through `factory.mjs`, including local issue-less merges with
 The dashboard opens task lists in a panel docked on the right edge, beside the flowchart (the
 flowchart shrinks while it is open) and can move a task back or directly
 to `resolved` with an operator comment. Manual resolution requires a non-merge
-outcome; it does not merge or close GitHub items. Resolved tasks with pending
+outcome; it does not merge or close GitHub items. Cmd+K or Ctrl+K opens a task
+palette (`rankTasks` in `factory-data.mjs`) that docks the chosen task's list and
+focuses its row; the shortcut is ignored while another dialog is open. Resolved tasks with pending
 feedback are not archived. Archived tasks go to
 `<owner.repo>-factory-archive/YYYY-MM-DD.json`, are never deleted, and come
 back only through `factory.mjs --restore` after the user agrees. Task

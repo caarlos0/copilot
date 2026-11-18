@@ -99,6 +99,30 @@ export function byRecency(tasks) {
   return [...tasks].sort((a, b) => time(b) - time(a) || a.id.localeCompare(b.id));
 }
 
+// Task palette matching: every term must appear in the task's identifying fields, never in history or comments.
+export function rankTasks(tasks, query, limit = 20) {
+  const text = query.trim().toLowerCase();
+  if (!text) return byRecency(tasks).slice(0, limit);
+  const terms = text.split(/\s+/);
+  const rank = (task) => {
+    const id = task.id.toLowerCase();
+    const title = task.title.toLowerCase();
+    if (id === text) return 0;
+    if (id.startsWith(text)) return 1;
+    if (title.startsWith(text)) return 2;
+    if (id.includes(text)) return 3;
+    return title.includes(text) ? 4 : 5;
+  };
+  const searchable = (task) => [task.id, task.title, task.state, task.resolution?.outcome, task.issue, task.pr, ...task.links]
+    .filter(Boolean).join("\n").toLowerCase();
+  return byRecency(tasks)
+    .filter((task) => terms.every((term) => searchable(task).includes(term)))
+    .map((task) => ({ task, rank: rank(task) }))
+    .sort((a, b) => a.rank - b.rank)
+    .slice(0, limit)
+    .map(({ task }) => task);
+}
+
 export function cyclesOf(task) {
   return task.history.filter((item, index) =>
     item.state === "implementation" && task.history[index - 1]?.state === "review").length;

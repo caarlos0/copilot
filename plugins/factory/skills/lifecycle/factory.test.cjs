@@ -62,6 +62,32 @@ test("the shipped example is a valid factory", async () => {
   validate(example);
 });
 
+test("rankTasks matches identifying fields only and ranks id, then title, then other fields", async () => {
+  const { rankTasks, byRecency } = await import("./factory-data.mjs");
+  const ids = (query, limit) => rankTasks(example.tasks, query, limit).map((task) => task.id);
+  assert.deepEqual(ids(""), byRecency(example.tasks).map((task) => task.id));
+  assert.deepEqual(ids("", 2), byRecency(example.tasks).slice(0, 2).map((task) => task.id));
+  assert.deepEqual(ids("issue-7"), ["issue-7"]);
+  assert.deepEqual(ids("  ISSUE-7  "), ["issue-7"]);
+  assert.deepEqual(ids("issue-3 typo"), ["issue-3"]);
+  assert.deepEqual(ids("issue-3 retry"), []);
+  assert.deepEqual(ids("blocked"), ["issue-5"]);
+  assert.deepEqual(ids("pull/21"), ["issue-7"]);
+  assert.deepEqual(ids("merged"), ["issue-3"]);
+
+  const tasks = structuredClone(example.tasks.slice(0, 3));
+  tasks[0].id = "other";
+  tasks[0].title = "Mentions issue-9 in the title";
+  tasks[1].id = "issue-9";
+  tasks[2].id = "issue-90";
+  tasks[2].title = "Another";
+  assert.deepEqual(rankTasks(tasks, "issue-9").map((task) => task.id), ["issue-9", "issue-90", "other"]);
+
+  const withHistory = structuredClone(example.tasks[0]);
+  withHistory.history.push({ ...withHistory.history[0], note: "zebra-comment" });
+  assert.deepEqual(rankTasks([withHistory], "zebra-comment"), []);
+});
+
 const withoutBudget = () => {
   const { budget, ...rest } = structuredClone(example);
   return rest;

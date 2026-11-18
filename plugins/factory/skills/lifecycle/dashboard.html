@@ -154,7 +154,20 @@
         color: var(--fg); background: var(--bg); border: 1px solid var(--border); border-radius: 12px; }
       dialog:focus { outline: none; }
       dialog::backdrop { background: rgb(0 0 0 / .5); }
-      #move-dialog, #settings-dialog { width: min(560px, calc(100% - 32px)); }
+      #move-dialog, #settings-dialog, #palette-dialog { width: min(560px, calc(100% - 32px)); }
+      #palette-dialog { margin-top: 12vh; }
+      #palette-input { flex: 1; min-width: 0; padding: 5px 12px; background: var(--bg); }
+      #palette-list { list-style: none; margin: 0; padding: 0; max-height: 50vh; overflow-y: auto; }
+      #palette-list li { padding: 8px 24px; cursor: pointer; overflow-wrap: anywhere; }
+      #palette-list li[aria-selected="true"] { background: color-mix(in srgb, var(--accent) 14%, var(--bg)); }
+      #palette-list .option-title { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+      #palette-list .option-meta { margin: 0; font-size: 12px; }
+      #palette-status { margin: 8px 24px; }
+      .task-row.task-flash { outline: 2px solid var(--accent); outline-offset: -2px; }
+      @media (prefers-reduced-motion: no-preference) {
+        .task-row.task-flash { animation: task-flash 1.2s ease-out; }
+      }
+      @keyframes task-flash { from { background: color-mix(in srgb, var(--accent) 25%, transparent); } }
       #title-row { display: flex; align-items: center; gap: 8px; }
       #open-settings { width: 32px; height: 32px; padding: 0; font-size: 18px; line-height: 28px;
         color: var(--fg-muted); background: transparent; border-color: transparent; }
@@ -294,6 +307,16 @@
         </div>
         <div id="move-body"></div>
       </dialog>
+      <dialog id="palette-dialog" aria-label="Go to task">
+        <div class="detail-head">
+          <input id="palette-input" type="text" autocomplete="off" placeholder="Go to task" aria-label="Go to task"
+            role="combobox" aria-expanded="true" aria-autocomplete="list" aria-controls="palette-list">
+          <button id="close-palette" class="close-button" type="button" tabindex="-1"
+            aria-label="Close palette" title="Close palette">&times;</button>
+        </div>
+        <ul id="palette-list" role="listbox" aria-label="Tasks"></ul>
+        <p id="palette-status" class="muted" role="status"></p>
+      </dialog>
       <dialog id="settings-dialog" aria-labelledby="settings-title">
         <div class="detail-head">
           <h2 id="settings-title">Settings</h2>
@@ -330,7 +353,7 @@
     </div>
     <noscript>Enable JavaScript to read the factory.</noscript>
     <script type="module">
-      import { states, outcomes, artifactName, githubURL, validate, countByState, isIdle, hopsSince, entered, byRecency, cyclesOf, operatorStates, operatorOutcomes, unblockState, unblockChoice, nextRun, nextDue, budgetText, leverSpends, leverAutonomyCaps, maxParallelWorkers, maxRoleLimit } from "./factory-data.mjs";
+      import { states, outcomes, artifactName, githubURL, validate, countByState, isIdle, hopsSince, entered, byRecency, rankTasks, cyclesOf, operatorStates, operatorOutcomes, unblockState, unblockChoice, nextRun, nextDue, budgetText, leverSpends, leverAutonomyCaps, maxParallelWorkers, maxRoleLimit } from "./factory-data.mjs";
 
       const SVG = "http://www.w3.org/2000/svg";
       const NODE = { w: 160, h: 110 };
@@ -406,6 +429,7 @@
       const panel = document.getElementById("detail");
       const moveDialog = document.getElementById("move-dialog");
       const settingsDialog = document.getElementById("settings-dialog");
+      const paletteDialog = document.getElementById("palette-dialog");
       const producers = document.getElementById("producers-dialog");
       function element(tag, value, className) {
         const node = document.createElement(tag);
@@ -835,6 +859,105 @@
         document.getElementById("settings-body").replaceChildren(form);
         settingsDialog.showModal();
         form.querySelector("input").focus();
+      }
+
+      const paletteInput = document.getElementById("palette-input");
+      const paletteList = document.getElementById("palette-list");
+      let paletteMatches = [];
+      let paletteActive = 0;
+
+      function setPaletteActive(index) {
+        paletteActive = index;
+        [...paletteList.children].forEach((option, position) => {
+          option.setAttribute("aria-selected", String(position === index));
+          if (position === index) option.scrollIntoView({ block: "nearest" });
+        });
+        paletteInput.setAttribute("aria-activedescendant", paletteMatches.length ? `palette-option-${index}` : "");
+      }
+
+      function paletteOption(task, index) {
+        const node = element("li", null, "option");
+        node.id = `palette-option-${index}`;
+        node.setAttribute("role", "option");
+        node.dataset.taskId = task.id;
+        node.style.setProperty("--c", `var(--${task.state})`);
+        const heading = element("div", null, "option-title");
+        heading.append(element("span", task.title), element("span", task.state, "chip state"));
+        const meta = element("p", null, "option-meta muted");
+        meta.append(element("code", task.id));
+        for (const href of [task.issue, task.pr]) {
+          if (href) meta.append(` #${githubURL(href).pathname.split("/").pop()}`);
+        }
+        node.append(heading, meta);
+        node.addEventListener("click", () => openTask(task.id));
+        return node;
+      }
+
+      function renderPalette() {
+        paletteMatches = rankTasks(snapshot.tasks, paletteInput.value);
+        paletteList.replaceChildren(...paletteMatches.map(paletteOption));
+        const count = paletteMatches.length;
+        document.getElementById("palette-status").textContent = `${count} ${count === 1 ? "task" : "tasks"}`;
+        setPaletteActive(0);
+      }
+
+      function openPalette() {
+        paletteInput.value = "";
+        renderPalette();
+        paletteDialog.showModal();
+        paletteInput.focus();
+      }
+
+      function openTask(id) {
+        const task = snapshot.tasks.find((item) => item.id === id);
+        paletteDialog.close();
+        if (!task) return;
+        const outcome = task.state === "resolved" ? task.resolution.outcome : null;
+        const query = filterQuery();
+        if (query && !matchesTask(task, query)) document.getElementById("global-filter").value = "";
+        const docked = openState() === task.state && (!openOutcome() || openOutcome() === outcome);
+        setHash(docked ? location.hash : `#${task.state}${outcome ? `/${outcome}` : ""}`);
+        const row = [...document.getElementById("task-list").children].find((item) => item.dataset.taskId === id);
+        if (!row) return;
+        row.setAttribute("tabindex", "-1");
+        row.classList.add("task-flash");
+        row.addEventListener("blur", () => row.classList.remove("task-flash"), { once: true });
+        row.focus({ preventScroll: true });
+        row.scrollIntoView({ block: "center", behavior: reduced ? "auto" : "smooth" });
+      }
+
+      function onPaletteKey(event) {
+        const last = paletteMatches.length - 1;
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          event.preventDefault();
+          if (last < 0) return;
+          const step = event.key === "ArrowDown" ? 1 : -1;
+          setPaletteActive((paletteActive + step + last + 1) % (last + 1));
+        } else if (event.key === "Enter" && last >= 0) {
+          event.preventDefault();
+          openTask(paletteMatches[paletteActive].id);
+        }
+      }
+
+      function onGlobalKey(event) {
+        const popupOpen = moveDialog.open || settingsDialog.open || producers.open;
+        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+          if (paletteDialog.open) {
+            event.preventDefault();
+            paletteDialog.close();
+          } else if (snapshot && !popupOpen) {
+            event.preventDefault();
+            openPalette();
+          }
+          return;
+        }
+        if (popupOpen || paletteDialog.open) return;
+        if (event.key === "Escape" && !panel.hidden) closeChoice();
+        if (event.key === "/" && !event.metaKey && !event.ctrlKey && !event.altKey
+          && !event.target.closest("input, textarea, select, [contenteditable]")) {
+          event.preventDefault();
+          document.getElementById("global-filter").focus();
+        }
       }
 
       // One section per stored object. Each field is saved only when its value changed.
@@ -1615,17 +1738,12 @@
       window.addEventListener("hashchange", draw);
       const closeChoice = () => choose(null);
       document.getElementById("close-detail").addEventListener("click", closeChoice);
-      document.addEventListener("keydown", (event) => {
-        const popupOpen = moveDialog.open || settingsDialog.open || producers.open;
-        if (event.key === "Escape" && !panel.hidden && !popupOpen) closeChoice();
-        if (event.key === "/" && !event.metaKey && !event.ctrlKey && !event.altKey && !popupOpen
-          && !event.target.closest("input, textarea, select, [contenteditable]")) {
-          event.preventDefault();
-          document.getElementById("global-filter").focus();
-        }
-      });
+      document.addEventListener("keydown", onGlobalKey);
+      paletteInput.addEventListener("keydown", onPaletteKey);
+      paletteInput.addEventListener("input", renderPalette);
       wireDismiss(moveDialog, "close-move", closeMove);
       wireDismiss(settingsDialog, "close-settings", closeSettings);
+      wireDismiss(paletteDialog, "close-palette", () => paletteDialog.close());
       wireDismiss(producers, "close-producers", closeChoice);
 
       document.getElementById("logo").src = document.getElementById("icon").href;

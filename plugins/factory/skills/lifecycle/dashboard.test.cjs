@@ -463,6 +463,7 @@ async function dashboard(t, { reducedMotion = true, confirm = () => true, now = 
     getBoundingClientRect() { return { left: 100, right: 900, top: 100, bottom: 700 }; }
     focus() { document.activeElement = this; }
     closest() { return ["input", "textarea", "select"].includes(this.tag) || this.editable ? this : null; }
+    scrollIntoView(options) { this.scrolled = options; }
     requestSubmit() { this.submitted = this.fire("submit"); }
     showModal() { this.open = true; }
     close() { this.open = false; }
@@ -1513,4 +1514,107 @@ test("code uses the GitHub inline code style in both color schemes", () => {
   const rule = html.match(/\n\s*code \{([^}]*)\}/)[1];
   for (const part of [/font-family: var\(--mono\)/, /font-size: 85%/, /padding: \.2em \.4em/, /border-radius: 6px/,
     /background: var\(--code-bg\)/, /overflow-wrap: anywhere/]) assert.match(rule, part);
+});
+
+test("Cmd+K and Ctrl+K toggle the task palette, and other dialogs keep it closed", async (t) => {
+  const ui = await dashboard(t);
+  const palette = ui.get("palette-dialog");
+  assert.equal(ui.press("k").defaultPrevented, false);
+  assert.equal(palette.open, false);
+  assert.equal(ui.press("k", { metaKey: true }).defaultPrevented, true);
+  assert.equal(palette.open, true);
+  assert.equal(ui.press("K", { ctrlKey: true }).defaultPrevented, true);
+  assert.equal(palette.open, false);
+  ui.press("k", { ctrlKey: true });
+  assert.equal(palette.open, true);
+  assert.equal(ui.get("palette-list").children.length, 5);
+  palette.open = false;
+
+  for (const id of ["settings-dialog", "move-dialog", "producers-dialog"]) {
+    ui.get(id).open = true;
+    assert.equal(ui.press("k", { metaKey: true }).defaultPrevented, false, id);
+    assert.equal(palette.open, false, id);
+    ui.get(id).open = false;
+  }
+});
+
+test("typing in the palette filters tasks and Escape closes it without closing the docked list", async (t) => {
+  const ui = await dashboard(t);
+  ui.run("choose('blocked')");
+  ui.press("k", { metaKey: true });
+  const input = ui.get("palette-input");
+  input.value = "retry";
+  await input.fire("input");
+  assert.deepEqual(ui.get("palette-list").children.map((option) => option.dataset.taskId), ["issue-9"]);
+  assert.equal(ui.get("palette-status").textContent, "1 task");
+  assert.match(ui.get("palette-list").children[0].textContent, /Retry loop never stops on 401/);
+  assert.equal(input["aria-activedescendant"], "palette-option-0");
+  input.value = "nothing matches";
+  await input.fire("input");
+  assert.equal(ui.get("palette-list").children.length, 0);
+  assert.equal(ui.get("palette-status").textContent, "0 tasks");
+
+  ui.press("Escape");
+  assert.equal(ui.get("detail").hidden, false, "Escape with the palette open must not close the docked list.");
+  const event = await ui.get("palette-dialog").fire("cancel");
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(ui.get("palette-dialog").open, false);
+  assert.equal(ui.get("detail").hidden, false);
+  ui.press("Escape");
+  assert.equal(ui.get("detail").hidden, true);
+});
+
+test("palette arrows wrap and Enter docks the task's list and focuses its row", async (t) => {
+  const ui = await dashboard(t, { reducedMotion: false });
+  ui.press("k", { metaKey: true });
+  const input = ui.get("palette-input");
+  const options = () => ui.get("palette-list").children.map((option) => option["aria-selected"]);
+  assert.deepEqual(options(), ["true", "false", "false", "false", "false"]);
+  assert.equal((await input.fire("keydown", { key: "ArrowUp" })).defaultPrevented, true);
+  assert.deepEqual(options(), ["false", "false", "false", "false", "true"]);
+  await input.fire("keydown", { key: "ArrowDown" });
+  await input.fire("keydown", { key: "ArrowDown" });
+  assert.deepEqual(options(), ["false", "true", "false", "false", "false"]);
+
+  input.value = "issue-3";
+  await input.fire("input");
+  await input.fire("keydown", { key: "Enter" });
+  assert.equal(ui.get("palette-dialog").open, false);
+  assert.equal(ui.run("location.hash"), "#resolved/merged");
+  const row = ui.get("task-list").children.find((item) => item.dataset.taskId === "issue-3");
+  assert.ok(row);
+  assert.equal(ui.document.activeElement, row);
+  assert.deepEqual([row.scrolled.block, row.scrolled.behavior], ["center", "smooth"]);
+  assert.match(row.className, /task-flash/);
+  await row.fire("blur");
+  assert.doesNotMatch(row.className, /task-flash/);
+
+  ui.press("k", { ctrlKey: true });
+  input.value = "issue-5";
+  await input.fire("input");
+  await ui.get("palette-list").children[0].fire("click");
+  assert.equal(ui.run("location.hash"), "#blocked");
+  assert.equal(ui.get("task-list").children[0].dataset.taskId, "issue-5");
+});
+
+test("opening a task from the palette clears a global filter that hides it", async (t) => {
+  const ui = await dashboard(t);
+  ui.get("global-filter").value = "retry";
+  await ui.get("global-filter").fire("input");
+  ui.press("k", { metaKey: true });
+  ui.get("palette-input").value = "issue-5";
+  await ui.get("palette-input").fire("input");
+  await ui.get("palette-input").fire("keydown", { key: "Enter" });
+  assert.equal(ui.get("global-filter").value, "");
+  assert.equal(ui.get("task-list").children[0].dataset.taskId, "issue-5");
+
+  ui.run("choose('resolved')");
+  ui.get("global-filter").value = "typo";
+  await ui.get("global-filter").fire("input");
+  ui.press("k", { metaKey: true });
+  ui.get("palette-input").value = "issue-3";
+  await ui.get("palette-input").fire("input");
+  await ui.get("palette-input").fire("keydown", { key: "Enter" });
+  assert.equal(ui.get("global-filter").value, "typo", "A matching filter stays.");
+  assert.equal(ui.run("location.hash"), "#resolved", "A list that already shows the task stays as it is.");
 });
