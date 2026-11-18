@@ -19,6 +19,7 @@ const workerStatuses = ["running", "idle", "closed", "unknown"];
 const ruleKinds = ["search", "backlog", "improve"];
 const everyUnits = { m: 60_000, h: 3_600_000, d: 86_400_000 };
 export const defaultLimits = { investigation: 3, implementation: 3 };
+export const maxWorkerSummary = 2000;
 export const defaultBudget = { max_parallel_workers: 10 };
 export const maxParallelWorkers = 100;
 export const maxRoleLimit = 100;
@@ -110,6 +111,15 @@ export function entered(task) {
 export function byRecency(tasks) {
   const time = (task) => Date.parse(task.history?.at(-1)?.at) || 0;
   return [...tasks].sort((a, b) => time(b) - time(a) || a.id.localeCompare(b.id));
+}
+
+// The worker summary a task card shows: the current state's role first, else the newest by summary_at.
+export function cardSummary(task) {
+  const time = (worker) => Date.parse(worker.summary_at) || 0;
+  const found = Object.entries(task.workers ?? {}).filter(([, worker]) => worker?.summary);
+  const [role, worker] = found.find(([name]) => name === task.state)
+    ?? found.sort(([, a], [, b]) => time(b) - time(a))[0] ?? [];
+  return worker ? { role, text: worker.summary } : null;
 }
 
 // Task palette matching: every term must appear in the task's identifying fields, never in history or comments.
@@ -232,6 +242,13 @@ function validateWorker(field, worker) {
   for (const key of ["brief", "result"]) {
     if (worker[key] != null) artifactName(worker[key], `${field}.${key}`);
   }
+  if (worker.summary != null) {
+    text(worker.summary, `${field}.summary`);
+    if (worker.summary.length > maxWorkerSummary) {
+      throw new Error(`${field}.summary must be at most ${maxWorkerSummary} characters.`);
+    }
+  }
+  if (worker.summary_at != null) timestamp(worker.summary_at, `${field}.summary_at`);
 }
 
 function validateTask(task, seen) {

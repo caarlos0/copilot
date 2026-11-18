@@ -249,7 +249,11 @@ until the factory confirms that write. After the action, write the observed
 result, full head or merge commit SHA, and worker status with `factory.mjs`
 in the same turn, before any follow-up action. For a result, first mirror its
 summary, evidence, and result path; then verify it and record the state change
-and disposition. If any write fails or is refused, stop further work and
+and disposition. Mirror the result's `summary` into `workers.<role>.summary`
+(text, at most 2000 characters; shorten it, never cut it mid-sentence) with
+`summary_at` set to the result's `updated_at`, in the same `--workers` write that
+records the result path. The dashboard card shows it and reads nothing else.
+If any write fails or is refused, stop further work and
 reconcile the latest file; never continue with untracked work.
 
 Tell implementation workers to stop before every commit, push that changes a

@@ -135,6 +135,12 @@ branches merged into the default branch, Rex panes, PRs, and worker results.
 Repair drift through `factory.mjs`, including local issue-less merges with
 `resolution: merged` and the full merge SHA in `details.merge_commit`.
 
+The dashboard task cards show one worker summary (`cardSummary` in
+`factory-data.mjs`): the role matching the task state, else the newest by
+`summary_at`. The coordinator mirrors each result's `summary` into the optional
+`workers.<role>.summary` (at most 2000 characters) and `summary_at`; the
+dashboard reads only the factory file.
+
 The dashboard sidebar sorts factories with `compareFactories` in `factory-data.mjs`:
 active with open tasks, then paused or blocked with open tasks, then nothing open,
 then finished; ties go by name without case, then file.

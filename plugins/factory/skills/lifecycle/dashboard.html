@@ -204,6 +204,11 @@
       .chip { padding: 0 7px; border: 1px solid var(--border); border-radius: 2em; color: var(--fg-muted);
         font-size: 12px; font-weight: 500; line-height: 18px; }
       .chip.state { color: var(--c); border-color: var(--c); }
+      .summary h4 { margin: 8px 0 2px; text-transform: capitalize; }
+      .summary-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+      .summary-text.clamped { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+      .summary-toggle { margin-top: 4px; padding: 0; border: 0; background: none; color: var(--accent); font-size: 12px; font-weight: 400; }
+      .summary-toggle:hover:not(:disabled) { background: none; text-decoration: underline; }
       .feedback-note { white-space: pre-wrap; border-left: 3px solid var(--accent); padding-left: 12px; }
       .move { flex: none; padding: 3px 12px; font-size: 12px; }
       .move-form { padding: 16px 24px; }
@@ -354,7 +359,7 @@
     </div>
     <noscript>Enable JavaScript to read the factory.</noscript>
     <script type="module">
-      import { states, outcomes, transitions, artifactName, githubURL, validate, countByState, entered, byRecency, rankTasks, compareFactories, sortReferences, cyclesOf, operatorStates, operatorOutcomes, unblockState, unblockChoice, stripRecommended, nextRun, nextDue, leverSpends, leverAutonomyCaps, maxParallelWorkers, maxRoleLimit, digitIndex } from "./factory-data.mjs";
+      import { states, outcomes, transitions, artifactName, githubURL, validate, countByState, entered, byRecency, cardSummary, rankTasks, compareFactories, sortReferences, cyclesOf, operatorStates, operatorOutcomes, unblockState, unblockChoice, stripRecommended, nextRun, nextDue, leverSpends, leverAutonomyCaps, maxParallelWorkers, maxRoleLimit, digitIndex } from "./factory-data.mjs";
 
       const SVG = "http://www.w3.org/2000/svg";
       const NODE = { w: 160, h: 110 };
@@ -1362,6 +1367,35 @@
         return [folded, list(earlier, steps.length)];
       }
 
+      // Task cards whose summary the reader expanded; it survives list rebuilds.
+      const summaryOpen = new Set();
+      const SUMMARY_FOLD = 240;
+
+      function summaryBlock(task) {
+        const summary = cardSummary(task);
+        if (!summary) return null;
+        const block = element("div", null, "summary");
+        const body = rich("p", summary.text, "summary-text");
+        block.append(element("h4", `${summary.role} summary`), body);
+        if (summary.text.length > SUMMARY_FOLD || summary.text.includes("\n")) {
+          const toggle = element("button", null, "summary-toggle");
+          toggle.type = "button";
+          const show = () => {
+            const open = summaryOpen.has(task.id);
+            body.classList.toggle("clamped", !open);
+            toggle.textContent = open ? "Show less" : "Show more";
+            toggle.setAttribute("aria-expanded", String(open));
+          };
+          toggle.addEventListener("click", () => {
+            if (!summaryOpen.delete(task.id)) summaryOpen.add(task.id);
+            show();
+          });
+          show();
+          block.append(toggle);
+        }
+        return block;
+      }
+
       function taskRow(task, expanded) {
         const node = element("li", null, "task-row");
         node.dataset.taskId = task.id;
@@ -1394,6 +1428,8 @@
           chips.append(chip);
         }
         node.append(chips);
+        const summary = summaryBlock(task);
+        if (summary) node.append(summary);
         if (task.blocker) {
           node.append(rich("p", `Blocked in ${task.blocker.from}: ${task.blocker.reason}`));
           if (task.blocker.options) {

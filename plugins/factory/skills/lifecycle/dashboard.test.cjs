@@ -1966,3 +1966,40 @@ test("opening a task from the palette clears a global filter that hides it", asy
   assert.equal(ui.get("global-filter").value, "typo", "A matching filter stays.");
   assert.equal(ui.run("location.hash"), "#resolved", "A list that already shows the task stays as it is.");
 });
+
+test("a card shows the worker summary for its state, else the newest, and folds a long one", async (t) => {
+  const ui = await dashboard(t);
+  const task = structuredClone(example.tasks.find((item) => item.id === "issue-5"));
+  const long = `Plan for #12 and be66032: ${"step ".repeat(60)}`;
+  task.state = "review";
+  task.workers = {
+    investigation: { status: "closed", summary: "Old finding.", summary_at: "2026-05-01T10:00:00Z" },
+    implementation: { status: "closed", summary: long, summary_at: "2026-05-02T10:00:00Z" },
+  };
+  const card = (value) => ui.run(`taskRow(${JSON.stringify(value)}, new Set())`);
+  let row = card(task);
+  const heading = (node) => node.querySelector("h4").textContent;
+  assert.equal(heading(row.querySelector(".summary")), "implementation summary", "No review summary: the newest wins.");
+  task.state = "investigation";
+  row = card(task);
+  assert.equal(heading(row.querySelector(".summary")), "investigation summary", "The current state's role wins.");
+  assert.equal(row.querySelector(".summary-toggle"), null, "A short summary has no toggle.");
+  assert.equal(row.querySelector(".summary-text").className, "summary-text");
+
+  task.state = "implementation";
+  row = card(task);
+  const body = row.querySelector(".summary-text");
+  const toggle = row.querySelector(".summary-toggle");
+  assert.ok(body.className.includes("clamped"));
+  assert.equal(toggle.textContent, "Show more");
+  assert.ok(body.querySelectorAll("a").length >= 1, "References stay links.");
+  await toggle.fire("click");
+  assert.ok(!body.className.includes("clamped"));
+  assert.equal(toggle.textContent, "Show less");
+  assert.ok(!card(task).querySelector(".summary-text").className.includes("clamped"), "A rebuilt row stays expanded.");
+  await toggle.fire("click");
+  assert.ok(body.className.includes("clamped"));
+
+  task.workers = {};
+  assert.equal(card(task).querySelector(".summary"), null, "No summary, no block.");
+});

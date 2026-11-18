@@ -917,3 +917,17 @@ test("a one-shot rule worker is matched by the factory's directory; no or many m
   assert.deepEqual(registry.map((line) => JSON.parse(line)).map(({ id, role, rule }) => ({ id, role, rule })),
     [{ id: uuid(1), role: "improver", rule: "self" }]);
 });
+
+test("a worker summary is optional, validated, and kept through later worker updates", async (t) => {
+  const f = await started(t);
+  const summary = "Found the retry loop; plan: stop on 401.";
+  const at = "2026-05-01T10:00:00Z";
+  f.ok("--task", "issue-1", "--workers",
+    JSON.stringify({ investigation: { status: "closed", summary, summary_at: at } }));
+  f.ok("--task", "issue-1", "--workers", JSON.stringify({ investigation: { status: "idle" } }));
+  assert.deepEqual((await f.read()).tasks[0].workers.investigation, { status: "idle", summary, summary_at: at });
+  f.ok("--task", "issue-1", "--workers", JSON.stringify({ investigation: { summary: "x".repeat(2000) } }));
+  for (const bad of [{ summary: 5 }, { summary: "" }, { summary: "x".repeat(2001) }, { summary_at: "yesterday" }]) {
+    f.fails(/summary/, "--task", "issue-1", "--workers", JSON.stringify({ investigation: bad }));
+  }
+});

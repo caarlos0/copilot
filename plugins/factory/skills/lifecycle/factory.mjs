@@ -623,6 +623,8 @@ Task options:
   --links JSON          Replace the GitHub issue/PR URL array
   --workers JSON        Merge worker records by role, e.g.
                         '{"implementation":{"status":"running","pane":"block:id"}}'; a null role clears it
+                        Optional "summary" (text, at most 2000 characters) and "summary_at" (ISO 8601
+                        with timezone) hold the latest result summary; the task card shows it
   --worktree JSON       {"path":"...","created_by_run":true}, or null
                         Refused in investigation; an investigation worker is one-shot and
                         read-only (no continuous mode, no worktree)
