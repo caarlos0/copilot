@@ -1029,9 +1029,6 @@ request. Do not start a timed loop. Stop the waiter when the factory session
 ends. If the factory is not running, comments remain pending until its next
 start.
 
-`wait.mjs` (files and hashes) still works but is deprecated. Do not use it for
-new runs.
-
 ## Merge
 
 Use `autonomy-dial` and `pr-shepherd`, not a separate per-head approval
@@ -1210,8 +1207,7 @@ printed HTTP URL, not a `file://` link. Do not open the browser for the user.
 
 The page draws the flow as a flowchart with a task count per state. Below
 Resolved, each resolution outcome has its own count and opens a filtered task
-list. The Resolved total opens all resolved tasks. A moving token shows each
-new transition from the file history. The dashed "Find work" node above
+list. The Resolved total opens all resolved tasks. The dashed "Find work" node above
 Initial feeds it. It shows the count of enabled rules and the next due time, and
 opens a read-only popup with each rule (kind, query or prompt, schedule, last
 run, worker and its result), the user-links source, and the skipped list. A

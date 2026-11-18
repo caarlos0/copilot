@@ -184,7 +184,7 @@ from `--session` and worker records. `session-metrics.mjs` reads those sessions'
 `events.jsonl` and prints counts only, never content. It cannot measure tool run
 times, and "idle" means time between turns.
 
-The factory waits with `broker.mjs wait`, not `wait.mjs`. The broker keeps one
+The factory waits with `broker.mjs wait`. The broker keeps one
 append-only JSONL log, `<owner.repo>-factory-events.jsonl` (mode 0600), beside
 the factory file. Events are typed notifications (`task.moved`, `task.updated`,
 `feedback.pending`, `budget.updated`, `limits.updated`, `lever.updated`, `worker.result`, `worker.blocked`, `pr.merged`; `rule.due` is computed by
@@ -214,10 +214,7 @@ exits 0 when a waiter is alive and 1 otherwise, and `reconcile.mjs` reports
 `agents/general.agent.md` and the lifecycle skill's "Receive worker events"
 in sync.
 
-The skill still bundles `wait.mjs` and its tests, deprecated in favor of the
-broker; keep it working until it is removed. It must not depend on files in the
-coordination plugin. The factory copy adds `--due`. Without it, keep the two
-copies behaviorally aligned.
+The skill must not depend on files in the coordination plugin.
 `serve.mjs` repeats the small state-directory confinement code of the coordinator
 server on purpose: the two plugins load independently.
 

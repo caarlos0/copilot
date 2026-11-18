@@ -2,7 +2,6 @@ const assert = require("node:assert/strict");
 const { readFileSync } = require("node:fs");
 const { mkdtemp, readFile, readdir, rm, symlink, writeFile } = require("node:fs/promises");
 const { spawn, spawnSync } = require("node:child_process");
-const { createHash } = require("node:crypto");
 const http = require("node:http");
 const { join } = require("node:path");
 const { tmpdir } = require("node:os");
@@ -402,31 +401,16 @@ test("the CLI and the dashboard share the write lock for settings writes", async
   assert.equal(await readFile(file, "utf8"), original);
 });
 
-test("a dashboard edit wakes the factory waiter even with no worker results", { timeout: 10000 }, async (t) => {
+test("a dashboard move emits an event the factory waiter wakes on", async (t) => {
   const { url, directory } = await server(t);
   const file = join(directory, factoryFile);
-  const cursor = join(directory, "cursor.json");
-  const content = await readFile(file);
-  await writeFile(cursor, JSON.stringify({ [file]: createHash("sha256").update(content).digest("hex") }));
-  const child = spawn(process.execPath, [join(__dirname, "wait.mjs"), "--cursor", cursor, file],
-    { stdio: ["ignore", "pipe", "pipe"] });
-  let stdout = "";
-  let stderr = "";
-  const closed = new Promise((resolve) => child.once("close", resolve));
-  t.after(async () => { child.kill(); await closed; });
-  await new Promise((resolve, reject) => {
-    child.stdout.on("data", (chunk) => { stdout += chunk; });
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk;
-      if (stderr.includes("Watching result files.")) resolve();
-    });
-    child.once("error", reject);
-    child.once("close", (code) => reject(new Error(`Waiter exited ${code}: ${stderr}`)));
-  });
   const response = await move(url, unblocked);
   assert.equal(response.status, 200, await response.clone().text());
-  assert.equal(await closed, 0, stderr);
-  assert.deepEqual(JSON.parse(stdout), { changed: [file] });
+  const waited = spawnSync(process.execPath, [join(__dirname, "broker.mjs"), "wait", file,
+    "--since", "0", "--exclude-source", "coordinator", "--timeout", "5"], { encoding: "utf8" });
+  assert.equal(waited.status, 0, waited.stderr);
+  const { events } = JSON.parse(waited.stdout);
+  assert.ok(events.length > 0 && events.every((event) => event.source === "dashboard"), waited.stdout);
 });
 
 test("accepts only GET on loopback host names", async (t) => {
