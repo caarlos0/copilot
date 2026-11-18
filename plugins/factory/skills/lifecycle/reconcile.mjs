@@ -129,7 +129,7 @@ async function reconcile(file, defaultBranch = "main") {
     }
   }
 
-  // A rule worker is finished when its result is newer than the rule's last run stamp.
+  // A rule worker is finished when its result is complete and newer than the rule's last run stamp.
   for (const rule of factory.rules ?? []) {
     const worker = rule.worker;
     if (!worker?.result) continue;
@@ -137,7 +137,7 @@ async function reconcile(file, defaultBranch = "main") {
     const result = await readJSON(file);
     if (!result) continue;
     const at = Date.parse(result.updated_at) || (await stat(file)).mtimeMs;
-    const finished = rule.last_run_at ? at > Date.parse(rule.last_run_at) : result.outcome === "complete";
+    const finished = result.outcome === "complete" && (!rule.last_run_at || at > Date.parse(rule.last_run_at));
     if (!finished) continue;
     const window = worker.window ? openWindows().find((id) => sameWindow(id, worker.window)) : undefined;
     if (window || worker.status === "running") {

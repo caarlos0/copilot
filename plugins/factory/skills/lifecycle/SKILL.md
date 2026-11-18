@@ -286,8 +286,8 @@ leave work behind. Treat each finding as unfinished work:
   worker still runs; otherwise verify and land or block it.
 - `open-window`: a resolved task still has an open Rex window. Release it as in
   "Release panes".
-- `rule-worker-done`: a rule's worker has a result newer than the rule's
-  `last_run_at` (or a `complete` result when the rule never ran), and its Rex
+- `rule-worker-done`: a rule's worker has a `complete` result newer than the rule's
+  `last_run_at` (or any `complete` result when the rule never ran), and its Rex
   window is still open or its status is still `running`. Read the result, process
   the candidates, clear the record with `--rule ID --rule-worker null`, and
   close the window (see "Find more work").

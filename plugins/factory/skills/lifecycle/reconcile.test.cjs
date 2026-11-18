@@ -130,6 +130,7 @@ test("flags a finished rule worker whose window is open or whose status is still
   await stamp("open-result.json", after);
   await stamp("closed-result.json", after);
   await stamp("fresh-result.json", before);
+  await stamp("working-result.json", after, "working");
   const rule = (id, worker, last_run_at = "2026-05-01T12:00:00Z") =>
     ({ id, description: id, kind: "backlog", enabled: true, last_run_at, worker });
   const rules = [
@@ -137,6 +138,8 @@ test("flags a finished rule worker whose window is open or whose status is still
     rule("open", { status: "closed", window: "a621-95363a2bc34f", result: "open-result.json" }),
     rule("closed", { status: "closed", window: "window:other-id", result: "closed-result.json" }),
     rule("fresh", { status: "running", window, result: "fresh-result.json" }),
+    rule("working", { status: "running", result: "working-result.json" }),
+    rule("working-first", { status: "running", result: "working-result.json" }, null),
     rule("missing", { status: "running", result: "none-result.json" }),
     rule("cleared", null),
   ];
