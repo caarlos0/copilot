@@ -317,6 +317,10 @@
       const SOURCE_ROUTE = [[centre("initial").x, SOURCE.y + SOURCE.h], [centre("initial").x, rowTop]];
       const flowRoutes = {
         "initial>investigation": across("initial", "investigation"),
+        "initial>review": [
+          [places.initial.x + NODE.w - 30, rowTop], [places.initial.x + NODE.w - 30, rowTop - 60],
+          [centre("review").x, rowTop - 60], [centre("review").x, rowTop],
+        ],
         "investigation>implementation": across("investigation", "implementation"),
         "implementation>review": across("implementation", "review", row - 20),
         "review>implementation": across("implementation", "review", row + 20).reverse(),
@@ -427,6 +431,7 @@
           return node;
         };
         edge("initial>investigation", flowRoutes["initial>investigation"]);
+        edge("initial>review", flowRoutes["initial>review"]);
         edge("investigation>implementation", flowRoutes["investigation>implementation"]);
         edge("implementation>review", flowRoutes["implementation>review"]);
         edge("review>implementation", flowRoutes["review>implementation"]);

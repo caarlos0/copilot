@@ -106,7 +106,9 @@ export function operatorStates(task) {
 
 export function checkTransition(task, to, operator = false) {
   if (task.state === to && !operator) return;
-  const allowed = operator ? operatorStates(task) : transitions[task.state];
+  const allowed = operator ? operatorStates(task) : [...transitions[task.state]];
+  // A PR handed over for review skips the work states.
+  if (!operator && task.state === "initial" && task.pr != null) allowed.push("review");
   if (!allowed.includes(to)) {
     throw new Error(`Task ${task.id} cannot move from ${task.state} to ${to}. Allowed: ${allowed.join(", ") || "none"}.`);
   }
