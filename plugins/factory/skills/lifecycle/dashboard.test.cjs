@@ -780,7 +780,10 @@ test("digits select the Nth sidebar factory and the first nine items show a kbd 
     assert.equal(dispatched.defaultPrevented, false);
   };
   await ignored("3");
-  await ignored("1", { ctrlKey: true });
+  await ignored("0");
+  await ignored("a");
+  await ignored("Enter");
+  for (const modifier of ["metaKey", "ctrlKey", "altKey", "shiftKey"]) await ignored("1", { [modifier]: true });
   await ignored("1", { target: { closest: () => ({}) } });
   await ignored("1", { repeat: true });
   ui.get("move-dialog").open = true;

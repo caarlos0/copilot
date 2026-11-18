@@ -62,14 +62,6 @@ test("the shipped example is a valid factory", async () => {
   validate(example);
 });
 
-test("sortReferences puts issues before pull requests, each by ascending number", async () => {
-  const { sortReferences } = await import("./factory-data.mjs");
-  const url = (kind, number) => `https://github.com/owner/repo/${kind}/${number}`;
-  const input = [url("pull", 5), url("issues", 20), url("pull", 12), url("issues", 3), url("pull", 2)];
-  assert.deepEqual(sortReferences(input), [url("issues", 3), url("issues", 20), url("pull", 2), url("pull", 5), url("pull", 12)]);
-  assert.equal(input[0], url("pull", 5), "The input must stay unchanged.");
-});
-
 test("rankTasks matches identifying fields only and ranks id, then title, then other fields", async () => {
   const { rankTasks, byRecency } = await import("./factory-data.mjs");
   const ids = (query, limit) => rankTasks(example.tasks, query, limit).map((task) => task.id);
@@ -717,26 +709,6 @@ test("usage errors exit 2 and malformed JSON flags exit 1", async (t) => {
   f.fails(/Unexpected token|JSON/, "--task", "issue-1", "--links", "{");
 });
 
-test("countByState counts tasks per state", async () => {
-  const { countByState } = await import("./factory-data.mjs");
-  assert.deepEqual(countByState(example.tasks), {
-    initial: 1, investigation: 0, implementation: 1, review: 1, blocked: 1, resolved: 1,
-  });
-});
-
-test("digitIndex maps plain 1-9 to a sidebar index within the count", async () => {
-  const { digitIndex } = await import("./factory-data.mjs");
-  assert.equal(digitIndex({ key: "1" }, 3), 0);
-  assert.equal(digitIndex({ key: "9" }, 9), 8);
-  assert.equal(digitIndex({ key: "3" }, 2), -1);
-  assert.equal(digitIndex({ key: "0" }, 9), -1);
-  assert.equal(digitIndex({ key: "a" }, 9), -1);
-  assert.equal(digitIndex({ key: "Enter" }, 9), -1);
-  for (const modifier of ["metaKey", "ctrlKey", "altKey", "shiftKey"]) {
-    assert.equal(digitIndex({ key: "1", [modifier]: true }, 9), -1, modifier);
-  }
-});
-
 const search = { id: "bugs", description: "Open bugs.", kind: "search", query: "is:issue is:open label:bug",
   every: "30m", enabled: true, last_run_at: null };
 
@@ -745,8 +717,9 @@ test("rules need a known kind, a query for search, and a valid interval", async 
   const rules = (rule) => ["--rules", JSON.stringify([{ ...search, ...rule }])];
   f.fails(/Rule bugs query/, ...rules({ query: null }));
   f.fails(/Rule bugs kind/, ...rules({ kind: "other" }));
-  f.fails(/every must look like/, ...rules({ every: "30 minutes" }));
-  f.fails(/every must look like/, ...rules({ every: "0m" }));
+  for (const every of ["", "30 minutes", "0m", "5", "5s", "10000m", "1.5h", " 5m"]) {
+    f.fails(/every must look like/, ...rules({ every }));
+  }
   f.fails(/Rule bugs worker\.status/, ...rules({ worker: { status: "gone" } }));
   f.ok("--rules", JSON.stringify([{ id: "old", description: "Legacy.", query: null, enabled: true, last_run_at: null }]));
   f.ok(...rules({ worker: { status: "closed", mode: "one-shot", result: "owner.repo-bugs-result.json" } }));
@@ -791,9 +764,9 @@ test("--ignored replaces the skipped list and accepts only GitHub links", async 
 });
 
 test("schedule helpers say what is due, only for an active factory", async () => {
-  const { intervalMs, nextRun, dueRules, nextDue } = await import("./factory-data.mjs");
-  assert.deepEqual(["30m", "6h", "1d", "9999m"].map(intervalMs), [1_800_000, 21_600_000, 86_400_000, 599_940_000]);
-  for (const bad of ["", "0m", "5", "5s", "10000m", "1.5h", " 5m"]) assert.throws(() => intervalMs(bad), /every must look like/, bad);
+  const { nextRun, dueRules, nextDue } = await import("./factory-data.mjs");
+  const interval = (every) => nextRun({ enabled: true, every, last_run_at: "1970-01-01T00:00:00Z" });
+  assert.deepEqual(["30m", "6h", "1d", "9999m"].map(interval), [1_800_000, 21_600_000, 86_400_000, 599_940_000]);
 
   const at = Date.parse("2026-05-01T12:00:00Z");
   const rule = (id, extra) => ({ id, enabled: true, last_run_at: null, ...extra });

@@ -357,7 +357,7 @@ export function validateArchive(data, project, day) {
   for (const task of data.tasks) validateTask(task, { ids, issue: new Set(), pr: new Set() });
 }
 
-export function intervalMs(every) {
+function intervalMs(every) {
   const match = /^([1-9]\d{0,3})([mhd])$/.exec(every);
   if (!match) throw new Error(`every must look like 30m, 6h, or 1d (up to 9999 units), not ${JSON.stringify(every)}.`);
   return Number(match[1]) * everyUnits[match[2]];
@@ -430,7 +430,7 @@ export function validate(data) {
   for (const task of data.tasks) validateTask(task, seen);
 }
 
-export function validateBudget(budget) {
+function validateBudget(budget) {
   if (!isObject(budget)) throw new Error("budget must be an object.");
   for (const key of Object.keys(budget)) oneOf(key, ["max_parallel_workers"], "budget key");
   const value = budget.max_parallel_workers;
@@ -440,7 +440,7 @@ export function validateBudget(budget) {
 }
 
 // Ceilings only: null or a missing key means no cap. They can lower what Lever resolves, never raise it.
-export function validateLever(lever) {
+function validateLever(lever) {
   if (!isObject(lever)) throw new Error("lever must be an object.");
   for (const [key, value] of Object.entries(lever)) {
     oneOf(key, ["spend", "autonomy_cap"], "lever key");
