@@ -19,32 +19,22 @@ async function home(t, ...dirs) {
 const state = (directory, dir) => join(directory, ".local/state", dir);
 const stateDir = () => import("./state-dir.mjs");
 
-test("lists only the new directory when neither exists", async (t) => {
-  const directory = await home(t);
-  assert.deepEqual((await stateDir()).stateDirectories(directory), [state(directory, "copilot-factory")]);
-});
-
-test("lists only the legacy directory when only it exists", async (t) => {
-  const directory = await home(t, "copilot-coordinator");
-  assert.deepEqual((await stateDir()).stateDirectories(directory), [state(directory, "copilot-coordinator")]);
-});
-
-test("lists the new directory first when both exist", async (t) => {
-  const directory = await home(t, "copilot-coordinator", "copilot-factory");
-  assert.deepEqual((await stateDir()).stateDirectories(directory),
-    [state(directory, "copilot-factory"), state(directory, "copilot-coordinator")]);
+test("stateDirectories lists the existing directories, new first, defaulting to the new one", async (t) => {
+  const cases = [
+    { existing: [], listed: ["copilot-factory"] },
+    { existing: ["copilot-coordinator"], listed: ["copilot-coordinator"] },
+    { existing: ["copilot-coordinator", "copilot-factory"], listed: ["copilot-factory", "copilot-coordinator"] },
+  ];
+  for (const { existing, listed } of cases) {
+    const directory = await home(t, ...existing);
+    assert.deepEqual((await stateDir()).stateDirectories(directory), listed.map((dir) => state(directory, dir)));
+  }
 });
 
 test("a file only in the legacy directory resolves there", async (t) => {
   const directory = await home(t, "copilot-coordinator", "copilot-factory");
   await writeFile(join(state(directory, "copilot-coordinator"), factoryFile), example);
   assert.equal((await stateDir()).stateFile(factoryFile, directory), join(state(directory, "copilot-coordinator"), factoryFile));
-});
-
-test("a file only in the new directory resolves there", async (t) => {
-  const directory = await home(t, "copilot-coordinator", "copilot-factory");
-  await writeFile(join(state(directory, "copilot-factory"), factoryFile), example);
-  assert.equal((await stateDir()).stateFile(factoryFile, directory), join(state(directory, "copilot-factory"), factoryFile));
 });
 
 test("the new directory wins for a file in both", async (t) => {

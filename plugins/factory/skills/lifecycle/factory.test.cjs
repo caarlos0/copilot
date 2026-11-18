@@ -63,10 +63,18 @@ test("the shipped example is a valid factory", async () => {
 });
 
 test("rankTasks matches identifying fields only and ranks id, then title, then other fields", async () => {
-  const { rankTasks, byRecency } = await import("./factory-data.mjs");
+  const { rankTasks } = await import("./factory-data.mjs");
   const ids = (query, limit) => rankTasks(example.tasks, query, limit).map((task) => task.id);
-  assert.deepEqual(ids(""), byRecency(example.tasks).map((task) => task.id));
-  assert.deepEqual(ids("", 2), byRecency(example.tasks).slice(0, 2).map((task) => task.id));
+  const at = (id, time) => ({ id, history: time ? [{ at: "2020-01-01T00:00:00Z" }, { at: time }] : [] });
+  const recent = [
+    at("b", "2026-01-02T00:00:00Z"),
+    at("c", "2026-01-03T00:00:00Z"),
+    at("a", "2026-01-02T00:00:00Z"),
+    at("none", null),
+  ];
+  assert.deepEqual(rankTasks(recent, "").map((task) => task.id), ["c", "a", "b", "none"]);
+  assert.deepEqual(rankTasks(recent, "", 2).map((task) => task.id), ["c", "a"]);
+  assert.deepEqual(recent.map((task) => task.id), ["b", "c", "a", "none"]);
   assert.deepEqual(ids("issue-7"), ["issue-7"]);
   assert.deepEqual(ids("  ISSUE-7  "), ["issue-7"]);
   assert.deepEqual(ids("issue-3 typo"), ["issue-3"]);
@@ -289,19 +297,6 @@ test("moves follow the flow and each move adds history", async (t) => {
   const { cyclesOf, entered } = await import("./factory-data.mjs");
   assert.equal(cyclesOf(task), 1);
   assert.equal(entered(task), task.history.at(-1).at);
-});
-
-test("byRecency sorts newest first, breaks ties by id, and keeps the input", async () => {
-  const { byRecency } = await import("./factory-data.mjs");
-  const at = (id, time) => ({ id, history: time ? [{ at: "2020-01-01T00:00:00Z" }, { at: time }] : [] });
-  const tasks = [
-    at("b", "2026-01-02T00:00:00Z"),
-    at("c", "2026-01-03T00:00:00Z"),
-    at("a", "2026-01-02T00:00:00Z"),
-    at("none", null),
-  ];
-  assert.deepEqual(byRecency(tasks).map((task) => task.id), ["c", "a", "b", "none"]);
-  assert.deepEqual(tasks.map((task) => task.id), ["b", "c", "a", "none"]);
 });
 
 test("a task with a PR can skip initial: created in review, or moved from initial", async (t) => {
