@@ -1133,14 +1133,11 @@ test("long histories fold older steps and keep them reachable across refreshes",
   assert.equal(reopened.children.find((child) => child.className === "history-earlier").open, true);
 });
 
-test("rows omit the Next line when there is no next action", async (t) => {
+test("rows do not render the next action", async (t) => {
   const ui = await dashboard(t);
   const base = example.tasks.find((item) => item.id === "issue-9");
-  const lines = (next) => ui.run(`taskRow(${JSON.stringify({ ...base, next_action: next })}, new Set())`)
-    .children.filter((child) => child.tag === "p" && child.textContent.startsWith("Next:"));
-  assert.equal(lines("Ship it.").length, 1);
-  for (const next of ["None", "none.", "", "  ", null]) assert.equal(lines(next).length, 0, String(next));
-  assert.equal(lines("None. The PR is merged.").length, 1);
+  const row = ui.run(`taskRow(${JSON.stringify({ ...base, next_action: "Ship it." })}, new Set())`);
+  assert.doesNotMatch(row.textContent, /Next:|Ship it\./);
 });
 
 test("resolved sublists count each outcome and open only matching tasks", async (t) => {
@@ -1332,7 +1329,7 @@ test("Unblock lists options, fills the comment verbatim and saves through the mo
   assert.equal(reason.textContent, "The docs build needs a token that the worker cannot read.");
   assert.equal(reason.tabIndex, 0);
   assert.equal(reason.role, "region");
-  assert.match(context.textContent, /Next: Ask the user for the docs token\./);
+  assert.doesNotMatch(context.textContent, /Next:|Ask the user for the docs token/);
   assert.match(context.querySelector(".unblock-notes").textContent, /blocked .*: Needs a token\./);
   assert.equal(comment.value, "");
   const choices = form.querySelectorAll(".option");
@@ -1386,7 +1383,6 @@ test("Unblock shows a long reason in full and only the last three history notes,
   const task = data.tasks.find((item) => item.id === "issue-5");
   const reason = `${"x".repeat(2500)}\n${"y".repeat(2500)}`;
   task.blocker.reason = reason;
-  task.next_action = "None.";
   task.history = ["one", "two", "three", "four"].map((note, index) => ({
     state: index === 3 ? "blocked" : "investigation", at: `2026-05-01T0${index}:00:00Z`, note,
   }));
@@ -1396,7 +1392,6 @@ test("Unblock shows a long reason in full and only the last three history notes,
   await ui.get("task-list").querySelector(".move").fire("click");
   const context = ui.get("move-body").querySelector(".unblock-context");
   assert.equal(context.querySelector(".unblock-reason").textContent, reason);
-  assert.doesNotMatch(context.textContent, /Next:/);
   const notes = context.querySelector(".unblock-notes").children.map((item) => item.textContent.replace(/^.*: /, ""));
   assert.deepEqual(notes, ["four", "three", "two"]);
 });
@@ -1773,8 +1768,7 @@ test("rows wrap UUIDs, SHAs, panes, paths and backticked text in code and keep l
   const ui = await dashboard(t);
   const pane = "block:01a1ec42-3b1e-7470-b269-912f7f7bd4fd";
   const task = structuredClone(example.tasks.find((item) => item.id === "issue-5"));
-  task.blocker.reason = "Run `npm test` after be66032 lands in /tmp/work/tree.";
-  task.next_action = "Check `a.json`.";
+  task.blocker.reason = "Run `npm test` after be66032 lands in /tmp/work/tree. Check `a.json`.";
   task.worktree = { path: "/tmp/work/tree", branch: "x" };
   task.workers = { implementation: { status: "running", name: "Fix 9a8b7c6", pane, brief: "brief.md", result: "result.json" } };
   task.history.at(-1).note = "Merged as 0123abc.";

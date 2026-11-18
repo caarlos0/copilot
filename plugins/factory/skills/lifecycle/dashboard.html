@@ -1093,7 +1093,6 @@
         body.setAttribute("role", "region");
         body.setAttribute("aria-label", "Blocker reason");
         const nodes = [heading, body];
-        if (!/^(none\.?)?$/i.test(task.next_action?.trim() ?? "")) nodes.push(rich("p", `Next: ${task.next_action}`, "muted"));
         const notes = task.history.filter((item) => item.note && item.note !== reason).slice(-3).reverse();
         if (notes.length) {
           const list = element("ul", null, "unblock-notes");
@@ -1384,7 +1383,6 @@
             element("p", task.feedback.acknowledged_id === task.feedback.id
               ? "Factory acknowledged this direction." : "Awaiting factory acknowledgement.", "muted"));
         }
-        if (!/^(none\.?)?$/i.test(task.next_action?.trim() ?? "")) node.append(rich("p", `Next: ${task.next_action}`));
         node.append(element("h4", `History (${task.history.length})`), ...historyFlow(task, expanded));
         const more = element("details");
         more.dataset.taskId = `${task.id}:details`;

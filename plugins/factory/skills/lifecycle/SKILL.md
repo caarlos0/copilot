@@ -1222,7 +1222,7 @@ blocked task) opens a second
 popup that saves an allowed return state or a direct move to `resolved`,
 with a required operator comment. On a blocked task the popup preselects the
 state the task was blocked from (else the first open state), shows the blocker
-reason, the state it came from, the next action and the last three history notes,
+reason, the state it came from and the last three history notes,
 lists the blocker `options` as one-click choices with the recommended one marked, and keeps the
 free comment field. Choosing an option copies its label verbatim into the
 comment (and selects its `state`, when allowed); the operator can edit it.
