@@ -1224,9 +1224,9 @@ free comment field. Choosing an option copies its label verbatim into the
 comment (and selects its `state`, when allowed); the operator can edit it.
 Cmd+Enter or Ctrl+Enter saves it.
 Resolving also requires a non-merge outcome.
-The task list stays on the state it showed. Departing rows fade out unless
-reduced motion is enabled. It shows acknowledgement status
-without claiming that a worker stopped or restarted. Close the task list with
+The task list stays on the state it showed. Departing rows fade out over 300 ms unless
+reduced motion is enabled. A saved move shows no success message. Rows show
+acknowledgement status without claiming that a worker stopped or restarted. Close the task list with
 its button or Escape; it stays open while you click other states. Close a popup
 with its button, Escape, or a click outside it. The move popup retains its draft and
 original revision during refresh; on conflict, reload the task,

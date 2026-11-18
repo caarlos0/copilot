@@ -172,8 +172,7 @@
       .close-button { flex: none; width: 32px; height: 32px; padding: 0; font-size: 24px;
         line-height: 28px; color: var(--fg-muted); background: transparent; border-color: transparent; }
       .move-form .controls { justify-content: flex-end; }
-      #detail-status, #detail-empty { margin: 16px 24px; }
-      #detail-status:empty { display: none; }
+      #detail-empty { margin: 16px 24px; }
       .global-filter { display: flex; flex: 1; align-items: center; gap: 8px; max-width: 560px; min-width: 200px; }
       .global-filter input { flex: 1; min-width: 0; }
       #global-filter-count { margin: 0; white-space: nowrap; }
@@ -317,7 +316,6 @@
         <button id="close-detail" class="close-button" type="button"
           aria-label="Close task list" title="Close task list">&times;</button>
       </div>
-      <p id="detail-status" role="status"></p>
       <p id="detail-filter-count" class="muted" role="status"></p>
       <ul id="task-list"></ul>
       <p id="detail-empty" class="muted" hidden>No tasks in this state.</p>
@@ -1051,8 +1049,6 @@
             if (ownsDialog) moveDialog.close();
             if (selection === file) {
               load(data, file);
-              document.getElementById("detail-status").textContent =
-                `Moved "${task.title}" to ${places[destination].title}. Comment saved; awaiting factory acknowledgement.`;
               if (ownsDialog) panel.focus();
             }
           } catch (cause) {
@@ -1274,7 +1270,7 @@
               if (row.inert) return;
               row.inert = true;
               row.animate({ opacity: [1, 0] }, {
-                duration: 220, easing: "ease-out", fill: "forwards",
+                duration: 300, easing: "ease-out", fill: "forwards",
               }).onfinish = () => {
                 row.remove();
                 document.getElementById("detail-empty").hidden = list.children.length > 0;
@@ -1291,7 +1287,6 @@
         if (outcome) emptyMessage = "No tasks with this outcome.";
         if (filter) emptyMessage = "No tasks match this filter.";
         document.getElementById("detail-empty").textContent = emptyMessage;
-        if (!sameList) document.getElementById("detail-status").textContent = "";
         panel.dataset.state = state;
         panel.dataset.outcome = outcome ?? "";
         if (panel.hidden) {
