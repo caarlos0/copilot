@@ -938,8 +938,7 @@ A PR the user gave for review is the exception: the user's ask is the request,
 so launch this worker as soon as the task is created in `review`.
 
 Launch a named Copilot worker in the PR worktree, with `coding:caarlos0` and a
-read-only brief that explicitly invokes `cross-model-review`. Do not use the
-machine's `review` wrapper: it selects a different review procedure. Keep
+read-only brief that explicitly invokes `cross-model-review`. Keep
 model choices within the user's preferences and the resolved spend budget.
 
 The worker must never checkout, switch, reset, or clean a shared implementation

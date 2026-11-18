@@ -241,7 +241,7 @@ a native watcher, so its own loop uses a timer and its tests never sleep or poll
 (a fake `gh` is on `PATH`; tests never call GitHub). `session-metrics.mjs`
 counts it under `gh_wait`.
 
-Review workers use `cross-model-review`, not the local `review` wrapper.
+Review workers use `cross-model-review`.
 Review depth follows the shared spend budget. A clean precision result is not
 a GitHub approval, and `review` state can have no optional model reviewer.
 Do not start a second Lever delivery coordinator, cloud runner, schedule,
