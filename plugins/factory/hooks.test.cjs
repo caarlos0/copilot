@@ -21,7 +21,12 @@ async function fixture(t, { rex = true } = {}) {
   }
   await symlink(jq, join(directory, "jq"));
   const run = (env) =>
-    spawnSync("/bin/bash", ["-c", entry.bash], { encoding: "utf8", env: { PATH: directory, ...env } });
+    // macOS bash sources ~/.bashrc when stdin is a socket, which Node's default pipe is.
+    spawnSync("/bin/bash", ["-c", entry.bash], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { PATH: directory, ...env },
+    });
   return { calls, run };
 }
 
