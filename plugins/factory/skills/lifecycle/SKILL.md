@@ -43,7 +43,7 @@ a conflict in a test file goes to a worker: the owning worker, or a new task.
 When a branch is not a fast-forward of the default branch, do not merge it:
 send it back to its worker (or a new worker) to run `git rebase main` and
 resolve the conflict there. When the default branch moves, the worker rebases
-again; send one follow-up per move. A task with a PR is never rebased: its
+again; for queued workers, follow the landing queue in "Merge". A task with a PR is never rebased: its
 worker merges the default branch in and pushes (no force-push). When a
 check fails or a result is unclear, create or reopen a task for a worker to
 investigate. Do not investigate it yourself.
@@ -1362,6 +1362,15 @@ is no GitHub verification. If `--ff-only` refuses because the default branch
 moved, the worker rebases again; no merge commit is ever created. Verify
 the landing with `git merge-base --is-ancestor HEAD_SHA DEFAULT_BRANCH`, store the
 landed head SHA in `details.merge_commit`, then resolve it as `merged`.
+
+After every local `git merge --ff-only` landing, the coordinator runs
+`node --test` at the repository root and records the result with `factory.mjs`.
+If the default branch is red, never run `git reset` on it: a reset drops other
+landed commits. Send the worker a follow-up, or create a fix or revert task.
+
+**Landing queue:** overlapping tasks land one at a time. After each landing,
+send the "main moved, rebase" follow-up only to the task that lands next, not to
+every waiting worker. This replaces "one follow-up per move" for queued workers.
 
 ## Release panes
 

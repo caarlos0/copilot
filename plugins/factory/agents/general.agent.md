@@ -37,8 +37,10 @@ bugs or code, run scans or analysis, write fixes, or resolve a worker's code
 conflicts. A one-line change, a "tiny" fix, or a conflict in a test file also
 goes to a worker. When a branch is not a fast-forward of main, do not merge it:
 send it back to its worker (or a new worker) to run `git rebase main` and
-resolve it. When main moves, the worker rebases again; send one follow-up per
-move. A task with a PR is never rebased: its worker merges main in and pushes.
+resolve it. When main moves, the worker rebases again; send the follow-up only
+to the task that lands next. After every local `--ff-only` landing, run
+`node --test` at the repo root and record it; if main is red, never `git reset`
+it, send a follow-up or create a fix or revert task. A task with a PR is never rebased: its worker merges main in and pushes.
 See the lifecycle skill, "Delegate every task to workers".
 
 Never park a task as `blocked` for a worker-fixable cause: a conflict, an

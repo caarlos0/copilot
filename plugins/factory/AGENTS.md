@@ -32,8 +32,11 @@ result or event.
 A task without a PR keeps a linear history. Its worker runs `git rebase main`
 (never merge main) before it reports a head, and the factory lands the local
 branch with `git merge --ff-only`, so no merge commit is created. When the
-default branch moves, the worker rebases again, and the factory sends one
-follow-up per move. A task with a PR follows the root rule: the worker brings
+default branch moves, the worker rebases again (see the landing queue below).
+After every local `git merge --ff-only` landing, the coordinator runs
+`node --test` at the repo root and records the result. If the default branch is
+red, it never runs `git reset` (a reset drops other landed commits); it sends
+the worker a follow-up or creates a fix or revert task. A task with a PR follows the root rule: the worker brings
 the default branch in with `git merge`, never rebases, and never force-pushes,
 because a rebase breaks reviewers and stacked PRs. GitHub mergeability and the
 PR checks gate it, so `emit` does not check that its head descends from `main`.
@@ -309,7 +312,10 @@ records remain readable but are not authority on recovery.
 When task file lists overlap, record each task's validated default-branch SHA
 in `details.validated_base_sha`. After one lands, the remaining worker rebases
 onto the new base (a task with a PR merges it instead), reruns affected checks on the combined code, and
-refreshes head-specific evidence before landing. Prefer an existing repository
+refreshes head-specific evidence before landing. Landing queue: overlapping
+tasks land one at a time. After each landing, the factory sends the "main moved,
+rebase" follow-up only to the task that lands next, not to every waiting
+worker; this replaces "one follow-up per move" for queued workers. Prefer an existing repository
 merge queue. For local-only tasks, use the current local default branch, not
 `origin`; independent tasks stay parallel.
 
