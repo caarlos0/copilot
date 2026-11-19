@@ -118,6 +118,15 @@ test("a browser without a token gets a login form; the API keeps its JSON 401", 
   assert.match(asked.headers.get("content-type"), /^application\/json/, "only the dashboard page gets the form");
 });
 
+test("a malformed token cookie gets the login form, not a 500", async (t) => {
+  const { url } = await server(t, ["--host", "0.0.0.0"]);
+  const bare = new URL(url);
+  bare.search = "";
+  const page = await fetch(bare, { headers: { Accept: "text/html", Cookie: "token=%" } });
+  assert.equal(page.status, 401);
+  assert.match(await page.text(), /<input type="password" name="token"/);
+});
+
 test("POST /login sets the cookie and redirects to a same-origin path only", async (t) => {
   const { url, token } = await server(t, ["--host", "0.0.0.0"]);
   const login = (values, extra = {}) => fetch(new URL("/login", url), {

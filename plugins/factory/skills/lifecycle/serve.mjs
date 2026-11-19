@@ -401,7 +401,13 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
   function cookieToken(header) {
     for (const part of (header ?? "").split(";")) {
       const at = part.indexOf("=");
-      if (at !== -1 && part.slice(0, at).trim() === "token") return decodeURIComponent(part.slice(at + 1).trim());
+      if (at !== -1 && part.slice(0, at).trim() === "token") {
+        try {
+          return decodeURIComponent(part.slice(at + 1).trim());
+        } catch {
+          return null;
+        }
+      }
     }
     return null;
   }
