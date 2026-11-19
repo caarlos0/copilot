@@ -309,7 +309,13 @@ only after the answer, and never edits plugin files. `factory.mjs` keeps
 `<owner.repo>-factory-sessions.jsonl` (IDs, roles, task or rule names; mode 0600)
 from `--session` and worker records. `session-metrics.mjs` reads those sessions'
 `events.jsonl` and prints counts only, never content. It cannot measure tool run
-times, and "idle" means time between turns.
+times, and "idle" means time between turns. The coordinator runs it before it
+launches the improve worker, with `--active-since WINDOW_START` (every session
+with an event in the window, including long-lived ones that started earlier,
+counted for the window only), and passes the output file
+`<project>-self-improve-metrics.json` in the brief; the worker's sandbox may not
+read session logs, so it never runs the tool. Without `--active-since`, a long
+session's totals are cumulative over its whole life.
 
 The factory waits with `broker.mjs wait`. The broker keeps one
 append-only JSONL log, `<owner.repo>-factory-events.jsonl` (mode 0600), beside

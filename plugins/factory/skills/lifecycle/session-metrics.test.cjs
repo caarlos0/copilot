@@ -109,9 +109,43 @@ test("--since always keeps the factory session", async (t) => {
   assert.deepEqual(result.sessions.map((item) => item.role), ["factory"]);
 });
 
+test("--active-since includes sessions that started earlier and counts only the window", async (t) => {
+  const f = await fixture(t, {
+    registry: [
+      { id: first, role: "implementation", task: "issue-1", at: "2026-05-01T09:00:00Z" },
+      { id: second, role: "implementation", task: "issue-2", at: "2026-05-01T09:00:00Z" },
+    ],
+  });
+  // The second session ran from 10:00:00 to 10:01:40, two hours before the first.
+  const old = [event(-7200, "user.message"), event(-7199, "assistant.turn_start"), event(-7100, "assistant.turn_end")];
+  await mkdir(join(f.directory, second));
+  await writeFile(join(f.directory, second, "events.jsonl"), `${old.join("\n")}\n`);
+  const run = (time) => JSON.parse(f.run("--registry", f.file, "--active-since", time).stdout);
+
+  const late = run("2026-05-01T12:20:06Z");
+  assert.equal(late.active_since, "2026-05-01T12:20:06.000Z");
+  assert.deepEqual(late.started_before_window, [first]);
+  assert.deepEqual(late.sessions.map((item) => item.id), [first]);
+  const [session] = late.sessions;
+  assert.equal(session.started_before_window, true);
+  assert.equal(session.started_at, "2026-05-01T12:20:06.000Z");
+  assert.equal(session.user_messages, 0);
+  assert.equal(session.turns, 2);
+  assert.equal(session.commands.sleep, 0);
+  assert.equal(session.usage.cost, 2);
+  assert.deepEqual(session.usage.models, ["m2"]);
+  assert.equal(late.totals.sessions, 1);
+
+  const both = run("2026-05-01T10:01:00Z");
+  assert.deepEqual(both.sessions.map((item) => [item.id, item.started_before_window]), [[first, false], [second, true]]);
+  assert.deepEqual(both.started_before_window, [second]);
+  assert.equal(both.sessions[0].usage.cost, 3);
+  assert.equal(run("2026-05-01T12:30:00Z").sessions.length, 0);
+});
+
 test("usage errors exit 2 and a bad registry exits 1", async (t) => {
   const f = await fixture(t);
-  for (const args of [[], ["../etc"], [first, "--registry", f.file], ["--registry", f.file, "--since", "soon"]]) {
+  for (const args of [[], ["../etc"], [first, "--registry", f.file], ["--registry", f.file, "--since", "soon"], ["--registry", f.file, "--active-since", "soon"], ["--registry", f.file, "--since", "2026-05-01T00:00:00Z", "--active-since", "2026-05-01T00:00:00Z"]]) {
     const result = f.run(...args);
     assert.equal(result.status, 2, `${args.join(" ")}: ${result.stdout}${result.stderr}`);
     assert.match(result.stderr, /Run with --help/);

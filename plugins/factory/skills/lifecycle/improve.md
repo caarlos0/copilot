@@ -12,8 +12,11 @@ verify it. Use `prompt-mirror` only for the "ask less of the user" signal.
 
 The brief gives you `WINDOW_START` (an ISO time) and absolute paths for:
 
-- the sessions registry, `<owner.repo>-factory-sessions.jsonl`;
-- `session-metrics.mjs`, beside this file;
+- the metrics file, `<project>-self-improve-metrics.json`, which the factory
+  generated with `session-metrics.mjs --active-since WINDOW_START` (your
+  sandbox may not read session logs, so do not run the tool);
+- the sessions registry, `<owner.repo>-factory-sessions.jsonl`, to look up a
+  session's role and task;
 - the factory file, read only;
 - your result file, `<project>-<rule>-result.json`. If it exists, it is the
   previous run. Read it before you write anything.
@@ -21,9 +24,9 @@ The brief gives you `WINDOW_START` (an ISO time) and absolute paths for:
 ## Privacy
 
 - Read only sessions that are in the registry.
-- Use `session-metrics.mjs`. It prints counts and names, not content. Read a
-  session's event log yourself only to explain a number, and never copy its
-  text.
+- Use the metrics file from the brief. It prints counts and names, not content.
+  Read a session's event log yourself only to explain a number, and never copy
+  its text.
 - Put session IDs and metric values in the result. Never put prompts, replies,
   commands, file contents, or secrets in the result, an issue, a PR, or a
   comment.
@@ -47,9 +50,10 @@ If you use `session_store_sql`, follow these rules:
    `confirmed`, `refuted`, or `inconclusive`. If it was not applied, the
    verdict is `not-applied`. Do not propose the same change again after a
    `declined`.
-2. **Measure.** Run `node session-metrics.mjs --registry REGISTRY --since
-   WINDOW_START`. Compare it with the window before it when that data exists.
-   Group by session `role`.
+2. **Measure.** Read the metrics file. Its sessions were active in the
+   window, and `started_before_window` names those that began earlier; their
+   numbers count only the window's events. Compare it with the window before
+   it when that data exists. Group by session `role`.
 3. **Look for these signals:**
 
    | Signal | Where it shows | Typical change |
@@ -75,9 +79,11 @@ If you use `session_store_sql`, follow these rules:
 
    The event log does not record tool run times. Do not claim a tool was slow.
    "Idle" is the time between turns, so it includes waits for the user and for
-   notifications. Metrics are whole-session totals. The factory's own session
-   is long-lived and registered once, so its numbers are cumulative; compare
-   them with the previous result, not with the window.
+   notifications. A session that started before the window has window-only
+   numbers, but its tool calls that began before the window are not counted as
+   failures. The factory's own session is long-lived, so if the factory ran the
+   tool without `--active-since`, its totals are cumulative over the whole
+   session: compare them with the previous result, not with the window.
 4. **Pick one change, or none.** Choose the change with the largest expected
    effect on one metric. With fewer than 3 worker sessions in the window,
    prefer no change. If the cause is outside the factory (for example a CI
@@ -116,7 +122,7 @@ If you use `session_store_sql`, follow these rules:
       { "metric": "commands.sleep", "value": 21, "sessions": ["11111111-1111-4111-8111-111111111111"] }
     ],
     "prediction": "sleep commands per implementation session fall from 7 to 1 or less",
-    "verify": "Run session-metrics for sessions after the change, at the next run"
+    "verify": "Run session-metrics --active-since the decision time, at the next run"
   },
   "findings": [
     { "class": "polling", "summary": "Three implementation sessions poll CI with sleep.", "evidence": [] }

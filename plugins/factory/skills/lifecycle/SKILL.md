@@ -596,13 +596,20 @@ work". It changes nothing without the user's answer. Its worker follows
 3. For a due `improve` rule, read its `last_run_at` first (this is
    `WINDOW_START`; use 7 days ago if it never ran), then stamp the rule with
    `--rule ID --ran`. Run `node session-metrics.mjs --registry REGISTRY
-   --since WINDOW_START` yourself. The factory session is always listed. If no
+   --active-since WINDOW_START` yourself, write the output to
+   `<project>-self-improve-metrics.json` in the state directory (temporary
+   file, then rename), and keep that path. The worker's sandbox cannot read
+   session logs, so it never runs the tool. `--active-since` keeps every
+   session with an event in the window, including long-lived workers that
+   started earlier (listed in `started_before_window`), and counts only the
+   window's events. The factory session is listed when it was active. If no
    listed session has a role other than `factory`, stop. Nothing is new, and
    no worker is needed.
 4. Otherwise start one worker as for a `backlog` rule. The brief gives
-   `WINDOW_START` and absolute paths to the registry, `session-metrics.mjs`,
-   `improve.md`, the factory file, and the result file, and the resolved spend
-   budget. The worker has no write authority.
+   `WINDOW_START` and absolute paths to the metrics file from step 3, the
+   registry, `improve.md`, the factory file, and the result file, and the
+   resolved spend budget. The worker reads the metrics file and does not run
+   `session-metrics.mjs`. The worker has no write authority.
 5. Read the result. If `change` is null, record the worker as closed and say
    nothing. Otherwise use `ask_user` once. Show the proposal, its evidence, and
    a recommended answer. After the user answers:
