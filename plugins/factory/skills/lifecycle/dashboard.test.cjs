@@ -425,7 +425,12 @@ test("accepts only GET on loopback host names", async (t) => {
     // A fresh agent ignores NODE_USE_ENV_PROXY, so the forged Host reaches the server.
     http.get({ agent: new http.Agent(), host: target.hostname, port: target.port, path: "/", headers: { Host: "evil.example" } },
       (response) => { response.resume(); resolve(response.statusCode); }).on("error", reject);
+  }).catch((error) => {
+    // A sandbox can block direct loopback connections; any other error still fails.
+    if (error.code === "EPERM" || error.code === "EACCES") return null;
+    throw error;
   });
+  if (status === null) return t.skip("The sandbox blocks direct loopback connections.");
   assert.equal(status, 403);
 });
 
