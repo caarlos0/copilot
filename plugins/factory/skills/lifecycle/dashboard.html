@@ -1220,8 +1220,9 @@
         const reload = element("button", "Reload settings");
         reload.type = "button";
         reload.hidden = true;
-        const save = element("button", "Save settings", "action-primary");
+        const save = element("button", "Save", "action-primary");
         save.type = "submit";
+        save.setAttribute("aria-label", "Save settings");
         const actions = element("div", null, "controls");
         actions.append(reload, save);
         fields.append(status, error, actions);
