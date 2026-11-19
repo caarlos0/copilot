@@ -958,7 +958,7 @@ edits, commits, or pushes. Use a new worktree for every task:
 ```sh
 WT=$(node /abs/path/to/worktree.mjs create fix-login)   # run in the main checkout
 NAME=$(node /abs/path/to/worker-name.mjs --role implementation --ref '#42' --summary 'Fix login redirect')
-rex window new -c "$(echo "$WT" | jq -r .path)" -- copilot --agent coding:caarlos0 --model claude-sonnet-5.5 --name "$NAME" --yolo --sandbox -i 'Read /abs/brief.md and do it.'
+rex window new -c "$(echo "$WT" | jq -r .path)" -- env FACTORY_TASK=fix-login FACTORY_ROLE=implementation FACTORY_FILE="$FILE" copilot --agent coding:caarlos0 --model claude-sonnet-5.5 --name "$NAME" --yolo --sandbox -i 'Read /abs/brief.md and do it.'
 ```
 
 `worktree.mjs` (next to this file) is a dependency-free helper. It prints JSON
@@ -1090,6 +1090,15 @@ roles. Append them to the `copilot` command, before `-i`:
 Deny rules win over every allow, including `--yolo`. They match the command
 text only: `sh -c 'git stash'` is not caught. A worker may still run `rex whoami`, `rex ls`, and `rex capture`. Keep
 the same list in `plugins/factory/AGENTS.md`.
+
+Every worker launch also sets `FACTORY_TASK` (the task ID; a rule worker has none),
+`FACTORY_ROLE` (the worker role) and `FACTORY_FILE` (the absolute factory file) with
+`env` before `copilot`, for example
+`env FACTORY_TASK=fix-login FACTORY_ROLE=implementation FACTORY_FILE=/abs/owner.repo-factory.json copilot ...`.
+The plugin's attention hook (`hooks/attention.mjs`) uses them to know that the
+session belongs to the factory; a session with none of them and no match in the
+factory file or the owner lock is untouched. The hook runs for every session of the
+user, so it does nothing without them.
 
 The plugin's `preToolUse` hook (`hooks/guard.mjs`) runs for the session
 recorded in the owner lock; no launcher variable is needed. `FACTORY_COORDINATOR=1`

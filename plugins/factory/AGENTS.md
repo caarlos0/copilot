@@ -113,6 +113,27 @@ workers. The planned role with `unknown` status is in the factory file before
 launch, and the pane and window IDs are written right after it. The short gap
 between them cannot be removed.
 
+Every worker launch also sets `FACTORY_TASK` (absent for a rule worker),
+`FACTORY_ROLE` and `FACTORY_FILE` with `env` before `copilot`. The attention hook
+reads them (see below).
+
+`hooks.json` ships three hooks for `hooks/attention.mjs`: `notification`,
+`permissionRequest`, and a second `preToolUse` entry that runs the script only
+when the payload mentions `ask_user` (a shell `case`, so other tool calls cost no
+Node start). The script does nothing, silently, and exits 0 on any error, unless
+the session is the factory's: `FACTORY_TASK` or `FACTORY_ROLE` is set, else the
+payload `sessionId` is the owner lock's session (the coordinator) or a
+`workers.*.session` in the factory file. The factory file comes from
+`FACTORY_FILE`, else the `origin` remote like `gate.mjs`. A `notification`
+(`permission_prompt` or `elicitation_dialog`) appends one `attention.requested`
+event (source `attention`) with `broker.mjs`'s `emit`: `kind` is `permission`,
+`sandbox-bypass` (the message says sandbox, or a fresh `permissionRequest` for
+the same command had `requestSandboxBypass`), `ask-user` or `other`; `text` is the
+message, plus the bypass reason, or the `ask_user` question with its enum
+`options`; `role` and `pane` (`REX_BLOCK`, else the file) when known. The two
+observers only write a note in `$TMPDIR` (valid 30 seconds, used once). Tests
+are in `hooks/attention.test.cjs`; the payloads are in `hooks/fixtures/`.
+
 Every worker launch carries the same deny flags (the worker deny constant;
 keep it identical to the one in the lifecycle skill's "Launch rules"). They
 block `git stash` and every Rex pane, window, block, and session command, and
