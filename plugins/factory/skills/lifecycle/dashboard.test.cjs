@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const { readFileSync } = require("node:fs");
-const { mkdtemp, readFile, readdir, rm, symlink, writeFile } = require("node:fs/promises");
+const { appendFile, mkdtemp, readFile, readdir, rm, symlink, writeFile } = require("node:fs/promises");
 const { spawn, spawnSync } = require("node:child_process");
 const http = require("node:http");
 const { join } = require("node:path");
@@ -182,7 +182,7 @@ test("moving back persists the comment, keeps worker context, and rejects a stal
   });
   assert.equal(task.feedback.acknowledged_id, null);
   assert.deepEqual(JSON.parse(await readFile(join(directory, factoryFile), "utf8")), data);
-  assert.deepEqual(await (await get(url, `/api/factory?file=${factoryFile}`)).json(), data);
+  assert.deepEqual(await (await get(url, `/api/factory?file=${factoryFile}`)).json(), { ...data, attention: [] });
   const stale = await move(url, unblocked);
   assert.equal(stale.status, 409);
   assert.match((await stale.json()).error, /changed since it was read/);
@@ -2257,4 +2257,84 @@ test("the project dropdown lists the sorted factories, switches on a pick, and c
 
   await ui.get("bar-settings").fire("click");
   assert.equal(ui.get("settings-dialog").open, true, "The settings button opens the settings dialog.");
+});
+
+test("the factory payload lists pending attention oldest first, and its tag follows the events", async (t) => {
+  const { url, directory } = await server(t);
+  const path = `/api/factory?file=${factoryFile}`;
+  const log = (id, type, at, data, task = null) => appendFile(join(directory, "owner.repo-factory-events.jsonl"),
+    `${JSON.stringify({ id, at, type, task, source: "attention", data })}\n`);
+  const ago = (minutes) => new Date(Date.now() - minutes * 60_000).toISOString();
+  const read = (tag) => get(url, path, tag ? { headers: { "If-None-Match": tag } } : undefined);
+
+  const first = await read();
+  assert.deepEqual((await first.json()).attention, []);
+  const empty = first.headers.get("etag");
+
+  await log("e1", "attention.requested", ago(1), { session: "s-new", kind: "ask-user", text: "Pick one", options: ["a", "b"], role: "implementation" }, "issue-5");
+  await log("e2", "attention.requested", ago(9), { session: "s-old", kind: "permission", text: "Run command: ls" });
+  const changed = await read(empty);
+  assert.equal(changed.status, 200, "A new item changes the tag while the factory file stays the same.");
+  const tag = changed.headers.get("etag");
+  assert.notEqual(tag, empty);
+  const { attention } = await changed.json();
+  assert.deepEqual(attention.map((item) => item.session), ["s-old", "s-new"]);
+  assert.deepEqual(attention[1], {
+    session: "s-new", kind: "ask-user", text: "Pick one", options: ["a", "b"], role: "implementation",
+    pane: null, task: "issue-5", at: attention[1].at,
+  });
+  assert.equal((await read(tag)).status, 304);
+
+  await log("e3", "attention.resolved", ago(0), { session: "s-old" });
+  const resolved = await read(tag);
+  assert.equal(resolved.status, 200);
+  assert.notEqual(resolved.headers.get("etag"), tag);
+  assert.deepEqual((await resolved.json()).attention.map((item) => item.session), ["s-new"]);
+});
+
+test("the badge, the page title and the waiting list show pending attention as data", async (t) => {
+  assert.match(html, /<button id="attention-badge"[^>]* hidden>/);
+  assert.match(html, /\$\{count \? `\(\$\{count\}\) ` : ""\}/);
+  const ui = await dashboard(t, { now: Date.parse("2026-05-01T12:10:00Z") });
+  const badge = ui.get("attention-badge");
+  assert.equal(badge.hidden, true, "The badge is hidden at zero.");
+  assert.equal(ui.document.title, "owner/repo - Factory");
+
+  const item = (n, extra = {}) => ({
+    session: `s${n}`, kind: "sandbox-bypass", text: `Run command: <b>rm</b> ${n}`, options: [], role: "implementation",
+    pane: `block:p${n}`, task: "issue-5", at: `2026-05-01T12:0${n % 10}:00Z`, ...extra,
+  });
+  const show = (items) => ui.run(`load({ ...snapshot, attention: ${JSON.stringify(items)} }, lastSource)`);
+  show([item(0, { options: ["yes", "no"] }), item(1, { pane: "block:x; rm -rf ~" })]);
+  assert.equal(badge.hidden, false);
+  assert.equal(ui.get("attention-count").textContent, "2");
+  assert.equal(ui.document.title, "(2) owner/repo - Factory");
+
+  await badge.fire("click");
+  assert.equal(ui.get("detail").hidden, false);
+  assert.equal(ui.get("attention-view").hidden, false);
+  assert.equal(ui.get("task-view").hidden, true);
+  assert.equal(ui.get("detail-title").textContent, "Waiting for you2");
+  const [first, second] = ui.get("attention-list").children;
+  assert.match(first.textContent, /Sandbox bypass.*10m.*Run command: <b>rm<\/b> 0.*yes.*no.*issue-5, implementation.*rex focus block:p0/);
+  assert.equal(first.querySelector("code").textContent, "rex focus block:p0");
+
+  ui.run("navigator = { clipboard: { writeText: async (value) => { globalThis.copied = value; } } }");
+  const copy = first.querySelector("button");
+  await copy.fire("click");
+  assert.equal(ui.run("copied"), "rex focus block:p0");
+  assert.equal(copy.textContent, "Copied");
+  assert.equal(second.querySelector("button"), null, "A pane that is not a plain ID gets no shell command.");
+  assert.match(second.textContent, /Pane: block:x; rm -rf ~/);
+
+  show(Array.from({ length: 23 }, (_, n) => item(n, { pane: null })));
+  assert.equal(ui.get("attention-list").children.length, 20);
+  assert.match(ui.get("attention-note").textContent, /oldest 20 of 23/);
+
+  show([]);
+  assert.equal(badge.hidden, true);
+  assert.equal(ui.document.title, "owner/repo - Factory");
+  assert.equal(ui.get("attention-empty").hidden, false);
+  await badge.fire("click");
+  assert.equal(ui.get("detail").hidden, true, "A second click closes the list.");
 });

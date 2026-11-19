@@ -6,6 +6,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { countByState, isObject, validate } from "./factory-data.mjs";
+import { openAttention } from "./attention.mjs";
 import { ConflictError, update } from "./factory.mjs";
 import { stateDirectories } from "./state-dir.mjs";
 
@@ -153,6 +154,19 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
     }
     parsed.set(target, { tag, data });
     return data;
+  }
+
+  // Pending attention items, oldest first. They live in the events log and the session logs, so the
+  // tag covers them too: a change there refreshes the browser even when the factory file is the same.
+  async function factoryView(entry) {
+    const attention = (await openAttention(entry.target))
+      .map(({ session, kind, text, options, role, pane, task, at }) => ({ session, kind, text, options, role, pane, task, at }))
+      .sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+    const digest = createHash("sha1").update(JSON.stringify(attention)).digest("base64url");
+    return {
+      tag: `${entry.tag.slice(0, -1)}-${digest}"`,
+      body: async () => ({ ...(await readFactory(entry)), attention }),
+    };
   }
 
   async function loadFactory(file) {
@@ -449,7 +463,8 @@ p{margin:0;color:#f87171}
         await sendTagged(request, response, tag, () => listFactories(entries));
       } else if (url.pathname === "/api/factory") {
         const entry = await factoryTag(url.searchParams.get("file"));
-        await sendTagged(request, response, entry.tag, () => readFactory(entry));
+        const view = await factoryView(entry);
+        await sendTagged(request, response, view.tag, view.body);
       } else if (url.pathname === "/api/artifact") {
         const data = await loadFactory(url.searchParams.get("file"));
         const name = url.searchParams.get("name");

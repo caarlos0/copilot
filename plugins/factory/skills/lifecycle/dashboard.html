@@ -194,6 +194,16 @@
       #producers-view h3.section { margin: 0; padding: 16px 24px 0; border-top: 1px solid var(--border); }
       #ignored-list li, #ignored-empty { padding: 8px 24px; overflow-wrap: anywhere; }
       #ignored-empty { margin: 0; }
+      #attention-note, #attention-empty { margin: 16px 24px 0; }
+      #attention-list { list-style: none; margin: 16px 0 0; padding: 0; border-top: 1px solid var(--border); }
+      .attention-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+      .attention-options { margin: 8px 0; padding-left: 20px; }
+      .attention-focus { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0 0; }
+      .attention-focus button { padding: 3px 12px; font-size: 12px; }
+      #attention-badge { display: inline-flex; align-items: center; gap: 6px; color: var(--attention);
+        border-color: color-mix(in srgb, var(--attention) 45%, var(--border)); }
+      #attention-badge[hidden] { display: none; }
+      #attention-badge[aria-pressed="true"] { background: color-mix(in srgb, var(--attention) 14%, var(--bg)); }
       body:has(dialog[open]) { overflow: hidden; }
       .detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
         position: sticky; top: 0; z-index: 1; padding: 16px 24px; background: var(--bg-muted);
@@ -312,6 +322,7 @@
         #project-bar { display: flex; flex: 1 1 0; align-items: center; gap: 8px; min-width: 0; }
         .refresh { display: contents; }
         #open-palette, #refresh { order: 1; justify-content: center; width: 44px; padding: 0; }
+        #attention-badge { order: 1; justify-content: center; min-width: 44px; padding: 0 8px; }
         #open-palette .label, #refresh .label { display: none; }
         .layout { padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
         main { min-width: 0; padding-top: 16px; }
@@ -330,7 +341,7 @@
         #palette-list { max-height: 40dvh; }
         #palette-list li { padding: 12px 16px; }
         #palette-status { padding-left: 16px; padding-right: 16px; }
-        #producers-note, #detail-empty { margin-left: 16px; margin-right: 16px; }
+        #producers-note, #detail-empty, #attention-note, #attention-empty { margin-left: 16px; margin-right: 16px; }
         #producers-view h3.section, #ignored-list li, #ignored-empty { padding-left: 16px; padding-right: 16px; }
         .move-form { padding: 16px; }
         .move-form .controls button { flex: 1 1 auto; }
@@ -365,6 +376,13 @@
         <h1>Factory</h1>
       </div>
       <div class="refresh">
+        <button id="attention-badge" type="button" aria-pressed="false" aria-controls="detail" hidden>
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"
+            stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M8 2a4 4 0 0 0-4 4c0 3-1.5 4-1.5 5h11C13.5 10 12 9 12 6a4 4 0 0 0-4-4ZM6.5 13.5a1.5 1.5 0 0 0 3 0"/>
+          </svg>
+          <span id="attention-count"></span>
+        </button>
         <button id="open-palette" type="button" aria-haspopup="dialog" aria-label="Go to task" title="Go to task">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"
             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -451,6 +469,11 @@
         <h3 class="section">Skipped</h3>
         <ul id="ignored-list"></ul>
         <p id="ignored-empty" class="muted" hidden>Nothing skipped.</p>
+      </div>
+      <div id="attention-view" hidden>
+        <p id="attention-note" class="muted">Read only. Answer each prompt in its pane.</p>
+        <ul id="attention-list"></ul>
+        <p id="attention-empty" class="muted" hidden>Nothing is waiting for you.</p>
       </div>
     </aside>
     </div>
@@ -715,8 +738,10 @@
       }
 
       const producersOpen = () => location.hash === "#producers";
+      const attentionOpen = () => location.hash === "#attention";
       const isFinder = (rule) => rule.kind !== "improve";
       const chooseProducers = () => setHash(producersOpen() ? "" : "#producers");
+      const chooseAttention = () => setHash(attentionOpen() ? "" : "#attention");
 
       function activateOnKey(node, action) {
         node.addEventListener("click", action);
@@ -856,7 +881,21 @@
         }
         const enabled = snapshot.rules.filter((rule) => rule.enabled && isFinder(rule));
         drawSource(enabled);
+        drawAttention();
         renderDetail(chosen);
+      }
+
+      // The header badge and the page title count the items that wait for the user.
+      function drawAttention() {
+        const count = snapshot?.attention.length ?? 0;
+        const badge = document.getElementById("attention-badge");
+        badge.hidden = count === 0;
+        badge.setAttribute("aria-pressed", String(attentionOpen()));
+        const label = `${count} ${count === 1 ? "item waits" : "items wait"} for you`;
+        badge.setAttribute("aria-label", label);
+        badge.title = label;
+        document.getElementById("attention-count").textContent = String(count);
+        document.title = `${count ? `(${count}) ` : ""}${snapshot ? `${snapshot.project} - ` : ""}Factory`;
       }
 
       function drawSource(enabled) {
@@ -1672,8 +1711,10 @@
       function renderDetail(state) {
         const list = document.getElementById("task-list");
         const finder = !state && producersOpen();
-        document.getElementById("task-view").hidden = finder;
+        const waiting = !state && attentionOpen();
+        document.getElementById("task-view").hidden = finder || waiting;
         document.getElementById("producers-view").hidden = !finder;
+        document.getElementById("attention-view").hidden = !waiting;
         if (!state) {
           moveDialog.close();
           panel.dataset.state = "";
@@ -1682,6 +1723,9 @@
           list.dataset.signature = "";
           if (finder) {
             renderProducers();
+            showPanel();
+          } else if (waiting) {
+            renderAttention();
             showPanel();
           } else {
             panel.hidden = true;
@@ -1741,6 +1785,71 @@
         const button = document.getElementById("close-detail");
         button.setAttribute("aria-label", label);
         button.title = label;
+      }
+
+      const attentionKinds = { permission: "Permission", "sandbox-bypass": "Sandbox bypass", "ask-user": "Question", other: "Other" };
+      const attentionLimit = 20;
+
+      async function copyText(button, value) {
+        const label = button.textContent;
+        try {
+          await navigator.clipboard.writeText(value);
+          button.textContent = "Copied";
+        } catch {
+          button.textContent = "Copy failed";
+        }
+        setTimeout(() => { button.textContent = label; }, 2000);
+      }
+
+      function attentionRow(item) {
+        const node = element("li", null, "task-row");
+        node.dataset.session = item.session;
+        const heading = element("div", null, "row-head");
+        const chips = element("span", null, "chips");
+        const waited = element("span", null, "chip");
+        waited.append(elapsedLabel(item.at));
+        chips.append(waited);
+        heading.append(element("h3", attentionKinds[item.kind] ?? item.kind), chips);
+        node.append(heading, element("p", item.text, "attention-text"));
+        if (item.options?.length) {
+          const options = element("ul", null, "attention-options");
+          options.append(...item.options.map((option) => element("li", option)));
+          node.append(options);
+        }
+        const meta = [item.task && `Task ${item.task}`, item.role].filter(Boolean).join(", ");
+        if (meta) node.append(element("p", meta, "muted"));
+        // The pane goes into a shell command, so only a plain ID gets a copy button.
+        if (item.pane && /^[\w:.-]+$/.test(item.pane)) {
+          const command = `rex focus ${item.pane}`;
+          const focus = element("p", null, "attention-focus");
+          const copy = element("button", "Copy focus command");
+          copy.type = "button";
+          copy.addEventListener("click", () => copyText(copy, command));
+          focus.append(element("code", command), copy);
+          node.append(focus);
+        } else if (item.pane) {
+          node.append(element("p", `Pane: ${item.pane}`, "muted"));
+        }
+        return node;
+      }
+
+      function renderAttention() {
+        const items = snapshot.attention;
+        document.getElementById("detail-title").textContent = "Waiting for you";
+        document.getElementById("detail-title").append(element("span", String(items.length), "counter"));
+        setCloseLabel("Close waiting list");
+        const list = document.getElementById("attention-list");
+        const signature = JSON.stringify(items);
+        if (list.dataset.signature !== signature) {
+          list.replaceChildren(...items.slice(0, attentionLimit).map(attentionRow));
+          list.dataset.signature = signature;
+        }
+        refreshElapsedLabels(list);
+        const note = document.getElementById("attention-note");
+        note.textContent = items.length > attentionLimit
+          ? `Read only. Answer each prompt in its pane. Showing the oldest ${attentionLimit} of ${items.length}.`
+          : "Read only. Answer each prompt in its pane.";
+        document.getElementById("attention-empty").hidden = items.length > 0;
       }
 
       function ruleRow(rule) {
@@ -1919,10 +2028,10 @@
       }
 
       function load(data, file) {
-        snapshot = data;
+        // A move or settings answer carries no attention list; keep the one on screen until the next refresh.
+        snapshot = { ...data, attention: data.attention ?? snapshot?.attention ?? [] };
         lastSource = file;
         document.getElementById("error").hidden = true;
-        document.title = `${data.project} - Factory`;
         draw();
       }
 
@@ -1979,6 +2088,7 @@
                 if (current === selection && version === mutation && lastSource === current) {
                   document.getElementById("error").hidden = true;
                   refreshElapsedLabels(document.getElementById("task-list"));
+                  refreshElapsedLabels(document.getElementById("attention-list"));
                   drawSource(snapshot.rules.filter((rule) => rule.enabled && isFinder(rule)));
                   if (producersOpen()) renderProducers();
                 } else {
@@ -2019,6 +2129,7 @@
         history.replaceState(null, "", url);
         renderDetail(null);
         snapshot = lastSource = null;
+        drawAttention();
         etags.clear();
         return refresh();
       }
@@ -2027,6 +2138,7 @@
         if (snapshot && !moveDialog.open && !settingsDialog.open && !paletteDialog.open) openPalette();
       });
       document.getElementById("open-settings").addEventListener("click", openSettings);
+      document.getElementById("attention-badge").addEventListener("click", chooseAttention);
       document.getElementById("bar-settings").addEventListener("click", openSettings);
       projectToggle.addEventListener("click", () => setProjectMenu(projectMenu.hidden));
       document.addEventListener("click", (event) => {

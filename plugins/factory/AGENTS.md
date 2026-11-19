@@ -436,6 +436,17 @@ over 24 hours old. The coordinator never answers an attention item, never types
 into its pane, never wakes on it, and reports `attention-stale` once; only the
 user answers.
 
+The dashboard shows the open items read only. `/api/factory` adds `attention`
+(oldest first; `session`, `kind`, `text`, `options`, `role`, `pane`, `task`, `at`)
+from `openAttention`, and the ETag covers it, so an item that appears or closes
+refreshes the browser even when the factory file is unchanged. The header has a
+badge with the count (hidden at 0) and the page title gets a `(N) ` prefix; the badge
+opens the "Waiting for you" panel (`#attention`) in the right dock. It lists the oldest 20
+rows: age, kind, text, options, task, role, and the pane's `rex focus BLOCK` command
+with a copy button (only for a plain block ID, since the command goes to a shell).
+All text is data, set with `textContent`. The dashboard never answers a prompt and
+makes no sound or notification.
+
 On every wake, drain all actionable tasks and reconcile results/worktrees,
 fill free worker slots before waiting, and run enabled search/backlog rules
 when the queue is empty and capacity is free. Keep one waiter armed unless the
