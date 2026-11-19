@@ -1109,6 +1109,19 @@ test("a row lists issues first, then pull requests, each by ascending number, wi
   assert.deepEqual(row.querySelector(".links").children.map((node) => node.href), [url("issues", 9), url("issues", 40), url("pull", 4), url("pull", 30)]);
 });
 
+test("a row shows one chip for a resource listed with a fragment, a query or another case, but keeps other repos", async (t) => {
+  const ui = await dashboard(t);
+  const issue = "https://github.com/owner/repo/issues/1009";
+  const task = {
+    ...example.tasks[0],
+    issue,
+    pr: null,
+    links: [`${issue}#issuecomment-1`, `${issue}?notification_referrer_id=x`, "https://github.com/Owner/Repo/issues/1009", "https://github.com/other/repo/issues/1009"],
+  };
+  const row = ui.run(`taskRow(${JSON.stringify(task)}, new Set())`);
+  assert.deepEqual(row.querySelector(".links").children.map((node) => node.href), [issue, "https://github.com/other/repo/issues/1009"]);
+});
+
 test("a row without references has no links line", async (t) => {
   const ui = await dashboard(t);
   const task = { ...example.tasks[0], issue: null, pr: null, links: [] };

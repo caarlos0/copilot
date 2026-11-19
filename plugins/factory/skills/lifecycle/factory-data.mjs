@@ -69,13 +69,19 @@ export function githubURL(value, field = "link") {
   return url;
 }
 
-// Issues first, then pull requests, each by ascending number.
+// Issues first, then pull requests, each by ascending number. A resource that
+// appears twice (query, fragment or owner/repo case differ) keeps its first URL.
 export function sortReferences(hrefs) {
   const key = (href) => {
     const [, , , kind, number] = githubURL(href).pathname.split("/");
     return [kind === "issues" ? 0 : 1, Number(number)];
   };
-  return [...hrefs].sort((a, b) => {
+  const seen = new Set();
+  const unique = [...hrefs].filter((href) => {
+    const identity = githubResourceURL(href).toLowerCase();
+    return !seen.has(identity) && seen.add(identity);
+  });
+  return unique.sort((a, b) => {
     const [kindA, numberA] = key(a);
     const [kindB, numberB] = key(b);
     return kindA - kindB || numberA - numberB;
