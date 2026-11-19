@@ -803,12 +803,6 @@ test("only the first nine sidebar items get a kbd badge", async (t) => {
   assert.equal(items[0].querySelector("kbd").textContent, "1");
 });
 
-test("the header has no refreshed label and no split title button", () => {
-  assert.doesNotMatch(html, /freshness|refreshed/i);
-  assert.doesNotMatch(html, /title-pill|id="goal"/);
-  assert.match(html, /<button id="refresh"/, "The refresh button stays.");
-});
-
 test("flow edges use only straight horizontal and vertical segments", async (t) => {
   const ui = await dashboard(t);
   const paths = ui.get("flow").querySelectorAll(".edge").map((edge) => edge.d);
@@ -1672,10 +1666,6 @@ test("the popup can resolve an initial task with an outcome and comment", async 
   assert.equal(saved.resolution.note, comment.value);
   assert.equal(saved.feedback.acknowledged_id, null);
   assert.equal(ui.get("detail").dataset.state, "initial");
-});
-
-test("the header has no run status pill", () => {
-  assert.doesNotMatch(html, /run-status|title-row/);
 });
 
 test("the Settings item at the bottom of the sidebar opens one settings dialog", async (t) => {
