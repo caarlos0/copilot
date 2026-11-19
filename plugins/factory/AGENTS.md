@@ -443,7 +443,9 @@ refreshes the browser even when the factory file is unchanged. The header has a
 badge with the count (hidden at 0) and the page title gets a `(N) ` prefix; the badge
 opens the "Waiting for you" panel (`#attention`) in the right dock. It lists the oldest 20
 rows: age, kind, text, options, task, role, and the pane's `rex focus BLOCK` command
-with a copy button (only for a plain block ID, since the command goes to a shell).
+with a copy glyph button (no text; `aria-label` and tooltip "Copy rex focus command"; only
+for a plain block ID, since the command goes to a shell). Rex registers a `rex` URL
+scheme, but the app documents no pane-focus URL, so there is no `rex://` link.
 All text is data, set with `textContent`. The dashboard never answers a prompt and
 makes no sound or notification.
 

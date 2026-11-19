@@ -2321,9 +2321,14 @@ test("the badge, the page title and the waiting list show pending attention as d
 
   ui.run("navigator = { clipboard: { writeText: async (value) => { globalThis.copied = value; } } }");
   const copy = first.querySelector("button");
+  assert.equal(copy.textContent, "", "The copy button shows a glyph, not text.");
+  assert.equal(copy["aria-label"], "Copy rex focus command");
+  assert.equal(copy.title, "Copy rex focus command");
+  assert.ok(copy.querySelector("svg"));
   await copy.fire("click");
   assert.equal(ui.run("copied"), "rex focus block:p0");
-  assert.equal(copy.textContent, "Copied");
+  assert.equal(copy["aria-label"], "Copied");
+  assert.equal(copy.textContent, "");
   assert.equal(second.querySelector("button"), null, "A pane that is not a plain ID gets no shell command.");
   assert.match(second.textContent, /Pane: block:x; rm -rf ~/);
 
