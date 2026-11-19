@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { basename, dirname, extname, join } from "node:path";
+import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { basename, dirname, extname, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+import { parseArgs } from "node:util";
 import { archiveFormat, githubResourceURL, validateArchive } from "./factory-data.mjs";
 
 const dayFile = /^\d{4}-\d{2}-\d{2}\.json$/;
@@ -83,3 +85,86 @@ export async function removeArchived(directory, project, id) {
     else await rm(join(directory, `${data.day}.json`));
   }
 }
+
+const day = 86_400_000;
+const hour = 3_600_000;
+const largeFile = 100 * 1024 * 1024;
+const workerRoles = ["investigation", "implementation", "review"];
+const usage = "Usage: node archive.mjs clean FACTORY_FILE [--older-than 14d] [--run]";
+
+function parseAge(value) {
+  const match = /^(\d+)([dh])$/.exec(value);
+  if (!match) throw new Error(`--older-than must look like 14d or 36h, got "${value}".`);
+  return Number(match[1]) * (match[2] === "d" ? day : hour);
+}
+
+const pendingFeedback = (task) => task.feedback && task.feedback.acknowledged_id !== task.feedback.id;
+
+// Lists the per-task artifacts of tasks resolved longer than `olderThan` ago
+// and, with `run`, deletes them. Large unreferenced files are only reported.
+export async function clean(file, { olderThan = 14 * day, run = false, now = Date.now() } = {}) {
+  const directory = dirname(file);
+  const current = JSON.parse(await readFile(file, "utf8"));
+  const project = basename(file, extname(file)).replace(/-factory$/, "");
+  const archived = (await readArchive(archiveDirectory(file), current.project)).flatMap((data) => data.tasks);
+  const live = new Set(current.tasks.map((task) => task.id));
+  const resolved = [...current.tasks, ...archived.filter((task) => !live.has(task.id))]
+    .filter((task) => task.state === "resolved");
+  const expired = resolved.filter((task) => Date.parse(task.updated_at) < now - olderThan && !pendingFeedback(task));
+  const open = JSON.stringify(current.tasks.filter((task) => task.state !== "resolved" || pendingFeedback(task)));
+
+  const entries = await readdir(directory, { withFileTypes: true });
+  const artifacts = new Map();
+  for (const task of expired) {
+    const prefix = `${project}-${task.id}-`.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const roles = workerRoles.join("|");
+    const files = new RegExp(`^${prefix}(${roles})-(brief|result)([.-].*)?\\.(md|json)$`);
+    const dirs = new RegExp(`^${prefix}(${roles})-instructions$`);
+    for (const entry of entries) {
+      if ((entry.isFile() && files.test(entry.name)) || (entry.isDirectory() && dirs.test(entry.name))) {
+        artifacts.set(entry.name, task.id);
+      }
+    }
+  }
+
+  const remove = [];
+  const kept = [];
+  for (const [name, task] of artifacts) {
+    const path = join(directory, name);
+    const reason = open.includes(name) ? "referenced by an open task"
+      : now - (await stat(path)).mtimeMs < day ? "modified in the last 24 hours" : null;
+    if (reason) kept.push({ path, task, reason });
+    else remove.push({ path, task });
+  }
+
+  const factories = entries.filter((entry) => entry.isFile() && entry.name.endsWith("-factory.json")).map((entry) => entry.name);
+  const references = (await Promise.all(factories.map((name) => readFile(join(directory, name), "utf8")))).join("\n");
+  const large = [];
+  for (const entry of entries) {
+    if (!entry.isFile() || factories.includes(entry.name) || references.includes(entry.name)) continue;
+    const info = await stat(join(directory, entry.name));
+    if (info.size > largeFile && now - info.mtimeMs >= day) {
+      large.push({ path: join(directory, entry.name), size: info.size });
+    }
+  }
+
+  if (run) for (const { path } of remove) await rm(path, { recursive: true, force: true });
+  return { run, tasks: [...new Set(remove.map((item) => item.task))], delete: remove, kept, "stale-large": large };
+}
+
+async function main() {
+  try {
+    const { values, positionals } = parseArgs({
+      allowPositionals: true,
+      options: { "older-than": { type: "string", default: "14d" }, run: { type: "boolean", default: false } },
+    });
+    if (positionals.length !== 2 || positionals[0] !== "clean") throw new Error(usage);
+    const result = await clean(resolve(positionals[1]), { olderThan: parseAge(values["older-than"]), run: values.run });
+    console.log(JSON.stringify(result, null, 2));
+  } catch (error) {
+    console.error(error.message);
+    process.exitCode = error.message === usage ? 2 : 1;
+  }
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) await main();

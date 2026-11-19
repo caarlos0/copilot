@@ -212,7 +212,8 @@ The helper:
 - moves `resolved` tasks last updated more than seven days ago into
   `<owner.repo>-factory-archive/YYYY-MM-DD.json` (by last update day) when you
   add or restore a task, except those with pending dashboard feedback. Nothing
-  is deleted. Artifact files stay on disk.
+  is deleted. Artifact files stay on disk until `archive.mjs clean` removes them
+  (see "Clean the state directory").
 - refuses a new task whose `id`, `issue`, or `pr` matches an archived task, and
   prints the match. See "Archived work".
 - exits 0 on success (silent), 1 on invalid data or I/O errors, 2 on usage
@@ -224,6 +225,32 @@ A task has `id`, `title`, `state`, `revision`, `feedback`, `next_action`, `issue
 `links`. Put acceptance criteria, evidence, and full SHAs in `details`.
 Derive the time in a state from the last history entry and review cycles from
 the history. Do not store counters.
+
+### Clean the state directory
+
+Task artifacts pile up in the state directory (briefs, results, instructions
+directories, archived copies, staging files). Once in a while, and when a
+listing of the directory gets slow, run `archive.mjs clean` beside this skill:
+
+```sh
+node archive.mjs clean "$FILE"                     # dry run: prints what it would delete
+node archive.mjs clean "$FILE" --older-than 30d --run
+```
+
+It is a dry run unless you pass `--run`. `--older-than` takes days or hours
+(`14d`, `36h`; default `14d`). For each task resolved longer ago than that
+(live or archived), it lists and, with `--run`, deletes
+`<project>-<task>-<role>-brief*.md`, `<project>-<task>-<role>-result*.json` and
+`<project>-<task>-<role>-instructions/`. Name each worker's instructions
+directory that way so the command finds it. It never touches a file that an open
+task names, a task with pending dashboard feedback, or anything modified in the
+last 24 hours; those show under `kept`. It also reports each file over 100 MB
+that no factory file names and that is older than 24 hours as `stale-large`.
+That is report only: ask the user before you delete one.
+
+Artifacts stay flat in the state directory. Grouping new ones under
+`<project>-tasks/<task>/` is a follow-up: it changes every brief and result
+path in this skill, the examples, and `reconcile.mjs` together.
 
 ## Write before action; reconcile with reality
 
@@ -991,7 +1018,8 @@ The factory runs no GitHub watcher.
 ### Launch rules
 
 Before every launch, put an `AGENTS.md` in a private, task-specific
-instructions directory under the state directory. It points to the exact brief
+instructions directory under the state directory, named
+`<project>-<task>-<role>-instructions` so `archive.mjs clean` can remove it. It points to the exact brief
 and carries both Rex rules above in its own text: never rename the session, and
 never create, close, or type into Rex windows, tabs, splits, or panes. Add the directory to
 `COPILOT_CUSTOM_INSTRUCTIONS_DIRS` for that worker only, keeping existing

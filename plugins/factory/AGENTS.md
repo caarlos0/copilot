@@ -265,6 +265,16 @@ refreshes head-specific evidence before landing. Prefer an existing repository
 merge queue. For local-only tasks, use the current local default branch, not
 `origin`; independent tasks stay parallel.
 
+`archive.mjs clean FACTORY_FILE [--older-than 14d] [--run]` is the retention
+tool for the state directory. It is a dry run unless `--run` is given. For tasks
+resolved longer ago than the threshold (live or archived) it deletes their
+`<project>-<task>-<role>-brief*.md`, `-result*.json` and `-instructions/`
+artifacts, and never a file that an open task names, a task with pending
+feedback, or anything modified in the last 24 hours. It reports files over
+100 MB that no factory file names as `stale-large` and never deletes them.
+Artifacts stay flat; grouping them under `<project>-tasks/<task>/` is a
+documented follow-up. Tests are in `archive.test.cjs`.
+
 PR watching goes through `skills/lifecycle/pr-watch.mjs`, which the factory
 ships and workers call by absolute path (like `broker.mjs`). It makes one
 GraphQL call per tick, prints one typed JSON event, and exits 3 on a rate limit
