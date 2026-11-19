@@ -79,8 +79,11 @@ search/backlog rules when the queue is empty and capacity is free. Capacity is
 `budget.max_parallel_workers` from the factory file (reread it every sweep and
 after every dashboard `budget.updated` event) minus the workers with status
 `running` (resolved tasks excluded), and the per-role `limits`; never exceed the budget. Wait with
-`broker.mjs wait --since CURSOR --exclude-source coordinator --due`, exactly one at
-a time (async bash). `--due` returns `rule.due` for a due rule and `reconcile.due`
+`broker.mjs wait --since CURSOR --exclude-source coordinator --exclude-source attention --due`,
+exactly one at a time (async bash). Attention events (`attention.requested`,
+`attention.resolved`) never wake you: a session waits for the user, not for you.
+Never answer such a prompt and never send keys into its pane. Report an
+`attention-stale` finding to the user once, with the pane id. `--due` returns `rule.due` for a due rule and `reconcile.due`
 every 5 minutes while the run is `active`; on `reconcile.due`, run `reconcile.mjs`,
 handle each finding, and re-arm (nothing to do means just re-arm). Leave `--due` out
 only while no slot is free for a due backlog rule. Workers report with

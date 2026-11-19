@@ -64,6 +64,7 @@ If you use `session_store_sql`, follow these rules:
    | Polling | `commands.sleep`, `commands.status_reads` high; `gh_wait` and `watch` low | Use `pr-watch.mjs` (`gh_wait` counts it); `gh pr checks --watch --fail-fast` for a one-off check |
    | Questions to the user | `tools.ask_user.calls`, `user_messages` in worker sessions | Give the worker a default answer, or decide in the brief |
    | Failures | `tools.<name>.failures` | Fix the tool profile or the brief; a tool that fails every call is a config bug |
+   | User waits | `attention.requested` per `role`, and the median time to the `attention.resolved` for the same `session`, in the events log `<owner.repo>-factory-events.jsonl` beside the factory file | Give the worker a default answer, or allow the tool in its profile |
 
    Four of these have a standing line in every implementation brief ("Standing
    cost lines" in the skill). If the signal is still high, the line is missing
