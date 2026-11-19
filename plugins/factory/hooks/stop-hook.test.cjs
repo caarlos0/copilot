@@ -128,7 +128,8 @@ test("finds the factory file from the origin remote and the state directory", as
   await mkdir(state, { recursive: true });
   await mkdir(repo);
   for (const args of [["init", "-q"], ["remote", "add", "origin", "git@github.com:owner/repo.git"]]) {
-    assert.equal(spawnSync("git", ["-C", repo, ...args]).status, 0);
+    const env = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };
+    assert.equal(spawnSync("git", ["-C", repo, ...args], { env }).status, 0);
   }
   await writeFile(join(state, "owner.repo-factory.json"), JSON.stringify({ status: "active", tasks: [] }));
   const env = { FACTORY_FILE: "", HOME: join(f.directory, "home") };

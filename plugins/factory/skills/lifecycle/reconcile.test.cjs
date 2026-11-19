@@ -16,7 +16,7 @@ function fakeWaiter(t) {
 }
 
 function git(cwd, ...args) {
-  const result = spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8" });
+  const result = spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8", env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" } });
   assert.equal(result.status, 0, result.stderr);
 }
 

@@ -200,7 +200,7 @@ test("worker.blocked checks a named result for outcome blocked, and pr.merged ne
 test("a complete implementation result must report the worktree head, rebased on main unless the task has a PR", async (t) => {
   const f = await fixture(t);
   const git = (cwd, ...args) => {
-    const out = spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8" });
+    const out = spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8", env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" } });
     assert.equal(out.status, 0, out.stderr);
     return out.stdout.trim();
   };
