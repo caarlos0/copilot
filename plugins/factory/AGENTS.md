@@ -202,8 +202,9 @@ then finished; ties go by name without case, then file. It shows them in section
 open), and Finished, with dimmer text; an empty section has no header, and the 1-9
 shortcuts follow the visible order. The dashboard shows no run-status pill above the
 flowchart, on any width. `paused`, `blocked`, and `finished` show in the Find work
-panel note ("Scheduled rules do not run while the factory is ..."). The sidebar is as wide as the longest project
-name, between 240px and 25vw. A name that does not fit loses its owner first, then
+panel note ("Scheduled rules do not run while the factory is ..."). The sidebar has a fixed width,
+`clamp(240px, 22vw, 360px)`; neither a project name nor the selected item changes it (the selected
+item changes only colors, never weight or border width). A name that does not fit loses its owner first, then
 its start (`fitProjectLabel`); the full name stays in `title` and `aria-label`.
 The dashboard opens task lists, and the read-only "Find work" rules and skipped
 list, in one panel docked on the right edge, beside the flowchart (the

@@ -2057,6 +2057,14 @@ test("on a phone the project switcher is a dropdown beside a settings button, an
   assert.match(html, /<nav id="project-menu"[^>]*hidden><\/nav>\s*<\/div>\s*<button id="bar-settings"[^>]*aria-label="Settings"/, "The settings button follows the dropdown.");
 });
 
+test("the sidebar has a fixed width and the selected item does not change its box", () => {
+  const sidebar = html.match(/\n {6}#sidebar \{[^}]*\}/)[0];
+  assert.match(sidebar, /width: clamp\(240px, 22vw, 360px\);/);
+  assert.doesNotMatch(sidebar, /max-content|min-width|max-width/);
+  const selected = html.match(/\.factory-item\[aria-current="true"\] \{[^}]*\}/)[0];
+  assert.doesNotMatch(selected, /font-weight|padding|border-width|border:/);
+});
+
 test("the project dropdown lists the sorted factories, switches on a pick, and closes on Escape or an outside click", async (t) => {
   const ui = await dashboard(t);
   await writeFile(join(ui.directory, "other.repo-factory.json"),
