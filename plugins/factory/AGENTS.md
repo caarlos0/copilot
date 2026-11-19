@@ -203,7 +203,10 @@ directory. `serve.mjs` lists and serves the factories of both directories
 (deduped by name, the new one wins) and writes the file where it lives; it
 caches each parsed file and sends an `ETag` (mtime, size, inode) on
 `/api/factory` and `/api/factories`, answering `If-None-Match` with 304, and the
-dashboard skips load and redraw on a 304; it binds `127.0.0.1` with no token
+dashboard skips load and redraw on a 304; it gzips (level 1, `Vary: Accept-Encoding`) the
+dashboard page, `factory-data.mjs` and both API responses for a client that sends
+`Accept-Encoding: gzip`, keeping the latest compressed body per resource and tag; the ETag is the
+same with or without gzip, and a 304 has no body; it binds `127.0.0.1` with no token
 by default, and a non-loopback `--host` (for reaching the dashboard from
 another device) requires a token on every request (`--token`, else the one saved with mode 0600
 as `dashboard-token` in the first state directory, created on the first start

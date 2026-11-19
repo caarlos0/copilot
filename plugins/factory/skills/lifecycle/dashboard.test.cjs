@@ -5,6 +5,7 @@ const { spawn, spawnSync } = require("node:child_process");
 const http = require("node:http");
 const { delimiter, join } = require("node:path");
 const { tmpdir } = require("node:os");
+const { gunzipSync } = require("node:zlib");
 const { test } = require("node:test");
 const vm = require("node:vm");
 
@@ -123,6 +124,45 @@ test("an unchanged factory answers 304 without a body, and a write brings a new 
   assert.equal(changed.status, 200);
   assert.notEqual(changed.headers.get("etag"), tag);
   assert.equal((await changed.json()).tasks.find((task) => task.id === "issue-5").state, "initial");
+});
+
+const rawGet = (base, path, headers = {}) => new Promise((resolve, reject) => {
+  http.get(new URL(path, base), { headers }, (response) => {
+    const chunks = [];
+    response.on("data", (chunk) => chunks.push(chunk));
+    response.on("end", () => resolve({ status: response.statusCode, headers: response.headers, body: Buffer.concat(chunks) }));
+  }).on("error", reject);
+});
+
+test("gzips the pages and the API only for a client that asks, and a 304 stays bare", async (t) => {
+  const { url } = await server(t);
+  for (const path of [`/api/factory?file=${factoryFile}`, "/api/factories", "/", "/factory-data.mjs"]) {
+    const plain = await rawGet(url, path, { "Accept-Encoding": "identity" });
+    assert.equal(plain.status, 200, path);
+    assert.equal(plain.headers["content-encoding"], undefined, path);
+    assert.equal(plain.headers.vary, "Accept-Encoding", path);
+
+    const packed = await rawGet(url, path, { "Accept-Encoding": "br, gzip;q=0.8" });
+    assert.equal(packed.headers["content-encoding"], "gzip", path);
+    assert.equal(packed.headers.vary, "Accept-Encoding", path);
+    assert.equal(packed.headers.etag, plain.headers.etag, path);
+    assert.deepEqual(gunzipSync(packed.body), plain.body, path);
+
+    const refused = await rawGet(url, path, { "Accept-Encoding": "gzip;q=0" });
+    assert.equal(refused.headers["content-encoding"], undefined, path);
+  }
+
+  const path = `/api/factory?file=${factoryFile}`;
+  const first = await rawGet(url, path, { "Accept-Encoding": "gzip" });
+  const same = await rawGet(url, path, { "Accept-Encoding": "gzip", "If-None-Match": first.headers.etag });
+  assert.equal(same.status, 304);
+  assert.equal(same.headers["content-encoding"], undefined);
+  assert.equal(same.body.length, 0);
+
+  assert.equal((await move(url, unblocked)).status, 200);
+  const changed = await rawGet(url, path, { "Accept-Encoding": "gzip" });
+  assert.notEqual(changed.headers.etag, first.headers.etag);
+  assert.equal(JSON.parse(gunzipSync(changed.body)).tasks.find((task) => task.id === "issue-5").state, "initial");
 });
 
 test("the listing answers 304 until any file changes, and a broken file never poisons the cache", async (t) => {

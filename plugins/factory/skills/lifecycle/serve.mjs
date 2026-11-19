@@ -5,6 +5,7 @@ import { homedir, networkInterfaces } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+import { gzipSync } from "node:zlib";
 import { countByState, isObject, validate } from "./factory-data.mjs";
 import { resolveAttention, sendAnswer } from "./attention.mjs";
 import { ConflictError, update } from "./factory.mjs";
@@ -260,14 +261,39 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
     response.end(typeof body === "object" && !Buffer.isBuffer(body) ? JSON.stringify(body) : body);
   }
 
-  // The body is built only when the browser's tag is stale.
-  async function sendTagged(request, response, tag, body) {
+  const acceptsGzip = (request) => (request.headers["accept-encoding"] ?? "").split(",").some((part) => {
+    const [name, ...params] = part.trim().toLowerCase().split(";");
+    return name === "gzip" && !params.some((param) => /^\s*q=0(\.0*)?\s*$/.test(param));
+  });
+
+  // The latest compressed body per resource: a changed tag compresses once, not once per request.
+  // The body is built only when the identity response or a new compression needs it.
+  const compressed = new Map();
+
+  async function sendBody(request, response, key, tag, body, type, headers = {}) {
+    headers = { ...headers, Vary: "Accept-Encoding" };
+    if (!acceptsGzip(request)) return send(response, 200, await body(), type, headers);
+    let entry = compressed.get(key);
+    if (entry?.tag !== tag) {
+      const data = await body();
+      entry = { tag, gzip: gzipSync(typeof data === "object" && !Buffer.isBuffer(data) ? JSON.stringify(data) : data, { level: 1 }) };
+      compressed.set(key, entry);
+    }
+    send(response, 200, entry.gzip, type, { ...headers, "Content-Encoding": "gzip" });
+  }
+
+  async function sendAsset(request, response, name, type) {
+    const body = await readFile(join(assets, name));
+    await sendBody(request, response, name, createHash("sha1").update(body).digest("base64url"), () => body, type);
+  }
+
+  async function sendTagged(request, response, key, tag, body) {
     const seen = request.headers["if-none-match"]?.split(",").map((value) => value.trim().replace(/^W\//, ""));
     if (seen?.includes(tag) || seen?.includes("*")) {
       response.writeHead(304, { "Cache-Control": "no-store", ETag: tag, "X-Content-Type-Options": "nosniff" });
       response.end();
     } else {
-      send(response, 200, await body(), undefined, { ETag: tag });
+      await sendBody(request, response, key, tag, body, undefined, { ETag: tag });
     }
   }
 
@@ -510,16 +536,16 @@ p{margin:0;color:#f87171}
       } else if (request.method !== "GET") {
         throw new HttpError(405, "Use GET, or POST /api/move, /api/settings or /api/attention/answer for dashboard changes.");
       } else if (url.pathname === "/" || url.pathname === "/dashboard.html") {
-        send(response, 200, await readFile(join(assets, "dashboard.html")), "text/html; charset=utf-8");
+        await sendAsset(request, response, "dashboard.html", "text/html; charset=utf-8");
       } else if (url.pathname === "/factory-data.mjs") {
-        send(response, 200, await readFile(join(assets, "factory-data.mjs")), "text/javascript; charset=utf-8");
+        await sendAsset(request, response, "factory-data.mjs", "text/javascript; charset=utf-8");
       } else if (url.pathname === "/api/factories") {
         const { entries, tag } = await listingTags();
-        await sendTagged(request, response, tag, () => listFactories(entries));
+        await sendTagged(request, response, "listing", tag, () => listFactories(entries));
       } else if (url.pathname === "/api/factory") {
         const entry = await factoryTag(url.searchParams.get("file"));
         const view = await factoryView(entry);
-        await sendTagged(request, response, view.tag, view.body);
+        await sendTagged(request, response, `factory:${entry.target}`, view.tag, view.body);
       } else if (url.pathname === "/api/artifact") {
         const data = await loadFactory(url.searchParams.get("file"));
         const name = url.searchParams.get("name");
