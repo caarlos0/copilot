@@ -440,10 +440,10 @@ over 24 hours old. `resolveAttention(file, { source })` also records the
 `/api/factory` read, one scan per file at a time), so an item clears without
 waiting for the coordinator to wake. The coordinator never answers an attention
 item, never types into its pane, never wakes on it, and reports `attention-stale`
-once; only the user answers.
+once; only the user answers, in the pane or with a click in the dashboard.
 
-The dashboard shows the open items read only. `/api/factory` adds `attention`
-(oldest first; `session`, `kind`, `text`, `options`, `role`, `pane`, `task`, `at`)
+`/api/factory` adds `attention`
+(oldest first; `id` (the request event), `session`, `kind`, `text`, `options`, `role`, `pane`, `task`, `at`)
 from `openAttention`, and the ETag covers it, so an item that appears or closes
 refreshes the browser even when the factory file is unchanged. The header has a
 badge with the count (hidden at 0) and the page title gets a `(N) ` prefix; the badge
@@ -452,8 +452,23 @@ rows: age, kind, text, options, task, role, and the pane's `rex focus BLOCK` com
 with a copy glyph button (no text; `aria-label` and tooltip "Copy rex focus command"; only
 for a plain block ID, since the command goes to a shell). Rex registers a `rex` URL
 scheme, but the app documents no pane-focus URL, so there is no `rex://` link.
-All text is data, set with `textContent`. The dashboard never answers a prompt and
-makes no sound or notification.
+All text is data, set with `textContent`. The dashboard makes no sound or notification.
+
+Only an `ask-user` item with options gets one button per option; every other item
+lists its options as text and offers only the copy button. The hook records `options`
+only for an `ask_user` form with one enum field, so the index of a button is the row
+of the form. A click sends `POST /api/attention/answer?file=` with `{id, index}`
+(same-origin JSON like the other writes). The server looks the item up among the
+pending ones by `id`, so a prompt that closed or was replaced is refused (409); it
+also refuses an item without options or without a plain block `pane`, a pane that
+`rex block ls` no longer lists, and an index outside the options. It then runs
+`rex --autostart=false send-key -b PANE down... enter` (`index` times Down, then
+Enter) with an argument array, never a shell. An `ask_user` form has no number keys: Down
+moves the highlight from the first row and Enter submits it. Permission and sandbox-bypass
+prompts get no buttons: their rows (for example "approve for the rest of the session")
+depend on runtime state the hook cannot see, and a wrong digit could grant a wider approval.
+The row stays until the session log, the pane, or the clock resolves it; its buttons stay
+disabled meanwhile, so one click sends one answer. The coordinator still never answers.
 
 On every wake, drain all actionable tasks and reconcile results/worktrees,
 fill free worker slots before waiting, and run enabled search/backlog rules

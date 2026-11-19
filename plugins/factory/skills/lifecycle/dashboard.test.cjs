@@ -1777,6 +1777,20 @@ test("the agent, skill, and plugin rules say the coordinator never exceeds the b
   }
 });
 
+test("the rules say only the user's click answers an attention prompt, and only an ask_user one", () => {
+  const plugin = join(__dirname, "..", "..");
+  const agents = readFileSync(join(plugin, "AGENTS.md"), "utf8");
+  const skill = readFileSync(join(__dirname, "SKILL.md"), "utf8");
+  for (const [text, file] of [[agents, "AGENTS.md"], [skill, "SKILL.md"]]) {
+    assert.match(text, /click/, file);
+    assert.doesNotMatch(text, /dashboard\s+shows\s+the\s+open\s+items\s+read\s+only|dashboard\s+never\s+answers\s+a\s+prompt/i, file);
+  }
+  assert.match(agents, /POST \/api\/attention\/answer/);
+  assert.match(agents, /coordinator\s+still\s+never\s+answers/);
+  assert.match(skill, /never\s+answer\s+the\s+prompt,\s+never\s+type\s+or\s+send\s+keys\s+into\s+the\s+pane/);
+  assert.match(html, /Pick an option to type it into the pane/);
+});
+
 test("the worker write boundary is present in the skill and plugin rules", () => {
   for (const file of [join(__dirname, "SKILL.md"), join(__dirname, "..", "..", "AGENTS.md")]) {
     const text = readFileSync(file, "utf8");

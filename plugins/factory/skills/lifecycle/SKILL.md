@@ -360,7 +360,7 @@ leave work behind. Treat each finding as unfinished work:
   next status line. Then do nothing: never answer the prompt, never type or send
   keys into the pane (`rex send*`), never relaunch the worker for it,
   and never let it wake you (the waiter excludes source `attention`). Only the
-  user can answer. The finding clears by itself when the prompt is answered,
+  user can answer, in the pane or with a click on an option button in the dashboard. The finding clears by itself when the prompt is answered,
   the pane closes, or 24 hours pass.
 - `worker-missing`: a worker (a task role or a rule worker) has status `running`,
   but its window is not in the live Rex session. It carries the role, window,
@@ -1476,7 +1476,7 @@ without it. Only use `--host` when the user asks to reach the
 dashboard from another device.
 
 The page shows the flow with a task count per state, task lists, the read-only
-"Find work" panel, Move and Unblock, settings, a Cmd+K palette, and an `r` refresh key (see
+"Find work" panel, the "Waiting for you" list (an `ask_user` question has one button per option; the user's click, never the coordinator, types it into the pane), Move and Unblock, settings, a Cmd+K palette, and an `r` refresh key (see
 `AGENTS.md`). It rereads the file every 30 seconds and shows saved state, not
 live worker status. The server accepts writes only from its own origin, with
 JSON, through the shared writer. Do not add a polling schedule just for the
