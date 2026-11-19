@@ -86,10 +86,17 @@ reports findings. A missing waiter blocks every time; findings block once per
 turn (`stop_hook_active` allows the next stop), because some findings need the
 user. Copilot ends the turn after 8 consecutive blocks. The hook cannot arm the
 waiter or wake an idle agent; it only forces the model to do it. It runs in
-every session of every user, so it is gated: it does nothing unless
-`FACTORY_COORDINATOR=1`, and the coordinator launch must set that variable
-(the hook payload has no agent name, and agent-frontmatter hooks resolve paths
-from the repository root, so plugin-root expansion there is unverified). The
+every session of every user, so it is gated (`gate.mjs`): it does nothing
+unless the project's owner lock (`<project>-factory.lock`, beside the factory
+file) records the Copilot session in the hook payload (`sessionId`). The lock
+holds `owner.json` with `copilot_session`; the older text file `owner`
+(`session ID pane ID`) is still read. The payload has no agent name, so the
+session ID is the only identity; no launcher has to set a variable. A session
+with no lock, or another session's lock, is untouched.
+`FACTORY_COORDINATOR=1` forces the hooks on for any session and
+`FACTORY_COORDINATOR=0` forces them off. `reconcile.mjs` reports
+`hooks-inactive` when the lock exists but the hooks would not run for the
+session that runs it (no recorded session, another session, or `=0`). The
 factory file comes from `FACTORY_FILE`, else `<owner.repo>-factory.json` from the
 `origin` remote of the session cwd, in the state directory; with no file the
 hook allows. It also allows on any error, a bad payload, or a reconcile
@@ -112,9 +119,9 @@ they win over `--yolo`:
 ```
 
 `hooks.json` also ships a `preToolUse` guard (`hooks/guard.mjs`) for the
-coordinator. It runs only when the coordinator is started with
-`FACTORY_COORDINATOR=1`, and it exits at once without it. The launcher of the
-coordinator must set the variable. The hook denies, with a reason that names the
+coordinator. It uses the same gate as the stop hook (owner lock session, with
+the `FACTORY_COORDINATOR` override), and it does nothing for any other session.
+The hook denies, with a reason that names the
 rule, the `task`, `read_agent`, `write_agent` and `run_dynamic_workflow` tools;
 `edit`, `create` and `apply_patch` outside `~/.local/state/copilot-coordinator`,
 `~/.local/state/copilot-factory`, the session directory and `$TMPDIR`; and bash
@@ -369,7 +376,8 @@ whose window is open or whose status is still `running` (`rule-worker-done`),
 `running` workers whose window is not in the live Rex session
 (`worker-missing`, plus `rex-session-missing` once when the session is gone;
 the factory relaunches them in their existing worktrees, never creating or
-renaming a session), and a missing waiter (`no-waiter`). The
+renaming a session), a missing waiter (`no-waiter`), and an owner lock whose
+session the coordinator hooks would not match (`hooks-inactive`). The
 factory runs it at startup, on every wake and user message, and before every
 report, so a missed waiter wake cannot leave finished work unmerged. The waiter
 is re-armed after each wake or user message, and `broker.mjs cursor` is taken

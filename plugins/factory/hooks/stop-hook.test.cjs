@@ -45,11 +45,27 @@ test("hooks.json declares one gated agentStop command with a timeout under the c
   assert.ok(entry.timeoutSec > 0 && entry.timeoutSec <= 30);
 });
 
-test("allows without running node when FACTORY_COORDINATOR is not 1", async (t) => {
+test("FACTORY_COORDINATOR=0 allows without running node", async (t) => {
   const f = await fixture(t);
   await f.write({ waiter: null });
-  assert.equal(f.run({ env: { FACTORY_COORDINATOR: "" } }), null);
   assert.equal(f.run({ env: { FACTORY_COORDINATOR: "0", PATH: "/nonexistent" } }), null);
+});
+
+test("without the variable, only the session in the owner lock is blocked", async (t) => {
+  const f = await fixture(t);
+  await f.write({ waiter: null });
+  const env = { FACTORY_COORDINATOR: "" };
+  const input = { sessionId: "coordinator-session" };
+  assert.equal(f.run({ input, env }), null, "no lock");
+  const lock = join(f.directory, "owner.repo-factory.lock");
+  await mkdir(lock);
+  await writeFile(join(lock, "owner.json"), JSON.stringify({ copilot_session: "coordinator-session" }));
+  assert.equal(f.run({ input, env }).decision, "block");
+  assert.equal(f.run({ input: { session_id: "coordinator-session" }, env }).decision, "block");
+  assert.equal(f.run({ input: { sessionId: "other-session" }, env }), null, "lock of another session");
+  assert.equal(f.run({ input: {}, env }), null, "payload without a session");
+  assert.equal(f.run({ input, env: { FACTORY_COORDINATOR: "0" } }), null, "explicit off");
+  assert.equal(f.run({ input: { sessionId: "other-session" } }).decision, "block", "explicit on");
 });
 
 test("blocks a non-finished run without an armed waiter, even after a prior block", async (t) => {

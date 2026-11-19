@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { resolveFactory, waiterPid } from "./broker.mjs";
+import { hooksInactive } from "./gate.mjs";
 
 const usage = "Usage: node reconcile.mjs FACTORY_FILE [--default-branch NAME]";
 
@@ -61,6 +62,9 @@ async function reconcile(file, defaultBranch = "main") {
   if ((factory.status === "active" || open.length > 0) && await waiterPid(await resolveFactory(file)) === null) {
     findings.push({ kind: "no-waiter", status: factory.status ?? null, open: open.length });
   }
+
+  const inactive = hooksInactive(file);
+  if (inactive) findings.push({ kind: "hooks-inactive", reason: inactive });
 
   // One Rex read per sweep, and only when a check needs it. After a Rex failure, null.
   let live;

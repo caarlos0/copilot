@@ -41,14 +41,14 @@ async function fixture(t, rex) {
   const file = join(directory, "owner.repo-factory.json");
   return {
     directory, repo, file,
-    async run(tasks, { status = "active", waiter = process.pid, rules } = {}) {
+    async run(tasks, { status = "active", waiter = process.pid, rules, env } = {}) {
       await writeFile(file, JSON.stringify({ rex_session: "session:work", status, tasks, rules }));
       const pidFile = join(directory, "owner.repo-factory-waiter.pid");
       if (waiter === null) await rm(pidFile, { force: true });
       else await writeFile(pidFile, `${waiter}\n`);
       const result = spawnSync(process.execPath, [script, file], {
         encoding: "utf8",
-        env: { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH}` },
+        env: { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH}`, ...env },
       });
       assert.equal(result.status, 0, result.stderr);
       return JSON.parse(result.stdout);
@@ -189,6 +189,24 @@ test("reports no-waiter while the run is active or a task is open, and no waiter
   assert.deepEqual(await kinds(open, { status: "paused", waiter: null }), ["no-waiter"]);
   assert.deepEqual(await kinds(open), []);
   assert.deepEqual(await kinds(done, { status: "finished", waiter: null }), []);
+});
+
+test("reports hooks-inactive when the owner lock would not activate the hooks for this session", async (t) => {
+  const f = await fixture(t, fakeRex);
+  const open = [task("busy", "implementation")];
+  const inactive = async (env) => (await f.run(open, { env })).findings.filter(({ kind }) => kind === "hooks-inactive");
+  const mine = { COPILOT_AGENT_SESSION_ID: "mine", FACTORY_COORDINATOR: "" };
+
+  assert.deepEqual(await inactive(mine), [], "no lock");
+  const lock = join(f.directory, "owner.repo-factory.lock");
+  await mkdir(lock);
+  await writeFile(join(lock, "owner.json"), JSON.stringify({ copilot_session: "mine" }));
+  assert.deepEqual(await inactive(mine), []);
+  assert.deepEqual(await inactive({ ...mine, FACTORY_COORDINATOR: "1" }), []);
+  assert.match((await inactive({ ...mine, COPILOT_AGENT_SESSION_ID: "other" }))[0].reason, /records session mine, not this session other/);
+  assert.match((await inactive({ ...mine, FACTORY_COORDINATOR: "0" }))[0].reason, /turns the hooks off/);
+  await writeFile(join(lock, "owner.json"), JSON.stringify({ rex_session: "session:x" }));
+  assert.match((await inactive(mine))[0].reason, /records no Copilot session/);
 });
 
 test("flags a running worker whose window is gone, for tasks and rules", async (t) => {

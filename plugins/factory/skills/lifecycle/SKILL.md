@@ -166,9 +166,13 @@ filename-safe key. Do not add dates, run IDs, or session IDs to the name.
 shape only, not as real data.
 
 Allow one factory agent per project. Claim it with an atomic `mkdir` of
-`<project>-factory.lock` in the state directory. Record your Copilot session
-and pane IDs inside it. If the lock exists, verify its owner and send new work
-to that factory. Do not start a second writer. Reclaim a lock only after you
+`<project>-factory.lock` in the state directory. Before your first turn ends,
+write `owner.json` inside it with `copilot_session` (your session ID, from
+`$COPILOT_AGENT_SESSION_ID`), `rex_session`, `pane`, `claimed_at` and
+`purpose`. The coordinator hooks (stop and guard) activate only for the session
+recorded there, so a lock without `copilot_session` leaves them off, and
+`reconcile.mjs` reports `hooks-inactive`. If the lock exists, verify its owner
+and send new work to that factory. Do not start a second writer. Reclaim a lock only after you
 verify the owner stopped. If you are not sure, stop and report the blocker.
 Release only your own lock when the factory stops.
 
@@ -317,6 +321,11 @@ leave work behind. Treat each finding as unfinished work:
 - `no-waiter`: the run is `active`, or a task is open, and no `broker.mjs wait`
   is alive for this factory. Arm one now (see "Receive worker events"), then
   continue the sweep. Armed first at startup, this never fires.
+- `hooks-inactive`: the owner lock exists but the stop and guard hooks would not
+  run for your session (the lock records no `copilot_session`, records another
+  session, or `FACTORY_COORDINATOR=0` is set). Rewrite `owner.json` in the lock
+  with your session ID (`$COPILOT_AGENT_SESSION_ID`) when you own the factory;
+  otherwise report it.
 - `unprocessed-result`: a `complete` result is newer than its task. Mirror and
   verify it now, then advance the task.
 - `branch-ahead`: an open issue-less task's branch (it lands by local merge)
@@ -1057,9 +1066,9 @@ Deny rules win over every allow, including `--yolo`. They match the command
 text only: `sh -c 'git stash'` is not caught. A worker may still run `rex whoami`, `rex ls`, and `rex capture`. Keep
 the same list in `plugins/factory/AGENTS.md`.
 
-Start the coordinator with `FACTORY_COORDINATOR=1` in its environment. The
-plugin's `preToolUse` hook (`hooks/guard.mjs`) is silent without it. With it,
-the hook denies the subagent and workflow tools, edits outside the state
+The plugin's `preToolUse` hook (`hooks/guard.mjs`) runs for the session
+recorded in the owner lock; no launcher variable is needed. `FACTORY_COORDINATOR=1`
+forces it on and `FACTORY_COORDINATOR=0` forces it off. The hook denies the subagent and workflow tools, edits outside the state
 directories, the session directory, and `$TMPDIR`, and these commands: `gh pr
 merge`, `git merge` without `--ff-only`, `rex new` and `rex session
 new|create|rename`, a `copilot` launch with `--autopilot` or without `--model

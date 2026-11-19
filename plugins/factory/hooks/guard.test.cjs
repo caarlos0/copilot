@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const { spawnSync } = require("node:child_process");
-const { mkdirSync, mkdtempSync, rmSync, symlinkSync } = require("node:fs");
+const { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } = require("node:fs");
 const { tmpdir } = require("node:os");
 const { join } = require("node:path");
 const { after, test } = require("node:test");
@@ -18,7 +18,7 @@ mkdirSync(join(home, ".local/state/copilot-coordinator"), { recursive: true });
 mkdirSync(join(home, ".local/state/copilot-factory"), { recursive: true });
 symlinkSync(join(home, ".local"), join(scratch, "link-to-state"));
 
-const env = { PATH: process.env.PATH, HOME: home, TMPDIR: scratch };
+const env = { PATH: process.env.PATH, HOME: home, TMPDIR: scratch, FACTORY_COORDINATOR: "1" };
 
 function run(payload) {
   const input = typeof payload === "string" ? payload : JSON.stringify(payload);
@@ -134,17 +134,45 @@ function hook(envOverride, payload) {
 
 const merge = { toolName: "bash", toolArgs: { command: "gh pr merge 1" }, cwd: home };
 
-test("hooks.json gates the guard on FACTORY_COORDINATOR=1", () => {
+const lockDir = join(scratch, "owner.repo-factory.lock");
+const factoryEnv = { PLUGIN_ROOT: join(__dirname, ".."), FACTORY_FILE: join(scratch, "owner.repo-factory.json") };
+const owned = { ...merge, sessionId: "coordinator-session" };
+
+test("hooks.json runs the guard unless FACTORY_COORDINATOR=0", () => {
   assert.ok(entry.timeoutSec > 0 && entry.timeoutSec <= 30);
-  const root = { PLUGIN_ROOT: join(__dirname, "..") };
-  for (const gate of [{}, { FACTORY_COORDINATOR: "0" }, { FACTORY_COORDINATOR: "" }]) {
-    const out = hook({ ...root, ...gate }, merge);
-    assert.equal(out.status, 0);
-    assert.equal(out.stdout, "");
-  }
-  const out = hook({ ...root, FACTORY_COORDINATOR: "1" }, merge);
+  const off = hook({ ...factoryEnv, FACTORY_COORDINATOR: "0", PATH: "/nonexistent" }, merge);
+  assert.equal(off.status, 0);
+  assert.equal(off.stdout, "");
+  const on = hook({ ...factoryEnv, FACTORY_COORDINATOR: "1" }, merge);
+  assert.equal(on.status, 0, on.stderr);
+  denied(JSON.parse(on.stdout), "gh-pr-merge");
+});
+
+test("without the variable, only the session recorded in the owner lock is guarded", () => {
+  const guarded = (payload, extra = {}) => {
+    const out = hook({ ...factoryEnv, ...extra }, payload);
+    assert.equal(out.status, 0, out.stderr);
+    return out.stdout ? JSON.parse(out.stdout) : null;
+  };
+  assert.equal(guarded(owned), null, "no lock");
+  mkdirSync(lockDir);
+  writeFileSync(join(lockDir, "owner.json"), JSON.stringify({ copilot_session: "coordinator-session" }));
+  denied(guarded(owned), "gh-pr-merge");
+  denied(guarded({ ...merge, session_id: "coordinator-session" }), "gh-pr-merge");
+  assert.equal(guarded({ ...merge, sessionId: "other-session" }), null, "lock of another session");
+  assert.equal(guarded(merge), null, "payload without a session");
+  assert.equal(guarded(owned, { FACTORY_COORDINATOR: "0" }), null, "explicit off");
+  denied(guarded({ ...merge, sessionId: "other-session" }, { FACTORY_COORDINATOR: "1" }), "gh-pr-merge");
+  rmSync(lockDir, { recursive: true });
+});
+
+test("reads the plain-text owner file of an older lock", () => {
+  mkdirSync(lockDir);
+  writeFileSync(join(lockDir, "owner"), "session coordinator-session pane block:1\n");
+  const out = hook(factoryEnv, owned);
   assert.equal(out.status, 0, out.stderr);
   denied(JSON.parse(out.stdout), "gh-pr-merge");
+  rmSync(lockDir, { recursive: true });
 });
 
 test("hooks.json allows when the plugin root is unknown", () => {

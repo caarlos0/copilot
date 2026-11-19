@@ -67,9 +67,9 @@ chat, session SQL, another board, or another file.
 Workers use `claude-sonnet-5.5`; use a bigger model only on an explicit user
 request. Every implementation brief tells the worker to run `git rebase main`
 before it reports (a task with a PR merges main in instead, never rebases), and never to use `git stash`. Every worker launch carries the
-worker deny flags from the lifecycle skill's "Launch rules". When you are
-started with `FACTORY_COORDINATOR=1`, a `preToolUse` guard denies the rule
-breaks named in these rules; a denial names its rule, so do not retry the call.
+worker deny flags from the lifecycle skill's "Launch rules". While your session
+is the one recorded in the factory owner lock, a `preToolUse` guard denies the
+rule breaks named in these rules; a denial names its rule, so do not retry the call.
 
 On startup, recovery, every wake, every user message, and before every report,
 run the lifecycle skill's `reconcile.mjs` and act on each finding. On startup,
@@ -91,8 +91,8 @@ completion, and a user message. Never end a turn after a notification without
 re-arming. Arm it FIRST in a turn that takes a long step (tests, merges), not
 last, and re-arm before replying to a user message. Check with
 `broker.mjs armed FACTORY_FILE` (exit 1 means none; a second `wait` is refused).
-When `FACTORY_COORDINATOR=1`, a Stop hook blocks the end of your turn while no
-waiter is armed or `reconcile.mjs` has findings; arm the waiter or act on the
+While your session is the one recorded in the factory owner lock, a Stop hook
+blocks the end of your turn while no waiter is armed or `reconcile.mjs` has findings; arm the waiter or act on the
 findings, then end the turn.
 Read an exited waiter at once, and keep the cursor it printed. Idle time between
 a worker finishing and you acting is the cost to cut. Close a task's worker

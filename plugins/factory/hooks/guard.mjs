@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 // preToolUse guard for the factory coordinator. Reads the hook payload on
-// stdin and prints a deny decision only when a rule below matches. Anything
+// stdin and prints a deny decision only for a coordinator session (see
+// gate.mjs) and only when a rule below matches. Anything
 // else, including any parse error, prints nothing, which allows the call.
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
+import { isCoordinator } from "../skills/lifecycle/gate.mjs";
 
 const DENIED_TOOLS = ["task", "read_agent", "write_agent", "run_dynamic_workflow"];
 const WRITE_TOOLS = ["edit", "create", "str_replace_editor", "apply_patch"];
@@ -113,7 +115,8 @@ function decide({ toolName, toolArgs, cwd = process.cwd() }) {
 }
 
 try {
-  const hit = decide(JSON.parse(readFileSync(0, "utf8")));
+  const input = JSON.parse(readFileSync(0, "utf8"));
+  const hit = isCoordinator(input) ? decide(input) : null;
   if (hit) {
     console.log(
       JSON.stringify({
