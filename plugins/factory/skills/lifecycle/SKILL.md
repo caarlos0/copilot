@@ -699,6 +699,31 @@ main moved. Never use `git stash`: the stash list is shared by all worktrees.
 To compare against the base, use a scratch worktree or
 `git diff > $TMPDIR/x.patch`."
 
+Every implementation brief also carries this block, word for word (the
+"standing cost lines"). They answer the largest costs in the factory's own
+metrics: polling, failed edits, steering messages, and idle workers.
+
+```text
+Standing cost lines:
+1. Never poll. No sleep loops and no self-wake schedule shorter than 20
+   minutes. Wait with `node PR_WATCH` or the blocking waiter.
+2. View a file before you edit it. Use edit, not create, for a file that
+   exists.
+3. This brief has the default for every decision you may hit. Use it and do
+   not ask. The factory sends all its nudges in one message.
+4. When the PR is handed to review and you have nothing to do, save a
+   `waiting` result, emit it, and stop. The factory closes your pane and starts
+   a fresh worker with a short handoff for any follow-up. Do not stay alive
+   across hours of idle waiting.
+```
+
+Write line 3 for real: put a default in the brief for each decision the worker
+may hit (naming, scope edge, failing unrelated test, flaky check, which base to
+use). Send follow-ups to a worker as one batched message, never a stream. When a
+`waiting` result comes in for a task in `review`, close the worker's pane in
+the step that records the result, and launch a fresh worker with a short
+handoff (task, PR, head, what changed) for any later follow-up.
+
 An investigation brief has one more hard line, in these words: "You are an
 investigation worker. Do not change anything. You are forbidden to write
 anywhere except the result path and `$TMPDIR`: no product file edits, no
@@ -1023,7 +1048,8 @@ NAME=$(node /abs/path/to/worker-name.mjs --role review --ref '#57' --summary 'Ad
 Open the tab in the factory's session with the worker name as its label. Verify
 the visible label. Pass the first message in the launch command with
 `-i`/`--interactive`: `copilot ... --model claude-sonnet-5.5 -i 'Read <absolute brief path> and do it.'`.
-It starts the interactive session and runs the prompt at once. Use no fixed
+The brief it names carries the standing cost lines for an implementation
+worker. It starts the interactive session and runs the prompt at once. Use no fixed
 sleep, no wait for the input prompt, and no `rex send` for the first message.
 Use `rex send` only for follow-ups to an idle worker you created. Run the launch
 command in the foreground of the new tab; a backgrounded launch once lost the

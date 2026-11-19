@@ -38,6 +38,14 @@ by all worktrees. To compare against the base, use a scratch worktree or
 (`--model claude-sonnet-5.5` in the launch command); use a bigger model only
 when the user asks for it. Two opus sessions caused 32% of spend.
 
+Every implementation brief also carries the four standing cost lines from the
+lifecycle skill's "Brief the workers": never poll (no sleep loops, no self-wake
+under 20 minutes; wait with `pr-watch.mjs` or the blocking waiter), view a file
+before editing it and use edit, not create, for an existing file, give a default
+for every decision and batch nudges into one message, and save a `waiting`
+result at hand-off to review so the factory closes the pane and starts a fresh
+worker for follow-ups. `improve.md` maps each line to the metric it addresses.
+
 `factory:general` is a thin agent over
 `plugins/factory/skills/lifecycle/SKILL.md`. It preloads `lifecycle`, which
 disables model/user invocation. It also preloads `autonomy-dial` and

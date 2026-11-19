@@ -1741,6 +1741,22 @@ test("the worker write boundary is present in the skill and plugin rules", () =>
   }
 });
 
+test("the standing cost lines are one block in the skill and are mapped in improve.md", () => {
+  const skill = readFileSync(join(__dirname, "SKILL.md"), "utf8");
+  const block = skill.match(/Standing cost lines:\n([\s\S]*?)\n```/);
+  assert.ok(block, "SKILL.md has the standing cost lines block");
+  const lines = block[1];
+  assert.match(lines, /1\. Never poll\..*no self-wake schedule shorter than 20\s+minutes.*`node PR_WATCH`.*blocking waiter/s);
+  assert.match(lines, /2\. View a file before you edit it\..*edit, not create, for a file that\s+exists/s);
+  assert.match(lines, /3\. This brief has the default for every decision.*nudges in one message/s);
+  assert.match(lines, /4\. When the PR is handed to review.*`waiting` result.*fresh\s+worker.*short handoff/s);
+  const improve = readFileSync(join(__dirname, "improve.md"), "utf8");
+  for (const signal of ["tools.manage_schedule.calls", "tools.create.failures", "tools.edit.failures", "idle.over_10_minutes"]) {
+    assert.ok(improve.includes(signal), signal);
+  }
+  assert.match(readFileSync(join(__dirname, "..", "..", "AGENTS.md"), "utf8"), /four\s+standing\s+cost\s+lines/);
+});
+
 test("the worker deny flags are one identical constant in the skill and plugin rules", () => {
   const constants = [join(__dirname, "SKILL.md"), join(__dirname, "..", "..", "AGENTS.md")].map((file) => {
     const lines = readFileSync(file, "utf8").split("\n").filter((line) => line.startsWith("--deny-tool="));

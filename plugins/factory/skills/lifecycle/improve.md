@@ -61,6 +61,18 @@ If you use `session_store_sql`, follow these rules:
    | Questions to the user | `tools.ask_user.calls`, `user_messages` in worker sessions | Give the worker a default answer, or decide in the brief |
    | Failures | `tools.<name>.failures` | Fix the tool profile or the brief; a tool that fails every call is a config bug |
 
+   Four of these have a standing line in every implementation brief ("Standing
+   cost lines" in the skill). If the signal is still high, the line is missing
+   from a brief or the worker ignores it; say which, and do not propose the
+   line again:
+
+   | Signal | Standing line |
+   | --- | --- |
+   | `commands.sleep`, `commands.status_reads`, `tools.manage_schedule.calls` | Never poll: no sleep loops, no self-wake under 20 minutes; wait with `pr-watch.mjs` or the blocking waiter |
+   | `tools.create.failures`, `tools.edit.failures` | View a file before editing it; edit, not create, for a file that exists |
+   | `user_messages` per worker (steering) | The brief has the default for every decision; the factory batches its nudges into one message |
+   | `idle.over_10_minutes`, high `idle.minutes` in an implementation session after the PR goes to review | Save a `waiting` result; the factory closes the pane and starts a fresh worker for follow-ups |
+
    The event log does not record tool run times. Do not claim a tool was slow.
    "Idle" is the time between turns, so it includes waits for the user and for
    notifications. Metrics are whole-session totals. The factory's own session
