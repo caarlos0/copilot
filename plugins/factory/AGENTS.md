@@ -376,7 +376,9 @@ whose window is open or whose status is still `running` (`rule-worker-done`),
 `running` workers whose window is not in the live Rex session
 (`worker-missing`, plus `rex-session-missing` once when the session is gone;
 the factory relaunches them in their existing worktrees, never creating or
-renaming a session), a missing waiter (`no-waiter`), and an owner lock whose
+renaming a session), `running` workers of resolved tasks (`stale-running`, with the
+`factory.mjs` fix command; the writer sets every worker of a task to `closed` when it
+moves to `resolved`, unless the write sets a status), a missing waiter (`no-waiter`), and an owner lock whose
 session the coordinator hooks would not match (`hooks-inactive`). The
 factory runs it at startup, on every wake and user message, and before every
 report, so a missed waiter wake cannot leave finished work unmerged. The waiter

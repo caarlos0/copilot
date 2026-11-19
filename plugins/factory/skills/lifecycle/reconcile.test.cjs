@@ -266,3 +266,18 @@ test("a merged task with a PR gets the delete command with --merged-pr, even whe
     command: `node ${join(__dirname, "worktree.mjs")} delete work --merged-pr ${pr}`,
   }]);
 });
+
+test("reports a running worker of a resolved task with the fix command", async (t) => {
+  const f = await fixture(t, fakeRex);
+  const { findings, errors } = await f.run([
+    task("done", "resolved", { workers: {
+      implementation: { status: "running", window: "window:gone" },
+      investigation: { status: "closed" },
+    } }),
+  ]);
+  assert.deepEqual(errors, []);
+  assert.deepEqual(findings.map(({ fix, ...rest }) => rest), [
+    { kind: "stale-running", task: "done", role: "implementation", window: "window:gone" },
+  ]);
+  assert.equal(findings[0].fix, `node ${join(__dirname, "factory.mjs")} ${f.file} --task done --workers '{"implementation":{"status":"closed"}}'`);
+});

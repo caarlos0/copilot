@@ -372,6 +372,11 @@ async function writeFactory(file, values, operator, source) {
     const patch = taskPatch(task, values);
     checkInvestigation(patch, task.state);
     task = merge(task, { ...patch, updated_at: at, revision: revision + 1 });
+    if (before.state !== "resolved" && task.state === "resolved") {
+      for (const [role, worker] of Object.entries(task.workers ?? {})) {
+        if (worker && !patch.workers?.[role]?.status) worker.status = "closed";
+      }
+    }
     for (const [role, worker] of Object.entries(patch.workers ?? {})) {
       track(worker?.session, role, { task: task.id });
       if (worker?.status === "running") launches.add(`${task.id}:${role}`);

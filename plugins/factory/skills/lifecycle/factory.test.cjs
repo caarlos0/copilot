@@ -956,3 +956,20 @@ test("a worker summary is optional, validated, and kept through later worker upd
     f.fails(/summary/, "--task", "issue-1", "--workers", JSON.stringify({ investigation: bad }));
   }
 });
+
+test("resolving a task closes its workers unless the write sets a status", async (t) => {
+  const f = await started(t);
+  f.ok("--task", "issue-1", "--workers", JSON.stringify({
+    investigation: { status: "running", pane: "block:p1", window: "window:w1" },
+    implementation: { status: "running", pane: "block:p2" },
+    review: { status: "idle" },
+  }));
+  f.ok("--task", "issue-1", "--state", "resolved", "--resolution", "completed",
+    "--workers", JSON.stringify({ review: { status: "unknown" } }));
+  const { workers } = (await f.read()).tasks[0];
+  assert.equal(workers.investigation.status, "closed");
+  assert.equal(workers.investigation.window, "window:w1");
+  assert.equal(workers.implementation.status, "closed");
+  assert.equal(workers.implementation.pane, "block:p2");
+  assert.equal(workers.review.status, "unknown");
+});

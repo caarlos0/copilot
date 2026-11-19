@@ -346,6 +346,11 @@ leave work behind. Treat each finding as unfinished work:
 - `worker-missing`: a worker (a task role or a rule worker) has status `running`,
   but its window is not in the live Rex session. It carries the role, window,
   pane, worktree, brief, and result. Recover it as in "Recover after a restart".
+- `stale-running`: a resolved task has a worker still recorded as `running`.
+  `factory.mjs` closes every worker of a task when it moves to `resolved`
+  (unless the write sets a status), so this means an old record. Run the
+  `fix` command in the finding. Workers of resolved tasks never count against
+  the budget.
 - `rex-session-missing`: the recorded `rex_session` is not in `rex ls`. Every
   running worker is also reported as `worker-missing`. Report the blocker once;
   never create or rename a session.
@@ -576,7 +581,8 @@ running at the same time, over every role (investigation, implementation,
 review, and rule workers). It is optional. A file without it has no total cap,
 and a new file gets 10. Read it from the factory file on every sweep and after
 every dashboard `budget.updated` event, and never exceed it. Reconcile stale
-`running` records first, then count every worker with status `running`; start a
+`running` records first, then count every worker with status `running` of a task
+that is not `resolved` (and rule workers); start a
 worker only when the count stays within the budget. The per-role `limits` still
 apply on top. Lowering the budget below the running count never stops a worker:
 start no new worker until the count falls under it. Change it with

@@ -224,7 +224,9 @@ test("the dashboard can resolve a task directly from every open state", async (t
       assert.deepEqual(task.resolution, { outcome, note: comment, at: task.updated_at });
       assert.equal(task.history.at(-1).note, comment);
       assert.equal(task.feedback.acknowledged_id, null);
-      assert.deepEqual(task.workers, before.workers);
+      const closed = Object.fromEntries(Object.entries(before.workers).map(
+        ([role, worker]) => [role, worker && { ...worker, status: "closed" }]));
+      assert.deepEqual(task.workers, closed);
       assert.equal(task.pr, before.pr);
       assert.deepEqual(JSON.parse(await readFile(file, "utf8")), data);
     });

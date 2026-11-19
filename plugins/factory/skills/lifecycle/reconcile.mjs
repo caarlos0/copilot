@@ -152,6 +152,20 @@ async function reconcile(file, defaultBranch = "main") {
     }
   }
 
+  // Resolving a task closes its workers; a running record left behind counts against the budget.
+  for (const task of resolved) {
+    for (const [role, worker] of Object.entries(task.workers ?? {})) {
+      if (worker?.status !== "running") continue;
+      findings.push({
+        kind: "stale-running",
+        task: task.id,
+        role,
+        window: worker.window ?? null,
+        fix: `node ${join(import.meta.dirname, "factory.mjs")} ${file} --task ${task.id} --workers '${JSON.stringify({ [role]: { status: "closed" } })}'`,
+      });
+    }
+  }
+
   if (resolved.some((task) => Object.values(task.workers ?? {}).some((w) => w?.window))) {
     for (const task of resolved) {
       for (const [role, worker] of Object.entries(task.workers ?? {})) {
