@@ -1,6 +1,6 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
-import { readFile, readdir, realpath, stat } from "node:fs/promises";
+import { readFile, readdir, realpath, rename, stat, writeFile } from "node:fs/promises";
 import { networkInterfaces } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,6 +25,22 @@ function lanAddresses() {
 
 const digest = (value) => createHash("sha256").update(value).digest();
 const sameToken = (value, expected) => typeof value === "string" && timingSafeEqual(digest(value), digest(expected));
+
+// Reuses the token in the file so a restart keeps the phone's cookie valid. A missing,
+// empty, or corrupt file gets a new token, written whole (mode 0600) and renamed into place.
+async function persistedToken(path) {
+  try {
+    const saved = (await readFile(path, "utf8")).trim();
+    if (tokenPattern.test(saved)) return saved;
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+  const token = randomBytes(24).toString("base64url");
+  const temporary = `${path}.${process.pid}.tmp`;
+  await writeFile(temporary, `${token}\n`, { mode: 0o600 });
+  await rename(temporary, path);
+  return token;
+}
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -71,7 +87,9 @@ Usage: node serve.mjs [--directory PATH] [--port PORT] [--host ADDR] [--token TO
                     0.0.0.0, makes every request require an access token. The page is plain
                     HTTP, so the token travels in clear text: use a trusted network only
   --token TOKEN     Access token for a non-loopback --host (at least 16 characters from
-                    A-Z a-z 0-9 . _ ~ -). Default: a random one. Ignored on loopback
+                    A-Z a-z 0-9 . _ ~ -). Default: a random one, saved (mode 0600) as
+                    dashboard-token in the state directory and reused on later starts.
+                    A --token value is not saved. Ignored on loopback
   -h, --help        Show help
 
 Open the printed HTTP URL. It lists every <owner.repo>-factory.json in the directories.
@@ -297,7 +315,7 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
   }
 
   const requireToken = !isLoopback(options.host);
-  const token = requireToken ? options.token ?? randomBytes(24).toString("base64url") : options.token;
+  const token = requireToken ? options.token ?? await persistedToken(join(directories[0].directory, "dashboard-token")) : undefined;
 
   // The allowed Host values are the server's own bound/advertised addresses, never an
   // arbitrary client-supplied value, to defend against DNS rebinding.

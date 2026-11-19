@@ -1,5 +1,5 @@
 const assert = require("node:assert/strict");
-const { readFileSync } = require("node:fs");
+const { existsSync, readFileSync, statSync } = require("node:fs");
 const { mkdtemp, rm, writeFile } = require("node:fs/promises");
 const { spawn } = require("node:child_process");
 const { join } = require("node:path");
@@ -12,8 +12,8 @@ const unblocked = { task: "issue-5", state: "initial", comment: "This is now unb
 
 // Spawns serve.mjs with the given extra args and resolves once it has printed its first
 // ready URL. The stderr accumulated so far is returned too, for the plain-HTTP warning.
-async function server(t, args = []) {
-  const directory = await mkdtemp(join(tmpdir(), "factory-dashboard-lan-test-"));
+async function server(t, args = [], existing) {
+  const directory = existing ?? await mkdtemp(join(tmpdir(), "factory-dashboard-lan-test-"));
   await writeFile(join(directory, factoryFile), JSON.stringify(example));
   const child = spawn(process.execPath,
     [join(__dirname, "serve.mjs"), "--directory", directory, "--port", "0", ...args], { stdio: ["ignore", "pipe", "pipe"] });
@@ -161,4 +161,34 @@ test("POST /login is not a route on the loopback default", async (t) => {
     body: "token=x",
   });
   assert.equal(response.status, 405);
+});
+
+test("a non-loopback --host saves its token and reuses it after a restart", async (t) => {
+  const first = await server(t, ["--host", "0.0.0.0"]);
+  const file = join(first.directory, "dashboard-token");
+  assert.equal(readFileSync(file, "utf8").trim(), first.token);
+  assert.equal(statSync(file).mode & 0o777, 0o600);
+
+  const second = await server(t, ["--host", "0.0.0.0"], first.directory);
+  assert.equal(second.token, first.token);
+  const bare = new URL(second.url);
+  bare.search = "";
+  const bearer = await fetch(bare, { headers: { Authorization: `Bearer ${first.token}` } });
+  assert.equal(bearer.status, 200, "the old token still works");
+
+  await writeFile(file, "");
+  const regenerated = await server(t, ["--host", "0.0.0.0"], first.directory);
+  assert.match(regenerated.token, /^[\w-]{16,}$/);
+  assert.notEqual(regenerated.token, first.token, "an empty file gets a new token");
+  assert.equal(readFileSync(file, "utf8").trim(), regenerated.token);
+});
+
+test("--token overrides the saved token and is not saved; loopback creates no file", async (t) => {
+  const given = "given-token-0123456789";
+  const { directory, token } = await server(t, ["--host", "0.0.0.0", "--token", given]);
+  assert.equal(token, given);
+  assert.equal(existsSync(join(directory, "dashboard-token")), false);
+
+  const loopback = await server(t);
+  assert.equal(existsSync(join(loopback.directory, "dashboard-token")), false);
 });

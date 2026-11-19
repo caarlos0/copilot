@@ -1436,8 +1436,10 @@ browser for the user.
 
 `--host ADDR` (for example `0.0.0.0`, to reach the dashboard from another
 device such as a phone) binds that address instead. Any non-loopback `--host`
-requires an access token on every request: a random one, unless `--token
-TOKEN` gives one. The startup output lists a ready URL with the token
+requires an access token on every request. The token is random, saved (mode
+0600) as `dashboard-token` in the state directory on the first start, and reused
+on later starts, so a restart keeps the phone's cookie valid; delete the file to
+rotate it. `--token TOKEN` overrides it and is not saved. The startup output lists a ready URL with the token
 (`http://<LAN-IP>:PORT/?token=...`) for each non-internal IPv4 address, and
 warns that plain HTTP carries the token in clear text, so only use this on a
 trusted network. A browser that opens the printed URL gets a cookie (30 days)

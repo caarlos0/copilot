@@ -184,7 +184,9 @@ caches each parsed file and sends an `ETag` (mtime, size, inode) on
 `/api/factory` and `/api/factories`, answering `If-None-Match` with 304, and the
 dashboard skips load and redraw on a 304; it binds `127.0.0.1` with no token
 by default, and a non-loopback `--host` (for reaching the dashboard from
-another device) requires a token (random, or `--token`) on every request,
+another device) requires a token on every request (`--token`, else the one saved with mode 0600
+as `dashboard-token` in the first state directory, created on the first start
+and reused after a restart; an empty or corrupt file is replaced),
 checked in constant time, with a cookie (`HttpOnly; SameSite=Strict`, 30 days) set
 after the first `?token=` load or after a `POST /login` from the login form, and
 an `Authorization: Bearer` header also accepted. A browser page request without a
