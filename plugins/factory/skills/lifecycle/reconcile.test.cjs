@@ -307,9 +307,12 @@ test("reports a running worker of a resolved task with the fix command", async (
 
 test("reports an attention item open longer than --attention-after, and records the ones the session log closed", async (t) => {
   const rex = `#!/bin/sh
+[ "$1" = "--autostart=false" ] && shift
 case "$1" in
   ls) echo '{"sessions":[{"session_id":"session:work"}]}' ;;
-  block) echo '{"blocks":[{"block_id":"block:live"}]}' ;;
+  block)
+    case "$*" in *--json*) echo "Error: rex block ls --json requires one session. Pass -s SESSION" >&2; exit 1 ;; esac
+    echo block:live ;;
   *) echo '{"windows":[]}' ;;
 esac
 `;

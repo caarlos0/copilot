@@ -1,9 +1,9 @@
 const assert = require("node:assert/strict");
 const { readFileSync } = require("node:fs");
-const { appendFile, mkdtemp, readFile, readdir, rm, symlink, writeFile } = require("node:fs/promises");
+const { appendFile, chmod, mkdtemp, readFile, readdir, rm, symlink, writeFile } = require("node:fs/promises");
 const { spawn, spawnSync } = require("node:child_process");
 const http = require("node:http");
-const { join } = require("node:path");
+const { delimiter, join } = require("node:path");
 const { tmpdir } = require("node:os");
 const { test } = require("node:test");
 const vm = require("node:vm");
@@ -12,7 +12,7 @@ const html = readFileSync(join(__dirname, "dashboard.html"), "utf8");
 const example = JSON.parse(readFileSync(join(__dirname, "factory.example.json"), "utf8"));
 const factoryFile = "owner.repo-factory.json";
 
-async function server(t) {
+async function server(t, env = {}) {
   const directory = await mkdtemp(join(tmpdir(), "factory-dashboard-test-"));
   const outside = await mkdtemp(join(tmpdir(), "factory-dashboard-outside-"));
   await writeFile(join(directory, factoryFile), JSON.stringify(example));
@@ -22,6 +22,7 @@ async function server(t) {
   await symlink(join(outside, "secret.md"), join(directory, "owner.repo-issue-9-investigation-brief.md"));
   const child = spawn(process.execPath, [join(__dirname, "serve.mjs"), "--directory", directory, "--port", "0"], {
     stdio: ["ignore", "pipe", "pipe"],
+    env: { ...process.env, ...env },
   });
   const closed = new Promise((resolve) => child.once("close", resolve));
   t.after(async () => {
@@ -2290,6 +2291,36 @@ test("the factory payload lists pending attention oldest first, and its tag foll
   assert.equal(resolved.status, 200);
   assert.notEqual(resolved.headers.get("etag"), tag);
   assert.deepEqual((await resolved.json()).attention.map((item) => item.session), ["s-new"]);
+});
+
+test("the factory payload drops an item whose pane is gone, and records its resolution", async (t) => {
+  const bin = await mkdtemp(join(tmpdir(), "factory-dashboard-rex-"));
+  t.after(() => rm(bin, { recursive: true, force: true }));
+  // Like the real rex: `block ls -A --json` is an error; `-q --short=false` lists full IDs.
+  await writeFile(join(bin, "rex"), `#!/bin/sh
+[ "$1" = "--autostart=false" ] && shift
+case "$*" in
+  "block ls -A -q --short=false") echo block:01a1f4e8-4bb0-72d2-bff2-25420482aad9 ;;
+  *) echo "Error: rex block ls --json requires one session. Pass -s SESSION" >&2; exit 1 ;;
+esac
+`);
+  await chmod(join(bin, "rex"), 0o755);
+  const { url, directory } = await server(t, { PATH: `${bin}${delimiter}${process.env.PATH}` });
+  const events = join(directory, "owner.repo-factory-events.jsonl");
+  const at = new Date(Date.now() - 20 * 60_000).toISOString();
+  const request = (id, session, pane) => ({ id, at, type: "attention.requested", task: null, source: "attention",
+    data: { session, kind: "sandbox-bypass", text: "Run command: ls", role: "backlog", pane } });
+  await appendFile(events, [
+    request("e1", "s-gone", "block:01a1f4d3-c03e-7f0b-bc24-060b0352db5f"),
+    request("e2", "s-live", "block:01a1f4e8-4bb0-72d2-bff2-25420482aad9"),
+  ].map((event) => `${JSON.stringify(event)}\n`).join(""));
+
+  const path = `/api/factory?file=${factoryFile}`;
+  assert.deepEqual((await (await get(url, path)).json()).attention.map((item) => item.session), ["s-live"]);
+  await get(url, path);
+  const resolved = (await readFile(events, "utf8")).trim().split("\n").map((line) => JSON.parse(line))
+    .filter(({ type }) => type === "attention.resolved");
+  assert.deepEqual(resolved.map(({ source, data }) => [source, data.session, data.reason]), [["attention", "s-gone", "pane-gone"]]);
 });
 
 test("the badge, the page title and the waiting list show pending attention as data", async (t) => {

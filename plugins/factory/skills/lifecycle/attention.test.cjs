@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
-const { appendFile, mkdir, mkdtemp, open, rm, writeFile } = require("node:fs/promises");
+const { appendFile, chmod, mkdir, mkdtemp, open, readFile, rm, writeFile } = require("node:fs/promises");
 const { tmpdir } = require("node:os");
-const { join } = require("node:path");
+const { delimiter, join } = require("node:path");
 const { test } = require("node:test");
 
 const fixtures = require("../../hooks/fixtures/session-log-events.json");
@@ -20,7 +20,7 @@ async function setup(t) {
   t.after(() => delete process.env.FACTORY_SESSION_STATE);
   const file = join(directory, "owner.repo-factory.json");
   await writeFile(file, JSON.stringify({ tasks: [{ id: "fix-it", title: "Fix the thing" }] }));
-  const { scanAttention, openAttention } = await import("./attention.mjs");
+  const { scanAttention, openAttention, resolveAttention } = await import("./attention.mjs");
 
   let n = 0;
   const log = (type, data, at = requestedAt, task = null) =>
@@ -31,7 +31,19 @@ async function setup(t) {
     await mkdir(join(state, session), { recursive: true });
     await appendFile(join(state, session, "events.jsonl"), events.map((event) => `${JSON.stringify(event)}\n`).join(""));
   };
-  return { directory, file, log, request, sessionLog, scanAttention, openAttention };
+  // A fake `rex` first on PATH. The real one fails on `block ls -A --json`.
+  const originalPath = process.env.PATH;
+  t.after(() => { process.env.PATH = originalPath; });
+  const fakeRex = async (script) => {
+    const bin = join(directory, "bin");
+    await mkdir(bin, { recursive: true });
+    await writeFile(join(bin, "rex"), `#!/bin/sh\n[ "$1" = "--autostart=false" ] && shift\n${script}\n`);
+    await chmod(join(bin, "rex"), 0o755);
+    process.env.PATH = `${bin}${delimiter}${originalPath}`;
+  };
+  const events = async () => (await readFile(join(directory, "owner.repo-factory-events.jsonl"), "utf8"))
+    .trim().split("\n").map((line) => JSON.parse(line));
+  return { directory, file, log, request, sessionLog, fakeRex, events, scanAttention, openAttention, resolveAttention };
 }
 
 test("lists a request with no resolved event after it, with the task title", async (t) => {
@@ -134,4 +146,61 @@ test("reads only the tail of a huge session log, and fast", async (t) => {
   const open2 = await f.openAttention(f.file, { now, panes: null });
   assert.deepEqual(open2, []);
   assert.ok(performance.now() - started < 1000, `took ${performance.now() - started} ms`);
+});
+
+test("an answer is found even when the session wrote more than one tail after it", async (t) => {
+  const f = await setup(t);
+  await f.request("busy");
+  await f.request("still-waiting");
+  const filler = (at) => ({ type: "assistant.message", data: { content: "x".repeat(1000) }, timestamp: at });
+  const later = Array.from({ length: 700 }, (_, i) => filler(new Date(Date.parse(after) + 1000 + i).toISOString()));
+  const before = Array.from({ length: 700 }, (_, i) => filler(new Date(Date.parse(requestedAt) - 3_600_000 + i).toISOString()));
+  await f.sessionLog("busy", ...before, { ...fixtures.permissionRequested, timestamp: requestedAt },
+    { ...fixtures.permissionCompleted, timestamp: after }, ...later);
+  await f.sessionLog("still-waiting", ...before, { ...fixtures.permissionRequested, timestamp: requestedAt }, ...later);
+
+  const { open, resolved } = await f.scanAttention(f.file, { now, panes: null });
+  assert.deepEqual(open.map((item) => item.session), ["still-waiting"]);
+  assert.deepEqual(resolved.map(({ item, reason }) => [item.session, reason]), [["busy", "answered"]]);
+});
+
+test("asks Rex for the live panes, and a pane Rex no longer lists is resolved", async (t) => {
+  const f = await setup(t);
+  await f.request("gone", { pane: "block:01a1f4d3-c03e-7f0b-bc24-060b0352db5f" });
+  await f.request("live", { pane: "block:01a1f4e8-4bb0-72d2-bff2-25420482aad9" });
+  await f.fakeRex(`case "$*" in
+  "block ls -A -q --short=false") printf 'block:01a1f4e8-4bb0-72d2-bff2-25420482aad9\\nblock:01a1f4e9-0000-7000-8000-000000000000\\n' ;;
+  *) echo "Error: unexpected arguments: $*" >&2; exit 1 ;;
+esac`);
+
+  const { open, resolved } = await f.scanAttention(f.file, { now });
+  assert.deepEqual(open.map((item) => item.session), ["live"]);
+  assert.deepEqual(resolved.map(({ item, reason }) => [item.session, reason]), [["gone", "pane-gone"]]);
+});
+
+test("the pane check is skipped when Rex fails or lists nothing", async (t) => {
+  const f = await setup(t);
+  await f.request("pane", { pane: "block:01a1f4d3-c03e-7f0b-bc24-060b0352db5f" });
+  await f.fakeRex("echo 'Error: no server' >&2; exit 1");
+  assert.equal((await f.openAttention(f.file, { now })).length, 1);
+  await f.fakeRex("exit 0");
+  assert.equal((await f.openAttention(f.file, { now })).length, 1);
+});
+
+test("resolveAttention records one resolved event per closed session, once", async (t) => {
+  const f = await setup(t);
+  await f.request("gone", { pane: "block:01a1-gone" });
+  await f.request("gone", { pane: "block:01a1-gone" });
+  await f.request("old", {}, "2026-04-29T12:00:00.000Z");
+  await f.request("open", { pane: "block:01a1-live" });
+
+  const scan = await f.resolveAttention(f.file, { source: "attention", now, panes: ["block:01a1-live"] });
+  assert.deepEqual(scan.open.map((item) => item.session), ["open"]);
+  const resolved = (await f.events()).filter(({ type }) => type === "attention.resolved");
+  assert.deepEqual(resolved.map(({ source, data }) => [source, data.session, data.reason]), [
+    ["attention", "gone", "pane-gone"],
+    ["attention", "old", "expired"],
+  ]);
+  await f.resolveAttention(f.file, { source: "attention", now, panes: ["block:01a1-live"] });
+  assert.equal((await f.events()).filter(({ type }) => type === "attention.resolved").length, 2);
 });

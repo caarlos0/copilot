@@ -6,7 +6,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { countByState, isObject, validate } from "./factory-data.mjs";
-import { openAttention } from "./attention.mjs";
+import { resolveAttention } from "./attention.mjs";
 import { ConflictError, update } from "./factory.mjs";
 import { stateDirectories } from "./state-dir.mjs";
 
@@ -156,10 +156,23 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
     return data;
   }
 
+  // One scan per file at a time, so two polls never record the same resolution twice.
+  const scans = new Map();
+  function pendingAttention(target) {
+    if (!scans.has(target)) {
+      scans.set(target, resolveAttention(target, { source: "attention" })
+        .then(({ open }) => open)
+        .finally(() => scans.delete(target)));
+    }
+    return scans.get(target);
+  }
+
   // Pending attention items, oldest first. They live in the events log and the session logs, so the
   // tag covers them too: a change there refreshes the browser even when the factory file is the same.
+  // The scan also records the items it finds closed (answered, pane gone, expired), so they
+  // clear without waiting for a reconcile run.
   async function factoryView(entry) {
-    const attention = (await openAttention(entry.target))
+    const attention = (await pendingAttention(entry.target))
       .map(({ session, kind, text, options, role, pane, task, at }) => ({ session, kind, text, options, role, pane, task, at }))
       .sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
     const digest = createHash("sha1").update(JSON.stringify(attention)).digest("base64url");

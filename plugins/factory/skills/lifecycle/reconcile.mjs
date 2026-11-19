@@ -4,8 +4,8 @@ import { readFile, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { sameId, scanAttention } from "./attention.mjs";
-import { emit, resolveFactory, waiterPid } from "./broker.mjs";
+import { resolveAttention, sameId } from "./attention.mjs";
+import { resolveFactory, waiterPid } from "./broker.mjs";
 import { intervalMs } from "./factory-data.mjs";
 import { hooksInactive } from "./gate.mjs";
 
@@ -204,19 +204,7 @@ async function reconcile(file, defaultBranch = "main", blockedAfter = intervalMs
 
   // A prompt waits for the user, so only the user can clear it. Report it; never answer it.
   try {
-    const { open: waiting, resolved: closed } = await scanAttention(file);
-    // One resolved event closes every request of its session, so it waits for a session's newest request.
-    const waitingSessions = new Set(waiting.map((item) => item.session));
-    const recorded = new Set();
-    for (const { item, reason } of closed) {
-      if (waitingSessions.has(item.session) || recorded.has(item.session)) continue;
-      recorded.add(item.session);
-      await emit(await resolveFactory(file), {
-        type: "attention.resolved",
-        source: "reconcile",
-        data: { session: item.session, reason },
-      });
-    }
+    const { open: waiting } = await resolveAttention(file, { source: "reconcile" });
     for (const item of waiting) {
       if (Date.now() - Date.parse(item.at) <= attentionAfter) continue;
       findings.push({
