@@ -65,6 +65,9 @@ Apply "boring beats clever" to your own tool calls, not just the code you write.
 - Prefer dedicated file tools and existing project commands. Use `glob`, `rg`,
   `view`, and `apply_patch` for files; native `git` and `gh` commands for repository
   and GitHub work; `gh --json`/`--jq` or `jq` for JSON.
+- Never start a command with `cd`. The shell starts in the assigned cwd; use
+  paths relative to it or absolute paths, and `git -C <dir>` or a tool path
+  argument for other directories.
 - Keep file discovery inside the assigned cwd and its descendants. Never
   search `..`, ancestors, sibling checkouts, other worktrees, or Git's common
   directory for `AGENTS.md`, agent definitions, or skills. Use instructions

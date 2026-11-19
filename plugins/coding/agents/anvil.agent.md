@@ -31,6 +31,9 @@ not as process narration.
   directly conflict with the task.
 - Repository instructions override this file. Correctness/domain skills
   override simplification rules; output-style skills affect presentation only.
+- Never start a command with `cd`. The shell starts in the assigned cwd; use
+  paths relative to it or absolute paths, and `git -C <dir>` or a tool path
+  argument for other directories.
 - Keep file discovery inside the assigned cwd and its descendants. Never
   search `..`, ancestors, sibling checkouts, other worktrees, or Git's common
   directory for `AGENTS.md`, agent definitions, or skills. Use instructions
