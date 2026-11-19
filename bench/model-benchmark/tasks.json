@@ -1,0 +1,116 @@
+{
+  "version": 1,
+  "tools_ref": "c20fb8d334f326a8b7675e6af532ec273f0c3ff9",
+  "tools_path": "plugins/factory/skills/lifecycle",
+  "defaults": {
+    "agent": "coding:caarlos0",
+    "reasoning_effort": "medium",
+    "baseline": "claude-sonnet-5.5",
+    "kill_grace_seconds": 10
+  },
+  "caps": {
+    "implementation": { "max_ai_credits": 250, "wall_minutes": 25 },
+    "investigation": { "max_ai_credits": 200, "wall_minutes": 15 }
+  },
+  "tasks": [
+    {
+      "id": "INV-1",
+      "role": "investigation",
+      "slug": "rule-worker-done-claim-true",
+      "export_at": "bb10a482873503202689bbbf991129f929d53d05",
+      "title": "Verify a rule-worker-done claim",
+      "brief": "Claim: plugins/factory/skills/lifecycle/reconcile.mjs ~line 140: when a rule has last_run_at, `rule-worker-done` fires if result.updated_at > last_run_at without checking result.outcome === 'complete' (the no-last_run_at branch checks it). A live backlog/improve worker writing a `working` result gets flagged and the coordinator would close it mid-run. Repro: rule {id:scan,kind:backlog,last_run_at:2026-01-01T00:00:00Z,worker:{status:running,result:scan-result.json}} + result {\"updated_at\":\"2026-01-01T00:05:00Z\",\"outcome\":\"working\"}; run `node reconcile.mjs FILE` on a scratch copy in $TMPDIR. Verify and propose the fix and test (reconcile.test.cjs rule-worker test, stamp() takes an outcome).",
+      "expected_verdict": "implement",
+      "facts": [
+        { "id": "location", "all": ["reconcile\\.mjs", "last_run_at", "\\b140\\b|const finished"] },
+        { "id": "fix", "all": ["outcome[^\\n]{0,24}complete"] },
+        { "id": "test", "all": ["reconcile\\.test\\.cjs"] }
+      ],
+      "forbidden": { "verdicts": ["already-fixed", "invalid", "duplicate"], "patterns": [] }
+    },
+    {
+      "id": "INV-2",
+      "role": "investigation",
+      "slug": "rule-worker-done-claim-already-fixed",
+      "export_at": "5ef075d61ddf5f7d66390246520ce5c79786df5f",
+      "title": "Verify a rule-worker-done claim",
+      "trap": true,
+      "brief": "Claim: plugins/factory/skills/lifecycle/reconcile.mjs ~line 140: when a rule has last_run_at, `rule-worker-done` fires if result.updated_at > last_run_at without checking result.outcome === 'complete' (the no-last_run_at branch checks it). A live backlog/improve worker writing a `working` result gets flagged and the coordinator would close it mid-run. Repro: rule {id:scan,kind:backlog,last_run_at:2026-01-01T00:00:00Z,worker:{status:running,result:scan-result.json}} + result {\"updated_at\":\"2026-01-01T00:05:00Z\",\"outcome\":\"working\"}; run `node reconcile.mjs FILE` on a scratch copy in $TMPDIR. Verify and propose the fix and test (reconcile.test.cjs rule-worker test, stamp() takes an outcome).",
+      "expected_verdict": "already-fixed",
+      "facts": [
+        { "id": "fixed-line", "all": ["reconcile\\.mjs", "last_run_at", "outcome[^\\n]{0,24}complete", "\\b140\\b|finished"] }
+      ],
+      "forbidden": { "verdicts": ["implement", "duplicate"], "patterns": [] }
+    },
+    {
+      "id": "INV-3",
+      "role": "investigation",
+      "slug": "move-no-toast",
+      "export_at": "bb10a482873503202689bbbf991129f929d53d05",
+      "title": "Scope a dashboard change",
+      "brief": "Task (user words): \"dont need this 'moved task' text in there. when I unblock/move a task, it should fade from the list (make it something like 300ms) and nothing else is needed\". The text is the status message at the top of the docked task list, e.g. `Moved \"TITLE\" to Implementation. Comment saved; awaiting factory acknowledgement.`\nJob: in plugins/factory/skills/lifecycle/dashboard.html find that message, the existing row fade-out (departing rows, reduced-motion handling) and its duration, and every place/test that references the message. Propose the smallest change: remove the success message (keep error/conflict messages), make the departing row fade last 300ms, keep reduced-motion behavior. List tests to update.",
+      "expected_verdict": "implement",
+      "facts": [
+        { "id": "status-element", "all": ["detail-status"] },
+        { "id": "message", "all": ["Comment saved|awaiting factory acknowledgement"] },
+        { "id": "fade", "all": ["\\b220\\b", "\\b300\\b"] },
+        { "id": "tests", "all": ["dashboard\\.test\\.cjs", "\\b1062\\b", "\\b1236\\b"] },
+        { "id": "docs", "all": ["SKILL\\.md", "fade"] }
+      ],
+      "forbidden": { "verdicts": ["already-fixed", "invalid", "duplicate"], "patterns": [] }
+    },
+    {
+      "id": "IMPL-1",
+      "role": "implementation",
+      "slug": "expected-revision-new-task",
+      "difficulty": "easy",
+      "base": "e427c5528fc79c4586cd481c3039d86750afe51b",
+      "tip": "84a8a220bde78635b5cbf1804b17f55cf815712d",
+      "title": "Reject --expected-revision on a new task",
+      "brief": "`node plugins/factory/skills/lifecycle/factory.mjs FILE --task NEW --expected-revision N` on a task that does not exist returns a ConflictError that says to reload and retry. That can never succeed. Make it a usage error with the message `--expected-revision applies only to existing tasks.` (an ordinary Error, not a ConflictError). The factory file must stay unchanged. Add a regression test to plugins/factory/skills/lifecycle/factory.test.cjs.",
+      "hidden": { "files": ["plugins/factory/skills/lifecycle/factory.test.cjs"], "name_pattern": null, "min_tests": 31 },
+      "regression": { "dir": "plugins/factory/skills/lifecycle", "exclude": ["serve-lan.test.cjs"] },
+      "rubric": [
+        { "id": "test-added", "file": "plugins/factory/skills/lifecycle/factory.test.cjs", "changed": true }
+      ]
+    },
+    {
+      "id": "IMPL-2",
+      "role": "implementation",
+      "slug": "reconcile-branch-ahead",
+      "difficulty": "medium",
+      "base": "e427c5528fc79c4586cd481c3039d86750afe51b",
+      "tip": "7cf5213bfd769ad2af338fa25004e4c738b44ae5",
+      "title": "Flag branch-ahead only for local-merge tasks",
+      "brief": "plugins/factory/skills/lifecycle/reconcile.mjs reports `branch-ahead` for tasks that have an issue or a PR. Those tasks land on GitHub, so the finding is noise for them. Report `branch-ahead` only for tasks that land by local merge (no issue and no PR). Keep the finding shape unchanged. Update the text in plugins/factory/AGENTS.md and plugins/factory/skills/lifecycle/SKILL.md that describes it. Add a test to plugins/factory/skills/lifecycle/reconcile.test.cjs.",
+      "hidden": { "files": ["plugins/factory/skills/lifecycle/reconcile.test.cjs"], "name_pattern": null, "min_tests": 4 },
+      "regression": { "dir": "plugins/factory/skills/lifecycle", "exclude": ["serve-lan.test.cjs"] },
+      "rubric": [
+        { "id": "agents-md", "file": "plugins/factory/AGENTS.md", "changed": true },
+        { "id": "skill-md", "file": "plugins/factory/skills/lifecycle/SKILL.md", "changed": true },
+        { "id": "test-added", "file": "plugins/factory/skills/lifecycle/reconcile.test.cjs", "changed": true }
+      ]
+    },
+    {
+      "id": "IMPL-3",
+      "role": "implementation",
+      "slug": "pr-merged-event",
+      "difficulty": "hard",
+      "base": "2905e86978c328c133e877258289d86f7ab29df7",
+      "tip": "b8d745fc89d912b3ace306a53f5574ae787a6c75",
+      "title": "Add the pr.merged broker event",
+      "brief": "Add a broker event `pr.merged` to plugins/factory/skills/lifecycle/broker.mjs. Spec:\n- It needs `--task` (`task: true`).\n- Its data keys are `pr` and `merge_commit`; both are required. A missing `merge_commit` makes `emit` exit 2 with a message that contains `needs \"merge_commit\"`.\n- `--source` defaults to `worker`, as for every other event.\n- `wait` returns it like any other event.\n- The `emit` help text lists the event and says it is a hint from the implementation worker (role, pr, merge_commit, head) that the factory verifies on GitHub.\nDocument the event in plugins/factory/skills/lifecycle/SKILL.md and plugins/factory/AGENTS.md. Add tests to plugins/factory/skills/lifecycle/broker.test.cjs.",
+      "hidden": {
+        "files": ["plugins/factory/skills/lifecycle/broker.test.cjs"],
+        "name_pattern": "^(pr\\.merged needs|wait returns pr\\.merged)",
+        "min_tests": 2
+      },
+      "regression": { "dir": "plugins/factory/skills/lifecycle", "exclude": ["serve-lan.test.cjs"] },
+      "rubric": [
+        { "id": "agents-md", "file": "plugins/factory/AGENTS.md", "changed": true, "pattern": "pr\\.merged" },
+        { "id": "skill-md", "file": "plugins/factory/skills/lifecycle/SKILL.md", "changed": true, "pattern": "pr\\.merged" },
+        { "id": "test-added", "file": "plugins/factory/skills/lifecycle/broker.test.cjs", "changed": true }
+      ]
+    }
+  ]
+}
