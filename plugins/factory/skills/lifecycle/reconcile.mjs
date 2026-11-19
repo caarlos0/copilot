@@ -4,11 +4,12 @@ import { readFile, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { resolveFactory, waiterPid } from "./broker.mjs";
+import { sameId, scanAttention } from "./attention.mjs";
+import { emit, resolveFactory, waiterPid } from "./broker.mjs";
 import { intervalMs } from "./factory-data.mjs";
 import { hooksInactive } from "./gate.mjs";
 
-const usage = "Usage: node reconcile.mjs FACTORY_FILE [--default-branch NAME] [--blocked-after 24h]";
+const usage = "Usage: node reconcile.mjs FACTORY_FILE [--default-branch NAME] [--blocked-after 24h] [--attention-after 30m]";
 
 async function readJSON(file) {
   try {
@@ -48,11 +49,7 @@ function liveState(session) {
   return { sessionGone: false, windows: rexJSON("window", "ls", "-s", session).windows.map((w) => w.window_id) };
 }
 
-// Rex may record short IDs; a short ID is the tail of the full one.
-const bare = (id) => id.replace(/^\w+:/, "");
-const sameId = (a, b) => bare(a).endsWith(bare(b)) || bare(b).endsWith(bare(a));
-
-async function reconcile(file, defaultBranch = "main", blockedAfter = intervalMs("24h")) {
+async function reconcile(file, defaultBranch = "main", blockedAfter = intervalMs("24h"), attentionAfter = intervalMs("30m")) {
   const factory = JSON.parse(await readFile(file, "utf8"));
   const directory = dirname(file);
   const findings = [];
@@ -205,6 +202,38 @@ async function reconcile(file, defaultBranch = "main", blockedAfter = intervalMs
     }
   }
 
+  // A prompt waits for the user, so only the user can clear it. Report it; never answer it.
+  try {
+    const { open: waiting, resolved: closed } = await scanAttention(file);
+    // One resolved event closes every request of its session, so it waits for a session's newest request.
+    const waitingSessions = new Set(waiting.map((item) => item.session));
+    const recorded = new Set();
+    for (const { item, reason } of closed) {
+      if (waitingSessions.has(item.session) || recorded.has(item.session)) continue;
+      recorded.add(item.session);
+      await emit(await resolveFactory(file), {
+        type: "attention.resolved",
+        source: "reconcile",
+        data: { session: item.session, reason },
+      });
+    }
+    for (const item of waiting) {
+      if (Date.now() - Date.parse(item.at) <= attentionAfter) continue;
+      findings.push({
+        kind: "attention-stale",
+        task: item.task,
+        title: item.title,
+        role: item.role,
+        attention: item.kind,
+        text: item.text,
+        pane: item.pane,
+        since: item.at,
+      });
+    }
+  } catch (error) {
+    errors.push(`attention: ${error.message.split("\n")[0]}`);
+  }
+
   if (missing.length > 0 && rex()?.sessionGone) {
     findings.push({ kind: "rex-session-missing", session: factory.rex_session, workers: missing.length });
   }
@@ -219,16 +248,18 @@ try {
     options: {
       "default-branch": { type: "string", default: "main" },
       "blocked-after": { type: "string", default: "24h" },
+      "attention-after": { type: "string", default: "30m" },
     },
   });
   if (positionals.length !== 1) throw new Error(usage);
-  let blockedAfter;
-  try {
-    blockedAfter = intervalMs(values["blocked-after"]);
-  } catch {
-    throw new Error(`--blocked-after must look like 30m, 24h, or 2d, not ${JSON.stringify(values["blocked-after"])}.`);
-  }
-  console.log(JSON.stringify(await reconcile(positionals[0], values["default-branch"], blockedAfter), null, 2));
+  const duration = (flag) => {
+    try {
+      return intervalMs(values[flag]);
+    } catch {
+      throw new Error(`--${flag} must look like 30m, 24h, or 2d, not ${JSON.stringify(values[flag])}.`);
+    }
+  };
+  console.log(JSON.stringify(await reconcile(positionals[0], values["default-branch"], duration("blocked-after"), duration("attention-after")), null, 2));
 } catch (error) {
   console.error(error.message);
   process.exitCode = 1;

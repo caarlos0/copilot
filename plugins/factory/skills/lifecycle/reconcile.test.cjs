@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const { spawnSync } = require("node:child_process");
-const { chmod, mkdir, mkdtemp, rm, writeFile } = require("node:fs/promises");
+const { chmod, mkdir, mkdtemp, readFile, rm, writeFile } = require("node:fs/promises");
 const { tmpdir } = require("node:os");
 const { delimiter, join } = require("node:path");
 const { test } = require("node:test");
@@ -303,4 +303,57 @@ test("reports a running worker of a resolved task with the fix command", async (
     { kind: "stale-running", task: "done", role: "implementation", window: "window:gone" },
   ]);
   assert.equal(findings[0].fix, `node ${join(__dirname, "factory.mjs")} ${f.file} --task done --workers '{"implementation":{"status":"closed"}}'`);
+});
+
+test("reports an attention item open longer than --attention-after, and records the ones the session log closed", async (t) => {
+  const rex = `#!/bin/sh
+case "$1" in
+  ls) echo '{"sessions":[{"session_id":"session:work"}]}' ;;
+  block) echo '{"blocks":[{"block_id":"block:live"}]}' ;;
+  *) echo '{"windows":[]}' ;;
+esac
+`;
+  const f = await fixture(t, rex);
+  const state = join(f.directory, "session-state");
+  await mkdir(join(state, "answered"), { recursive: true });
+  const minutesAgo = (minutes) => new Date(Date.now() - minutes * 60_000).toISOString();
+  const lines = [];
+  const request = (id, session, minutes, extra = {}) => lines.push({
+    id, at: minutesAgo(minutes), type: "attention.requested", task: "busy", source: "attention",
+    data: { session, kind: "sandbox-bypass", text: `text ${id}`, role: "implementation", pane: "block:live", ...extra },
+  });
+  request("old", "s-old", 45);
+  request("fresh", "s-fresh", 5);
+  request("gone", "s-gone", 45, { pane: "block:dead" });
+  request("answered", "answered", 45);
+  await writeFile(join(f.directory, "owner.repo-factory-events.jsonl"), lines.map((line) => `${JSON.stringify(line)}\n`).join(""));
+  await writeFile(join(state, "answered", "events.jsonl"), `${JSON.stringify({ type: "permission.completed", data: {}, timestamp: minutesAgo(40) })}\n`);
+
+  const env = { FACTORY_SESSION_STATE: state };
+  const run = () => f.run([task("busy", "implementation", { title: "Busy task" })], { env });
+  const attention = ({ findings }) => findings.filter(({ kind }) => kind === "attention-stale");
+  let result = await run();
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(attention(result).map(({ since, ...rest }) => rest), [{
+    kind: "attention-stale", task: "busy", title: "Busy task", role: "implementation",
+    attention: "sandbox-bypass", text: "text old", pane: "block:live",
+  }]);
+  assert.deepEqual(attention(await f.run([task("busy", "implementation")], { env, args: ["--attention-after", "10m"] })).map(({ text }) => text), ["text old"]);
+  assert.equal(attention(await f.run([task("busy", "implementation")], { env, args: ["--attention-after", "1m"] })).length, 2);
+
+  const log = (await readFile(join(f.directory, "owner.repo-factory-events.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+  const resolved = log.filter(({ type }) => type === "attention.resolved");
+  assert.deepEqual(resolved.map(({ source, data }) => [source, data.session, data.reason]).sort(), [
+    ["reconcile", "answered", "answered"],
+    ["reconcile", "s-gone", "pane-gone"],
+  ]);
+  assert.equal(resolved.length, 2, "recorded once, not on every sweep");
+});
+
+test("--attention-after must be a duration", async (t) => {
+  const f = await fixture(t, fakeRex);
+  await writeFile(f.file, JSON.stringify({ status: "active", tasks: [] }));
+  const result = spawnSync(process.execPath, [script, f.file, "--attention-after", "soon"], { encoding: "utf8" });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /--attention-after must look like/);
 });

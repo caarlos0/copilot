@@ -31,7 +31,7 @@ const eventTypes = {
   "attention.resolved": { task: false, data: ["session"] },
 };
 
-const eventsFile = (file) =>
+export const eventsFile = (file) =>
   join(dirname(file), `${basename(file, extname(file))}-events.jsonl`);
 
 const waiterFile = (file) =>

@@ -393,7 +393,9 @@ The skill must not depend on files in the coordination plugin.
 `serve.mjs` repeats the small state-directory confinement code of the coordinator
 server on purpose: the two plugins load independently.
 
-`reconcile.mjs` is a read-only sweep that prints JSON findings: complete results
+`reconcile.mjs` is a sweep that prints JSON findings and changes only the events
+log: it appends a missing `attention.resolved` event (source `reconcile`, with a
+`reason`) for an attention item that `attention.mjs` finds resolved. Complete results
 newer than their task, open issue-less task branches ahead of the default
 branch, clean worktrees of merged tasks whose HEAD is in the default branch
 (`merged-worktree`: remove with `worktree.mjs delete NAME`, only if the run created it;
@@ -408,13 +410,26 @@ renaming a session), `running` workers of resolved tasks (`stale-running`, with 
 `factory.mjs` fix command; the writer sets every worker of a task to `closed` when it
 moves to `resolved`, unless the write sets a status), a task blocked longer than
 `--blocked-after` (default 24h; `stale-blocked`, naming its blocker class and owner),
-a missing waiter (`no-waiter`), and an owner lock whose
+an attention item open longer than `--attention-after` (default 30m;
+`attention-stale`, naming task, kind, text and pane), a missing waiter (`no-waiter`), and an owner lock whose
 session the coordinator hooks would not match (`hooks-inactive`). The
 factory runs it at startup, on every wake and user message, and before every
 report, so a missed waiter wake cannot leave finished work unmerged. The waiter
 is re-armed after each wake or user message, and `broker.mjs cursor` is taken
 and the waiter armed before the startup sweep. Closing a task's panes belongs to the step that records
 `resolved`.
+
+`attention.mjs` (`openAttention(file)`, shared by reconcile and the dashboard
+server) returns the open attention items: each `attention.requested` with no later
+`attention.resolved` for its session, the task title when known, minus items it
+resolves by signal: the session log
+(`$FACTORY_SESSION_STATE`, default `~/.copilot/session-state/<session>/events.jsonl`)
+shows `permission.completed` or the end of an `ask_user` call after the request
+(only the last 256 KiB is read, by byte offset, because logs reach 500 MB), the
+item's pane is not in `rex block ls -A` (skipped when Rex fails), or the item is
+over 24 hours old. The coordinator never answers an attention item, never types
+into its pane, never wakes on it, and reports `attention-stale` once; only the
+user answers.
 
 On every wake, drain all actionable tasks and reconcile results/worktrees,
 fill free worker slots before waiting, and run enabled search/backlog rules

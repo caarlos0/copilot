@@ -311,10 +311,13 @@ the default branch, verify the ancestry and merge commit, then resolve it as
 and blocked until its task can be identified. A refused write stops the sweep
 until the file is reread and the drift is resolved.
 
-Start every sweep with the bundled read-only check, beside this skill:
+Start every sweep with the bundled check, beside this skill. It changes nothing
+except one thing: it appends the missing `attention.resolved` event (source
+`reconcile`) for an attention item whose prompt was answered, whose pane is
+gone, or that is over 24 hours old.
 
 ```sh
-node reconcile.mjs /abs/state/owner.repo-factory.json [--default-branch main] [--blocked-after 24h]
+node reconcile.mjs /abs/state/owner.repo-factory.json [--default-branch main] [--blocked-after 24h] [--attention-after 30m]
 ```
 
 It prints `{findings, errors}` as JSON. Run it at startup, on every wake, on
@@ -350,6 +353,15 @@ leave work behind. Treat each finding as unfinished work:
   (default `24h`; `30m`, `6h`, `2d`). It names the blocker `class` and `owner`
   (null for an old blocker without them). Check whether the cause is now
   worker-fixable, then chase the owner or move the task on.
+- `attention-stale`: a Copilot session has waited for the user (a permission,
+  sandbox-bypass, or `ask_user` prompt) longer than `--attention-after` (default
+  `30m`; same format as `--blocked-after`). It names the task, role, `attention`
+  kind, `text`, and `pane`. Report it to the user once, with the pane, in your
+  next status line. Then do nothing: never answer the prompt, never type or send
+  keys into the pane (`rex send*`), never relaunch the worker for it,
+  and never let it wake you (the waiter excludes source `attention`). Only the
+  user can answer. The finding clears by itself when the prompt is answered,
+  the pane closes, or 24 hours pass.
 - `worker-missing`: a worker (a task role or a rule worker) has status `running`,
   but its window is not in the live Rex session. It carries the role, window,
   pane, worktree, brief, and result. Recover it as in "Recover after a restart".
