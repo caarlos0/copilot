@@ -236,7 +236,7 @@ to `resolved` with an operator comment. Manual resolution requires a non-merge
 outcome; it does not merge or close GitHub items. Cmd+K or Ctrl+K opens a task
 palette (`rankTasks` in `factory-data.mjs`) that docks the chosen task's list and
 focuses its row; the shortcut is ignored while another dialog is open. The header
-shows "Go to task" and "Refresh now" with an icon and text; at 700px wide or less
+shows "Go to task" and "Refresh" with an icon and text; at 700px wide or less
 they are icon-only 44px buttons. The header has no freshness label. At that width the
 sidebar gives way to a project dropdown (the sidebar list, same sort order) with a
 settings button beside it. Resolved tasks with pending
