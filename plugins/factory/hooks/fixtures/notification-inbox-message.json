@@ -1,0 +1,9 @@
+{
+  "sessionId": "00000000-0000-4000-8000-000000000001",
+  "timestamp": 1795104600363,
+  "cwd": "/work/repo",
+  "message": "Inbox from Copilot Subconscious (entry_id: subconscious-agent-00000000-0000-4000-8000-000000000002)\n\n## runtime-rust-migration-boundary\n\nNew shared functionality should be implemented in Rust.",
+  "title": "Inbox entry subconscious-agent-00000000-0000-4000-8000-000000000002 from Copilot Subconscious",
+  "hook_event_name": "Notification",
+  "notification_type": "new_inbox_message"
+}

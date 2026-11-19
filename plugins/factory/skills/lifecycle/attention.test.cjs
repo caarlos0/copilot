@@ -63,6 +63,14 @@ test("lists a request with no resolved event after it, with the task title", asy
   });
 });
 
+test("an `other` request from an older log is not listed", async (t) => {
+  const f = await setup(t);
+  await f.request("s1", { kind: "other", text: "Inbox from Copilot Subconscious" });
+  await f.request("s2");
+  const open = await f.openAttention(f.file, { now, panes: null });
+  assert.deepEqual(open.map((item) => item.session), ["s2"]);
+});
+
 test("an absent events log has no open items", async (t) => {
   const f = await setup(t);
   assert.deepEqual(await f.openAttention(f.file, { now, panes: null }), []);

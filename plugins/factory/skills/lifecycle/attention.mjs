@@ -110,8 +110,11 @@ export async function scanAttention(file, { now = Date.now(), panes } = {}) {
     }
     const session = event?.data?.session;
     if (typeof session !== "string") continue;
-    if (event.type === "attention.requested") requests.set(event.id, event);
-    else if (event.type === "attention.resolved") {
+    // The hook no longer records `other` (an inbox message or a finished shell command is not a
+    // wait), but older logs hold them.
+    if (event.type === "attention.requested") {
+      if (event.data.kind !== "other") requests.set(event.id, event);
+    } else if (event.type === "attention.resolved") {
       for (const [id, request] of requests) if (request.data.session === session) requests.delete(id);
     }
   }

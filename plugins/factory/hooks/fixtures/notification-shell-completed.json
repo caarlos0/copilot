@@ -1,0 +1,9 @@
+{
+  "sessionId": "00000000-0000-4000-8000-000000000001",
+  "timestamp": 1795104600363,
+  "cwd": "/work/repo",
+  "message": "Shell command \"Run tests\" (shellId: 7) has completed successfully.",
+  "title": "Run tests",
+  "hook_event_name": "Notification",
+  "notification_type": "shell_completed"
+}

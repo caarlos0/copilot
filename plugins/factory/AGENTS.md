@@ -128,10 +128,13 @@ payload `sessionId` is the owner lock's session (the coordinator) or a
 (`permission_prompt` or `elicitation_dialog`) appends one `attention.requested`
 event (source `attention`) with `broker.mjs`'s `emit`: `kind` is `permission`,
 `sandbox-bypass` (the message says sandbox, or a fresh `permissionRequest` for
-the same command had `requestSandboxBypass`), `ask-user` or `other`; `text` is the
+the same command had `requestSandboxBypass`) or `ask-user`; `text` is the
 message, plus the bypass reason, or the `ask_user` question with its enum
 `options`; `role` and `pane` (`REX_BLOCK`, else the file) when known. The two
-observers only write a note in `$TMPDIR` (valid 30 seconds, used once). Tests
+observers only write a note in `$TMPDIR` (valid 30 seconds, used once). Any other
+notification type (`new_inbox_message`, `shell_completed`, and so on) is not a wait
+for the user: the hook records nothing, and `attention.mjs` skips `other` items that
+older logs hold. Tests
 are in `hooks/attention.test.cjs`; the payloads are in `hooks/fixtures/`.
 
 Every worker launch carries the same deny flags (the worker deny constant;

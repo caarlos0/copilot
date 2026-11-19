@@ -16,6 +16,8 @@ as `hook.start` events in `events.jsonl`.
 | `pre-tool-use-sandbox-bypass.json` | `preToolUse` hook stdin for the same bash call |
 | `pre-tool-use-ask-user.json` | `preToolUse` hook stdin for `ask_user` (message and options) |
 | `session-log-events.json` | `events.jsonl` lines: `permission.requested`, notification `hook.start`, `permission.completed`, `ask_user` start and complete |
+| `notification-inbox-message.json` | `notification` hook stdin, `new_inbox_message` (shape from a session log; text redacted) |
+| `notification-shell-completed.json` | `notification` hook stdin, `shell_completed` (shape from a session log) |
 
 ## Verified
 

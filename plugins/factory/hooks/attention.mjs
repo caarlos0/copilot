@@ -80,6 +80,10 @@ function takeNote(session, now) {
   }
 }
 
+// Only these notifications are a wait for the user. Any other type (an inbox message, a
+// finished shell command) is not, so it raises nothing.
+const PROMPTS = new Set(["permission_prompt", "elicitation_dialog"]);
+
 function describe(input, note) {
   const message = typeof input.message === "string" ? input.message : "";
   if (input.notification_type === "elicitation_dialog") {
@@ -87,13 +91,10 @@ function describe(input, note) {
       ? { kind: "ask-user", text: note.text, options: note.options }
       : { kind: "ask-user", text: message, options: [] };
   }
-  if (input.notification_type === "permission_prompt") {
-    const matches = note?.type === "command" && message.includes(note.command.split("\n")[0].slice(0, 80));
-    const bypass = /sandbox/i.test(message) || (matches && note.bypass);
-    const reason = matches && note.bypass && note.reason ? `\nSandbox bypass: ${note.reason}` : "";
-    return { kind: bypass ? "sandbox-bypass" : "permission", text: message + reason, options: [] };
-  }
-  return { kind: "other", text: message, options: [] };
+  const matches = note?.type === "command" && message.includes(note.command.split("\n")[0].slice(0, 80));
+  const bypass = /sandbox/i.test(message) || (matches && note.bypass);
+  const reason = matches && note.bypass && note.reason ? `\nSandbox bypass: ${note.reason}` : "";
+  return { kind: bypass ? "sandbox-bypass" : "permission", text: message + reason, options: [] };
 }
 
 async function main() {
@@ -106,7 +107,7 @@ async function main() {
     if (note) writeFileSync(noteFile(who.session), JSON.stringify({ ...note, at: now }), { mode: 0o600 });
     return;
   }
-  if (typeof input.notification_type !== "string") return;
+  if (!PROMPTS.has(input.notification_type)) return;
   const { kind, text, options } = describe(input, takeNote(who.session, now));
   const data = { session: who.session, kind, text: clip(text, MAX_TEXT) };
   if (who.role) data.role = who.role;

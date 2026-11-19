@@ -1209,7 +1209,7 @@ the cursor. Each event has `id`, `at`, `type`, `task`, `source`, and `data`:
 | `worker.result` | a worker after each result write | `role`, `outcome`, `head`, `result`, `feedback_id`, `summary` |
 | `worker.blocked` | a worker that cannot continue | `role`, `reason` |
 | `pr.merged` | the implementation worker after its final `merged: true` result | `role`, `pr`, `merge_commit`, `head` |
-| `attention.requested` | a hook (`--source attention`) when a Copilot session waits for the user; no `--task` | `session`, `kind` (`permission`, `sandbox-bypass`, `ask-user`, `other`), `text` (at most 2000 characters), optional `role`, `pane`, `options` (strings) |
+| `attention.requested` | a hook (`--source attention`) when a Copilot session waits for the user; no `--task` | `session`, `kind` (`permission`, `sandbox-bypass`, `ask-user`; `other` is accepted for old logs but no hook writes it), `text` (at most 2000 characters), optional `role`, `pane`, `options` (strings) |
 | `attention.resolved` | a hook (`--source attention`) when that wait ends; no `--task` | `session` |
 | `rule.due` | `wait --due` itself, never stored | `rules`: due rule IDs |
 | `reconcile.due` | `wait --due` itself, every 5 minutes while the run is `active`, never stored | `every`: `"5m"` |

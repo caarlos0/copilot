@@ -168,6 +168,18 @@ test("recognizes the coordinator by the owner lock", async (t) => {
   assert.equal(event.data.pane, undefined);
 });
 
+test("a notification that is not a prompt raises no event", async (t) => {
+  const { run, events, worker } = await setup(t);
+  for (const name of ["notification-inbox-message.json", "notification-shell-completed.json"]) {
+    const out = run(await load(name), worker);
+    assert.equal(out.status, 0, out.stderr);
+    assert.equal(out.stdout + out.stderr, "", name);
+  }
+  assert.deepEqual(await events(), []);
+  assert.equal(run(await load("notification-permission.json"), worker).status, 0);
+  assert.equal((await events()).length, 1);
+});
+
 test("garbage input exits 0 with no output and no event", async (t) => {
   const { run, events, worker } = await setup(t);
   const bad = ["", "not json", "null", "[]", "42", '{"sessionId":7}', '{"sessionId":"s","notification_type":{}}'];
