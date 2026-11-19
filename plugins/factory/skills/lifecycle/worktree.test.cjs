@@ -227,3 +227,59 @@ test("--pr refuses a PR from another repository", async (t) => {
   assert.equal(result.status, 2);
   assert.equal(existsSync(join(f.root, "wts", "proj", "pr-12")), false);
 });
+
+async function squashed(t, { sha = (tip) => tip, merged = true } = {}) {
+  const f = await fixture(t);
+  f.git(f.repo, "remote", "add", "origin", "git@github.com:acme/proj.git");
+  const { path } = f.helper(f.repo, "create", "squashed").json;
+  f.git(path, "commit", "-q", "--allow-empty", "-m", "work");
+  f.git(f.repo, "commit", "-q", "--allow-empty", "-m", "squash of work");
+  const tip = f.git(path, "rev-parse", "HEAD");
+  const bin = join(f.root, "bin");
+  await mkdir(bin);
+  await writeFile(join(bin, "gh"), `#!/bin/sh
+[ "$1 $2" = "api repos/acme/proj/pulls/7" ] || exit 1
+echo '{"merged":${merged},"head":{"sha":"${sha(tip)}"}}'
+`);
+  await chmod(join(bin, "gh"), 0o755);
+  const env = { ...f.env, PATH: `${bin}${delimiter}${process.env.PATH}` };
+  const del = (...args) => {
+    const result = spawnSync(process.execPath, [script, "delete", "squashed", ...args], { cwd: f.repo, encoding: "utf8", env });
+    return { status: result.status, json: JSON.parse(result.stdout) };
+  };
+  return { f, path, del };
+}
+
+test("delete --merged-pr removes a squash-merged branch", async (t) => {
+  const { f, path, del } = await squashed(t);
+  assert.equal(del().json.reason, "unmerged");
+  const result = del("--merged-pr", "https://github.com/acme/proj/pull/7");
+  assert.equal(result.status, 0, JSON.stringify(result.json));
+  assert.deepEqual(result.json, { path, branch: "squashed", removed: true, branch_deleted: true });
+  assert.equal(existsSync(path), false);
+  assert.equal(f.git(f.repo, "branch", "--list", "squashed"), "");
+});
+
+test("delete --merged-pr refuses a PR whose head is not in the worktree", async (t) => {
+  const { path, del } = await squashed(t, { sha: () => "f".repeat(40) });
+  const result = del("--merged-pr", "7");
+  assert.equal(result.status, 2);
+  assert.equal(result.json.reason, "pr-not-merged");
+  assert.equal(existsSync(path), true);
+});
+
+test("delete --merged-pr refuses an open PR", async (t) => {
+  const { path, del } = await squashed(t, { merged: false });
+  assert.equal(del("--merged-pr", "7").status, 2);
+  assert.equal(existsSync(path), true);
+});
+
+test("delete --merged-pr refuses a dirty tree and a PR of another repository", async (t) => {
+  const { path, del } = await squashed(t);
+  assert.equal(del("--merged-pr", "https://github.com/other/thing/pull/7").status, 1);
+  await writeFile(join(path, "new.txt"), "x");
+  const result = del("--merged-pr", "7");
+  assert.equal(result.status, 2);
+  assert.equal(result.json.reason, "dirty");
+  assert.equal(existsSync(path), true);
+});

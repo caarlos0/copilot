@@ -331,8 +331,9 @@ leave work behind. Treat each finding as unfinished work:
   the candidates, clear the record with `--rule ID --rule-worker null`, and
   close the window (see "Find more work").
 - `merged-worktree`: a `merged` task's worktree is clean and its HEAD is in the
-  default branch. If `created_by_run` is true, remove it with `worktree.mjs delete NAME`
-  as in "Release panes". Leave a reused worktree (`false`).
+  default branch, or it has a merged PR. If `created_by_run` is true, remove it with
+  `worktree.mjs delete NAME` as in "Release panes"; for a task with a PR the finding
+  carries the exact `command`, which has `--merged-pr URL`. Leave a reused worktree (`false`).
 - `worker-missing`: a worker (a task role or a rule worker) has status `running`,
   but its window is not in the live Rex session. It carries the role, window,
   pane, worktree, brief, and result. Recover it as in "Recover after a restart".
@@ -1337,7 +1338,10 @@ Remove a worktree only as a separate action: one created by this run, with
 complete work and nothing uncommitted. Use `worktree.mjs delete NAME` (never
 `--force`). It never asks: it removes a clean worktree whose tip is in the
 default branch or in a remote branch, and otherwise exits 2 with
-`removed: false` and a `reason`; then leave the worktree alone.
+`removed: false` and a `reason`; then leave the worktree alone. A squash-merged PR
+branch is in neither: for a task with a merged PR add `--merged-pr URL_OR_NUMBER`.
+It checks with `gh api` that the PR is merged and its head is the worktree tip or an
+ancestor of it, and the tree is still clean (never `--force`).
 Never delete a reused worktree or one with pending work. The `merged-worktree`
 finding from `reconcile.mjs` flags a merged task's worktree that is ready for
 this.

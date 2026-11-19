@@ -362,7 +362,9 @@ server on purpose: the two plugins load independently.
 newer than their task, open issue-less task branches ahead of the default
 branch, clean worktrees of merged tasks whose HEAD is in the default branch
 (`merged-worktree`: remove with `worktree.mjs delete NAME`, only if the run created it;
-`delete` refuses a dirty or unmerged tree), open Rex windows of resolved tasks, finished rule workers
+`delete` refuses a dirty or unmerged tree; a task with a PR also gets its squash-merged
+worktree flagged, with the exact command that has `--merged-pr URL`, which verifies the
+PR with `gh api`), open Rex windows of resolved tasks, finished rule workers
 whose window is open or whose status is still `running` (`rule-worker-done`),
 `running` workers whose window is not in the live Rex session
 (`worker-missing`, plus `rex-session-missing` once when the session is gone;

@@ -231,3 +231,20 @@ test("reports a gone Rex session once, with every running worker missing", async
     { kind: "worker-missing", task: "b", workers: undefined },
   ]);
 });
+
+test("a merged task with a PR gets the delete command with --merged-pr, even when its HEAD is not in the default branch", async (t) => {
+  const f = await fixture(t, fakeRex);
+  const dirty = join(f.directory, "dirty");
+  git(f.repo, "worktree", "add", "-q", "-b", "dirty", dirty, "work");
+  await writeFile(join(dirty, "scratch.txt"), "x");
+  const pr = "https://github.com/acme/proj/pull/7";
+  const { findings, errors } = await f.run([
+    task("squashed", "resolved", { pr, worktree: { path: f.repo, created_by_run: true } }),
+    task("dirty", "resolved", { pr, worktree: { path: dirty, created_by_run: true } }),
+  ]);
+  assert.deepEqual(errors, []);
+  assert.deepEqual(findings, [{
+    kind: "merged-worktree", task: "squashed", path: f.repo, created_by_run: true,
+    command: `node ${join(__dirname, "worktree.mjs")} delete work --merged-pr ${pr}`,
+  }]);
+});

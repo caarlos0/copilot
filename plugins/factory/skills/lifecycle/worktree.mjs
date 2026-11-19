@@ -6,7 +6,7 @@ import { parseArgs } from "node:util";
 
 const usage = `Usage:
   node worktree.mjs create NAME [--pr N] [--base REF] [-- CMD...]
-  node worktree.mjs delete NAME [--force] [--default-branch NAME]
+  node worktree.mjs delete NAME [--force] [--default-branch NAME] [--merged-pr URL_OR_NUMBER]
   node worktree.mjs path NAME
 
 Run it inside the project checkout. NAME is the branch name. Output is JSON on
@@ -20,7 +20,10 @@ leading "~" is the home directory. When it is unset the path is
 
 create branches from local HEAD (or --base REF), or reuses the worktree that
 already has the branch. delete removes a clean worktree whose tip is in the
-default branch or in a remote branch; --force skips both checks. It never asks.
+default branch or in a remote branch; --force skips both checks. With
+--merged-pr (a squash-merged branch is in neither), it asks gh whether the PR is
+merged and its head is the worktree tip or an ancestor of it, then removes the
+clean worktree and deletes the branch. It never asks.
 Exit codes: 1 usage, 2 refused, 3 not found, 4 git or gh failed.`;
 
 const DEFAULT_TEMPLATE = "~/Developer/worktrees/{repo}/{branch}";
@@ -165,7 +168,18 @@ function defaultBranch(cwd, override) {
   return [head, "main", "master"].find((b) => b && gitOk(cwd, "show-ref", "--verify", "--quiet", `refs/heads/${b}`)) ?? null;
 }
 
-function remove(ctx, name, { force, defaultBranch: override }) {
+function mergedPR(ctx, path, tip, ref) {
+  const slug = repoSlug(ctx.cwd);
+  const match = /^(?:https:\/\/github\.com\/([^/]+\/[^/]+)\/pull\/)?(\d+)\/?$/.exec(ref);
+  if (!match || (match[1] && match[1].toLowerCase() !== slug.toLowerCase())) {
+    throw new Fail("usage", `--merged-pr needs a PR number or a URL in ${slug}.`);
+  }
+  const pr = JSON.parse(run("gh", ["api", `repos/${slug}/pulls/${match[2]}`], ctx.cwd));
+  const head = pr.head?.sha ?? "";
+  return pr.merged === true && head !== "" && (head === tip || gitOk(path, "merge-base", "--is-ancestor", head, tip));
+}
+
+function remove(ctx, name, { force, defaultBranch: override, mergedPr }) {
   const wt = find(ctx, name, templatePath(ctx, name));
   if (!wt) throw new Fail("not-found", `No worktree for ${name}.`);
   const { path, branch } = wt;
@@ -179,18 +193,27 @@ function remove(ctx, name, { force, defaultBranch: override }) {
   const target = defaultBranch(ctx.cwd, override);
   const merged = (target !== null && gitOk(path, "merge-base", "--is-ancestor", tip, target)) ||
     git(path, "branch", "-r", "--contains", tip) !== "";
+  let prMerged = false;
   if (!force) {
     if (git(path, "status", "--porcelain") !== "") {
       throw new Fail("refused", `${path} has uncommitted changes.`, { ...info, removed: false, reason: "dirty" });
     }
-    if (!merged) {
+    if (mergedPr !== undefined) {
+      prMerged = mergedPR(ctx, path, tip, mergedPr);
+      if (!prMerged) {
+        throw new Fail("refused", `PR ${mergedPr} is not merged, or its head is not in ${branch ?? tip}.`,
+          { ...info, removed: false, reason: "pr-not-merged" });
+      }
+    }
+    if (!merged && !prMerged) {
       throw new Fail("refused", `${branch ?? tip} is not in ${target ?? "the default branch"} or a remote branch.`,
         { ...info, removed: false, reason: "unmerged" });
     }
   }
 
   git(ctx.cwd, "worktree", "remove", ...(force ? ["--force"] : []), path);
-  const branchDeleted = merged && branch !== null && gitOk(ctx.cwd, "branch", "-d", branch);
+  const branchDeleted = (merged || prMerged) && branch !== null &&
+    gitOk(ctx.cwd, "branch", prMerged && !merged ? "-D" : "-d", branch);
   return { ...info, removed: true, branch_deleted: branchDeleted };
 }
 
@@ -207,6 +230,7 @@ function main(argv) {
         base: { type: "string", default: "HEAD" },
         force: { type: "boolean", default: false },
         "default-branch": { type: "string" },
+        "merged-pr": { type: "string" },
         help: { type: "boolean", short: "h", default: false },
       },
     });
@@ -217,6 +241,7 @@ function main(argv) {
   if (values.help) return { out: usage };
   const [subcommand, name, ...rest] = positionals;
   if (!["create", "delete", "path"].includes(subcommand) || rest.length > 0) throw new Fail("usage", usage);
+  if (values["merged-pr"] !== undefined && subcommand !== "delete") throw new Fail("usage", "--merged-pr works only with delete.");
   if (command.length > 0 && subcommand !== "create") throw new Fail("usage", "-- CMD works only with create.");
   if (values.pr !== undefined && !/^\d+$/.test(values.pr)) throw new Fail("usage", "--pr needs a PR number.");
 
@@ -230,7 +255,11 @@ function main(argv) {
     return { result: { path: existing?.path ?? path, branch: name, exists: existing !== undefined } };
   }
   if (subcommand === "delete") {
-    return { result: remove(ctx, name, { force: values.force, defaultBranch: values["default-branch"] }) };
+    return { result: remove(ctx, name, {
+      force: values.force,
+      defaultBranch: values["default-branch"],
+      mergedPr: values["merged-pr"],
+    }) };
   }
   const result = create(ctx, name, { pr: values.pr, base: values.base });
   return { result, command };

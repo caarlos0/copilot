@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { resolveFactory, waiterPid } from "./broker.mjs";
 
@@ -30,6 +31,8 @@ function isAncestor(cwd, branch) {
     throw error;
   }
 }
+
+const worktreeScript = join(dirname(fileURLToPath(import.meta.url)), "worktree.mjs");
 
 const rexJSON = (...args) => JSON.parse(execFileSync("rex", [...args, "--json"], {
   encoding: "utf8",
@@ -127,13 +130,19 @@ async function reconcile(file, defaultBranch = "main") {
     const worktree = task.worktree;
     if (task.resolution?.outcome !== "merged" || !worktree?.path || !existsSync(worktree.path)) continue;
     try {
-      if (git(worktree.path, "status", "--porcelain") !== "" || !isAncestor(worktree.path, defaultBranch)) continue;
-      findings.push({
+      // A squash-merged PR branch is never in the default branch; `worktree.mjs` verifies the PR with gh.
+      if (git(worktree.path, "status", "--porcelain") !== "" || !(task.pr || isAncestor(worktree.path, defaultBranch))) continue;
+      const finding = {
         kind: "merged-worktree",
         task: task.id,
         path: worktree.path,
         created_by_run: worktree.created_by_run,
-      });
+      };
+      if (task.pr) {
+        const branch = git(worktree.path, "rev-parse", "--abbrev-ref", "HEAD");
+        finding.command = `node ${worktreeScript} delete ${branch} --merged-pr ${task.pr}`;
+      }
+      findings.push(finding);
     } catch {
       errors.push(`${task.id}: cannot read worktree ${worktree.path}.`);
     }
