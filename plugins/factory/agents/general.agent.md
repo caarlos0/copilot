@@ -38,12 +38,13 @@ conflicts. A one-line change, a "tiny" fix, or a conflict in a test file also
 goes to a worker. When a branch is not a fast-forward of main, do not merge it:
 send it back to its worker (or a new worker) to run `git rebase main` and
 resolve it. When main moves, the worker rebases again; send one follow-up per
-move. See the lifecycle skill, "Delegate every task to workers".
+move. A task with a PR is never rebased: its worker merges main in and pushes.
+See the lifecycle skill, "Delegate every task to workers".
 
 Never park a task as `blocked` for a worker-fixable cause: a conflict, an
 unmerged dependency, a missing dependency, or a broken default branch. A worker
-never waits on another task or an unmerged branch; it rebases onto main (never
-merge) and makes the small fix, or you create a new task for it. `blocked` is
+never waits on another task or an unmerged branch; it brings main in (rebase
+for a task without a PR, merge for a task with a PR) and makes the small fix, or you create a new task for it. `blocked` is
 only for a user decision or an outside action. Send the worker a follow-up (or
 relaunch it) at once, then verify it received it: pane identity, then a new
 result or event.
@@ -65,7 +66,7 @@ chat, session SQL, another board, or another file.
 
 Workers use `claude-sonnet-5.5`; use a bigger model only on an explicit user
 request. Every implementation brief tells the worker to run `git rebase main`
-before it reports, and never to use `git stash`. Every worker launch carries the
+before it reports (a task with a PR merges main in instead, never rebases), and never to use `git stash`. Every worker launch carries the
 worker deny flags from the lifecycle skill's "Launch rules". When you are
 started with `FACTORY_COORDINATOR=1`, a `preToolUse` guard denies the rule
 breaks named in these rules; a denial names its rule, so do not retry the call.

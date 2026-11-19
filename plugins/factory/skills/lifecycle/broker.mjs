@@ -128,12 +128,15 @@ async function checkResult(factory, { type, task, data }) {
   }
 }
 
-// A task without a worktree record has no branch to check.
+// A task without a worktree record has no branch to check. A task with a PR merges the default
+// branch in (never rebases), so only a local-landing task must descend from it.
 async function checkHead(factory, task, head) {
-  const worktree = JSON.parse(await readFile(factory, "utf8")).tasks?.find(({ id }) => id === task)?.worktree;
+  const record = JSON.parse(await readFile(factory, "utf8")).tasks?.find(({ id }) => id === task);
+  const worktree = record?.worktree;
   if (!worktree?.path) return;
   const at = git(worktree.path, "rev-parse", "HEAD");
   if (at !== head) throw new Error(`The worktree ${worktree.path} is at ${at}, not at head ${head}. Commit, then report the real head.`);
+  if (record.pr) return;
   try {
     git(worktree.path, "merge-base", "--is-ancestor", defaultBranch, head);
   } catch (error) {
@@ -363,9 +366,9 @@ emit    Appends one event and prints it. Types: ${Object.keys(eventTypes).join("
         emit refuses (exit 1, nothing appended) a worker.result whose data.result is not a JSON
         file in the state directory with the same task, role and outcome; a worker.blocked with
         data.result gets the same check with outcome blocked. A complete implementation
-        worker.result with data.head must match HEAD of the task's worktree and descend from
-        main (skipped when the task has no worktree record). pr.merged needs a full
-        merge_commit SHA.
+        worker.result with data.head must match HEAD of the task's worktree and, for a task
+        without a PR, descend from main (skipped when the task has no worktree record).
+        pr.merged needs a full merge_commit SHA.
         pr.merged is a hint from the implementation worker (role, pr, merge_commit, head); the
         factory verifies the merge on GitHub before it resolves the task.
         factory.mjs emits task.moved, task.updated, and feedback.pending after every task write,

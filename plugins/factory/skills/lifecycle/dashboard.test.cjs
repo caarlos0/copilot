@@ -1713,7 +1713,7 @@ test("the delegate-always rule is present in the agent, skill, and plugin rules"
     assert.match(text, /never do(es)? (actual )?work or investigation/i, file);
     assert.match(text, /git rebase main/, file);
     assert.match(text, /git merge --ff-only/, file);
-    assert.doesNotMatch(text, /git merge main|git merge --no-ff|never rebase/, file);
+    assert.doesNotMatch(text, /git merge --no-ff/, file);
     assert.match(text, /claude-sonnet-5\.5/, file);
     assert.match(text, /never use `git stash`|never to use `git stash`/i, file);
     assert.match(text, /never\s+waits?\s+on\s+another\s+task/i, file);

@@ -19,18 +19,20 @@ workers" section in sync.
 
 `blocked` is only for a user decision or an outside action. A worker never waits
 on another task or an unmerged branch: for a conflict, a missing dependency, or
-a broken default branch it rebases onto the default branch (`git rebase main`,
-never merge) and makes the small fix, or the coordinator creates a new task.
+a broken default branch it brings in the default branch (`git rebase main`
+for a task without a PR; `git merge` for a task with a PR) and makes the small fix, or the coordinator creates a new task.
 The coordinator sends a follow-up (or relaunches) at once for a blocked task
 with a worker-fixable cause, and verifies receipt by pane identity, then a new
 result or event.
 
-Task branches keep a linear history. A worker runs `git rebase main` (never
-merge main) before it reports a head, and the factory lands a local branch with
-`git merge --ff-only`, so no merge commit is created. When the default branch
-moves, the worker rebases again, and the factory sends one follow-up per move.
-The root rule that humans merge, not rebase, when integrating upstream into a
-feature branch does not apply to factory task branches.
+A task without a PR keeps a linear history. Its worker runs `git rebase main`
+(never merge main) before it reports a head, and the factory lands the local
+branch with `git merge --ff-only`, so no merge commit is created. When the
+default branch moves, the worker rebases again, and the factory sends one
+follow-up per move. A task with a PR follows the root rule: the worker brings
+the default branch in with `git merge`, never rebases, and never force-pushes,
+because a rebase breaks reviewers and stacked PRs. GitHub mergeability and the
+PR checks gate it, so `emit` does not check that its head descends from `main`.
 
 Standing worker rules: never use `git stash`, because the stash list is shared
 by all worktrees. To compare against the base, use a scratch worktree or
@@ -260,7 +262,7 @@ records remain readable but are not authority on recovery.
 
 When task file lists overlap, record each task's validated default-branch SHA
 in `details.validated_base_sha`. After one lands, the remaining worker rebases
-onto the new base (never merges it), reruns affected checks on the combined code, and
+onto the new base (a task with a PR merges it instead), reruns affected checks on the combined code, and
 refreshes head-specific evidence before landing. Prefer an existing repository
 merge queue. For local-only tasks, use the current local default branch, not
 `origin`; independent tasks stay parallel.
@@ -322,7 +324,8 @@ wake it. Workers write their result file atomically, then run
 appends and exits 1 with a reason when it refuses: a `worker.result` needs
 `data.result`, a JSON file in the state directory whose `task`, `role` and
 `outcome` match the event, and a `complete` implementation result with `data.head`
-needs the task's worktree at that head and descended from `main`. After a PR merge, the
+needs the task's worktree at that head, and, for a task without a PR, descended
+from `main`. After a PR merge, the
 implementation worker also emits `pr.merged`, a hint: the factory verifies the
 merge on GitHub, resolves the task, and releases its panes and worktree, and
 `reconcile.mjs` stays the backstop for a missed event, and while the run is

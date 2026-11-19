@@ -43,7 +43,8 @@ a conflict in a test file goes to a worker: the owning worker, or a new task.
 When a branch is not a fast-forward of the default branch, do not merge it:
 send it back to its worker (or a new worker) to run `git rebase main` and
 resolve the conflict there. When the default branch moves, the worker rebases
-again; send one follow-up per move. When a
+again; send one follow-up per move. A task with a PR is never rebased: its
+worker merges the default branch in and pushes (no force-push). When a
 check fails or a result is unclear, create or reopen a task for a worker to
 investigate. Do not investigate it yourself.
 
@@ -666,8 +667,9 @@ worker-fixable, so they never justify `blocked`, a wait, or a schedule:
 - a missing dependency;
 - a broken default branch.
 
-A worker never waits on another task or an unmerged branch. It rebases its
-branch onto the default branch (`git rebase main`, never merge) and makes the
+A worker never waits on another task or an unmerged branch. It brings the
+default branch into its branch (`git rebase main` for a task without a PR,
+`git merge main` for a task with a PR) and makes the
 small fix. If the
 fix is not small, or does not belong to the task, the coordinator creates a new
 task for it. Conflicts go back to the owning worker, as above.
@@ -720,9 +722,11 @@ writes a `blocked` result, and does not edit. Every brief also has this
 standing line: "Read `plugins/factory/AGENTS.md` before the first edit." Skip
 that line only when the repo has no such file.
 
-Every implementation brief has these standing rules: "Run `git rebase main`
-(never merge main) before you report, and again each time the factory tells you
-main moved. Never use `git stash`: the stash list is shared by all worktrees.
+Every implementation brief has these standing rules: "Before you report, and
+again each time the factory tells you main moved, bring main in: if the task has
+no PR, run `git rebase main` (never merge main); if it has a PR, run
+`git merge main` and push, never rebase and never force-push.
+Never use `git stash`: the stash list is shared by all worktrees.
 To compare against the base, use a scratch worktree or
 `git diff > $TMPDIR/x.patch`."
 
@@ -792,8 +796,10 @@ needs `data.role`, `data.outcome` (`working`, `waiting`, `complete`, or `blocked
 `data.result`, the result file name in the state directory. `emit` refuses it (exit 1,
 nothing appended) unless that file parses and its `task`, `role` and `outcome` match the
 event. For a `complete` implementation result with `data.head`, it also refuses unless the
-task's worktree (`worktree.path`) is at that head and the head descends from `main`; run
-`git rebase main` and emit again. A task with no worktree record skips the head check.
+task's worktree (`worktree.path`) is at that head and, for a task without a PR, the head
+descends from `main`; run `git rebase main` and emit again. A task with a PR skips that
+descent check (GitHub mergeability and the PR checks gate it; merge main in, never rebase).
+A task with no worktree record skips the head check.
 Add `head`, `feedback_id`, and a short `summary` when known. Keep long
 evidence in the result file; an event is at most 64 KiB. Emit `worker.blocked`
 (`role`, `reason`) as well as a `blocked` result so a blocker wakes the factory first;
@@ -935,11 +941,12 @@ It reproduces the problem, makes the smallest complete change, validates it,
 and opens the PR when authorized. For iterative performance or quality work,
 use `find-the-loop` first. Once the PR exists, use `pr-shepherd` to own CI,
 review threads, conflicts, and landing at the inherited autonomy level.
-Follow the factory's rebase policy when updating from the base: run
-`git rebase main` (never merge main) before every report, so the branch is a
-fast-forward of the default branch.
+Follow the factory's rebase policy when updating from the base: before every
+report, run `git rebase main` (never merge main) for a task without a PR, so the
+branch is a fast-forward of the default branch; for a task with a PR, run
+`git merge main` and push, never rebase and never force-push.
 It never waits on another task or an unmerged branch. If the default branch is
-broken or a dependency is missing, it rebases onto the default branch
+broken or a dependency is missing, it brings in the default branch
 and makes the small fix, or reports it so the coordinator creates a new task.
 It writes `blocked` only for a user decision or an outside action.
 
@@ -975,7 +982,7 @@ evidence and stops.
 When concurrent tasks' changed-file lists overlap, record each task's validated
 default-branch SHA in `details.validated_base_sha`. After an overlapping task
 lands, the remaining worker rebases onto the new default-branch tip
-(never merges it), reruns checks affected by the combined code, and refreshes the
+(a task with a PR merges it instead), reruns checks affected by the combined code, and refreshes the
 base SHA and head-specific check/review evidence before landing. For local-only
 tasks, use the current local default branch, not `origin`. Keep independent
 tasks parallel.

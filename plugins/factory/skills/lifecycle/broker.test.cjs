@@ -197,7 +197,7 @@ test("worker.blocked checks a named result for outcome blocked, and pr.merged ne
   assert.match(short.stderr, /full 40-character SHA/);
 });
 
-test("a complete implementation result must report the worktree head, rebased on main", async (t) => {
+test("a complete implementation result must report the worktree head, rebased on main unless the task has a PR", async (t) => {
   const f = await fixture(t);
   const git = (cwd, ...args) => {
     const out = spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8" });
@@ -213,11 +213,11 @@ test("a complete implementation result must report the worktree head, rebased on
   git(repo, "worktree", "add", "-b", "task", tree);
   commit(tree, "work");
   const head = git(tree, "rev-parse", "HEAD");
-  const tasks = (worktree) => writeFileSync(f.factory, JSON.stringify({ tasks: [{ id: "t1", worktree }] }));
+  const tasks = (worktree, pr) => writeFileSync(f.factory, JSON.stringify({ tasks: [{ id: "t1", pr, worktree }] }));
   const data = (head) => JSON.stringify(withResult(f.directory, "t1", { role: "implementation", outcome: "complete", head }));
   const emit = (head) => f.run("emit", f.factory, "worker.result", "--task", "t1", "--data", data(head));
 
-  tasks({ path: tree, created_by_run: true });
+  tasks({ path: tree, created_by_run: true }, null);
   assert.equal(emit(head).status, 0);
   const stale = emit("0".repeat(40));
   assert.equal(stale.status, 1);
@@ -227,10 +227,18 @@ test("a complete implementation result must report the worktree head, rebased on
   const behind = emit(head);
   assert.equal(behind.status, 1);
   assert.match(behind.stderr, /does not descend from main/);
+
+  tasks({ path: tree, created_by_run: true }, "https://github.com/owner/repo/pull/1");
+  assert.equal(emit(head).status, 0);
+  const wrong = emit("0".repeat(40));
+  assert.equal(wrong.status, 1);
+  assert.match(wrong.stderr, /is at .*, not at head/);
+
+  tasks({ path: tree, created_by_run: true }, null);
   git(tree, ...identity, "rebase", "main");
   assert.equal(emit(git(tree, "rev-parse", "HEAD")).status, 0);
 
-  tasks(null);
+  tasks(null, null);
   assert.equal(emit("0".repeat(40)).status, 0);
 });
 
