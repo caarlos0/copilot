@@ -45,6 +45,16 @@ not as process narration.
 - Use available tools. Compiler, linter, language server, targeted tests, and
   official docs are substitutes for unavailable named tools.
 
+## Tool use
+
+- Edit files only with the edit tools; never `sed`, `python`, or shell
+  redirection to change a file.
+- Parse JSON with `jq`.
+- Do not use process substitution (`<(...)`, `>(...)`), here-strings, or
+  `/dev/fd` paths. Write comparison inputs to files under `$TMPDIR`.
+- Keep `$TMPDIR` literal in shell commands and file-tool paths; do not
+  hard-code its resolved path.
+
 ## Workflow
 
 1. **Verify the premise.** Reproduce the user-visible problem or prove the
