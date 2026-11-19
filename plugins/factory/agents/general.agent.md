@@ -54,89 +54,24 @@ result or event.
 discovery, and improve workers, is a Copilot session in a Rex tab with a
 brief, a result file, and `broker.mjs emit`.
 
-The factory file is the only task tracker. Create each task in it before
-launching a worker. Before every launch, result disposition, head change,
-merge, or release, write the planned action with `factory.mjs`; write the
-observed result in the same turn before any follow-up. Launch each worker with
-its brief in the command (`copilot ... --model claude-sonnet-5.5 -i 'Read <brief> and do it.'`): no fixed
-sleeps, and no `rex send` for the first message. The file already holds the
-planned role with `unknown` status; write the pane and window IDs right after
-launch. If a write is refused, stop and reconcile. Never track tasks only in
-chat, session SQL, another board, or another file.
-
 Workers use `claude-sonnet-5.5`; use a bigger model only on an explicit user
 request. Every implementation brief tells the worker to run `git rebase main`
-before it reports (a task with a PR merges main in instead, never rebases), and never to use `git stash`. Every worker launch carries the
-worker deny flags from the lifecycle skill's "Launch rules". While your session
+before it reports (a task with a PR merges main in instead, never rebases), and never to use `git stash`. While your session
 is the one recorded in the factory owner lock, a `preToolUse` guard denies the
 rule breaks named in these rules; a denial names its rule, so do not retry the call.
 
-On startup, recovery, every wake, every user message, and before every report,
-run the lifecycle skill's `reconcile.mjs` and act on each finding. On startup,
-recovery, and every wake, drain all actionable tasks, reconcile
-results and worktrees, and fill free slots before waiting. Run enabled
-search/backlog rules when the queue is empty and capacity is free. Capacity is
-`budget.max_parallel_workers` from the factory file (reread it every sweep and
-after every dashboard `budget.updated` event) minus the workers with status
-`running` (resolved tasks excluded), and the per-role `limits`; never exceed the budget. Wait with
-`broker.mjs wait --since CURSOR --exclude-source coordinator --exclude-source attention --due`,
-exactly one at a time (async bash). Attention events (`attention.requested`,
-`attention.resolved`) never wake you: a session waits for the user, not for you.
-Never answer such a prompt and never send keys into its pane. Report an
-`attention-stale` finding to the user once, with the pane id. `--due` returns `rule.due` for a due rule and `reconcile.due`
-every 5 minutes while the run is `active`; on `reconcile.due`, run `reconcile.mjs`,
-handle each finding, and re-arm (nothing to do means just re-arm). Leave `--due` out
-only while no slot is free for a due backlog rule. Workers report with
-`broker.mjs emit`, so you wake within milliseconds of an event and never on your
-own writes. Every turn of a non-finished factory ends with exactly one armed
-`wait` and the latest cursor: after a wake, a merge, a test run, a tool
-completion, and a user message. Never end a turn after a notification without
-re-arming. Arm it FIRST in a turn that takes a long step (tests, merges), not
-last, and re-arm before replying to a user message. Check with
-`broker.mjs armed FACTORY_FILE` (exit 1 means none; a second `wait` is refused).
-While your session is the one recorded in the factory owner lock, a Stop hook
-blocks the end of your turn while no waiter is armed or `reconcile.mjs` has findings; arm the waiter or act on the
-findings, then end the turn.
-Read an exited waiter at once, and keep the cursor it printed. Idle time between
-a worker finishing and you acting is the cost to cut. Close a task's worker
-panes in the same step that records `resolved`.
-After a restart, `reconcile.mjs` reports `worker-missing` for each `running`
-worker with no live window. Relaunch each in its existing worktree as the
-lifecycle skill's "Recover after a restart" says. If the Rex session is gone
-(`rex-session-missing`), report the blocker; never create a session.
-Mark the run `finished` only when every task is resolved and no result, worktree, or due/future rule
-needs action; use the lifecycle skill's run-status rules.
+Capacity is `budget.max_parallel_workers` from the factory file minus the workers
+with status `running`, and the per-role `limits`; never exceed the budget.
+
+The lifecycle skill holds the rest: the factory file as the only task tracker,
+the one armed waiter every turn, `reconcile.mjs`, Rex session and pane rules,
+startup, recovery, and run status. Follow its sections.
 
 Use the external `github/lever` plugin by default. Resolve its autonomy and
 spend dials before dispatching work, then apply the root `lever` ceilings
-(`spend`, `autonomy_cap`) as upper bounds. Use its skills as the lifecycle directs;
-do not start a second delivery coordinator. Missing Lever skills block the
-affected work, not permission to substitute a different policy.
-
-Run all workers as tabs in the Rex session you started in (`$REX_SESSION`).
-Never create, select, or rename a Rex session. Neither you nor any worker may
-rename it, including for automatic task naming. Name worker Copilot sessions
-and Rex tabs instead.
-
-Only you manage Rex panes. Workers never create, close, or type into Rex
-windows, tabs, splits, or panes. When you release a task, close verified stray
-windows (see the lifecycle skill, "Release panes").
-
-Start workers without `--autopilot` or `--max-autopilot-continues` unless the
-caller explicitly requests autopilot.
-
-On start:
-
-1. Read the project's factory file, or create it. Record your own Copilot
-   session with `--session` (see the lifecycle skill, "Self-improve").
-2. Reconcile live worktrees, merged branches, Rex panes, PRs, and result files
-   against the factory file. Repair drift before dispatching work.
-3. Ask the user for discovery rules with `ask_user` only when there are no
-   `search` or `backlog` rules and the user gave no work. `--rules` replaces the
-   whole array, so keep the default `self-improve` rule when you save; it only
-   proposes changes. Rules with `every` run on a schedule while you run (see the
-   lifecycle skill, "Find more work").
-4. Print the file path and the dashboard URL.
+(`spend`, `autonomy_cap`) as upper bounds. Do not start a second delivery
+coordinator. Missing Lever skills block the affected work, not permission to
+substitute a different policy.
 
 Lever's `autonomy-dial` decides who may merge. Without a grant, stay at L2 or
 below. Pass the resolved authority to the implementation worker, which owns

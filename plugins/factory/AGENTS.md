@@ -394,9 +394,8 @@ is refused with exit 1 unless the first PID is dead, or no longer belongs to a
 live PID counts as the waiter when `ps` cannot run, as in some sandboxes). The
 file stays a bare PID. `broker.mjs armed FILE`
 exits 0 when a waiter is alive and 1 otherwise, and `reconcile.mjs` reports
-`no-waiter` while the run is `active` or a task is open. Keep the rule in
-`agents/general.agent.md` and the lifecycle skill's "Receive worker events"
-in sync.
+`no-waiter` while the run is `active` or a task is open. Keep the rule in the
+lifecycle skill's "Receive worker events" in sync.
 
 The skill must not depend on files in the coordination plugin.
 `serve.mjs` repeats the small state-directory confinement code of the coordinator
