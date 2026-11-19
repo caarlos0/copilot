@@ -377,7 +377,7 @@ so its own writes and the attention events (no task; hooks emit them with source
 appends and exits 1 with a reason when it refuses: a `worker.result` needs
 `data.result`, a JSON file in the state directory whose `task`, `role` and
 `outcome` match the event, and a `complete` implementation result with `data.head`
-needs the task's worktree at that head, and, for a task without a PR, descended
+needs the task's worktree at that head with no uncommitted changes, and, for a task without a PR, descended
 from `main`. After a PR merge, the
 implementation worker also emits `pr.merged`, a hint: the factory verifies the
 merge on GitHub, resolves the task, and releases its panes and worktree, and

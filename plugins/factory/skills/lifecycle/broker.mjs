@@ -167,6 +167,7 @@ async function checkHead(factory, task, head) {
   if (!worktree?.path) return;
   const at = git(worktree.path, "rev-parse", "HEAD");
   if (at !== head) throw new Error(`The worktree ${worktree.path} is at ${at}, not at head ${head}. Commit, then report the real head.`);
+  if (git(worktree.path, "status", "--porcelain")) throw new Error(`The worktree ${worktree.path} has uncommitted changes; commit, then emit again.`);
   if (record.pr) return;
   try {
     git(worktree.path, "merge-base", "--is-ancestor", defaultBranch, head);

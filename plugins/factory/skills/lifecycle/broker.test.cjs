@@ -242,6 +242,32 @@ test("a complete implementation result must report the worktree head, rebased on
   assert.equal(emit("0".repeat(40)).status, 0);
 });
 
+test("a complete implementation result is refused while the worktree has uncommitted changes", async (t) => {
+  const f = await fixture(t);
+  const git = (cwd, ...args) => {
+    const out = spawnSync("git", ["-C", cwd, "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false", ...args], { encoding: "utf8" });
+    assert.equal(out.status, 0, out.stderr);
+    return out.stdout.trim();
+  };
+  const repo = join(f.directory, "repo");
+  git(f.directory, "init", "-b", "main", repo);
+  git(repo, "commit", "--allow-empty", "-m", "base");
+  const head = git(repo, "rev-parse", "HEAD");
+  writeFileSync(f.factory, JSON.stringify({ tasks: [{ id: "t1", pr: null, worktree: { path: repo, created_by_run: true } }] }));
+  const data = JSON.stringify(withResult(f.directory, "t1", { role: "implementation", outcome: "complete", head }));
+  const emit = () => f.run("emit", f.factory, "worker.result", "--task", "t1", "--data", data);
+
+  writeFileSync(join(repo, "work.txt"), "x");
+  const dirty = emit();
+  assert.equal(dirty.status, 1);
+  assert.match(dirty.stderr, /uncommitted changes; commit, then emit again/);
+
+  git(repo, "add", "work.txt");
+  git(repo, "commit", "-m", "work");
+  const committed = JSON.stringify(withResult(f.directory, "t1", { role: "implementation", outcome: "complete", head: git(repo, "rev-parse", "HEAD") }));
+  assert.equal(f.run("emit", f.factory, "worker.result", "--task", "t1", "--data", committed).status, 0);
+});
+
 test("pr.merged needs a task, pr, and merge_commit", async (t) => {
   const f = await fixture(t);
   const merged = { role: "implementation", pr: "https://github.com/owner/repo/pull/1", merge_commit: "a".repeat(40), head: "b".repeat(40) };
