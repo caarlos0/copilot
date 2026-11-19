@@ -1928,6 +1928,99 @@ test("Cmd+K and Ctrl+K toggle the task palette, and other dialogs keep it closed
   }
 });
 
+test("r refreshes like the button, and is ignored while typing, with modifiers, or with a dialog open", async (t) => {
+  const answers = [];
+  const ui = await dashboard(t, {
+    fetchRequest: async (path, _, request) => {
+      answers.push(path.split("?")[0]);
+      return request();
+    },
+  });
+  const calls = () => answers.filter((path) => path === "/api/factory").length;
+  const ignored = async (event, setup = () => {}) => {
+    const before = calls();
+    setup(true);
+    const dispatched = ui.press("r", event);
+    await ui.run("running");
+    setup(false);
+    assert.equal(calls(), before, JSON.stringify(event));
+    assert.equal(dispatched.defaultPrevented, false);
+  };
+  answers.length = 0;
+  for (const modifier of ["metaKey", "ctrlKey", "altKey", "shiftKey"]) await ignored({ [modifier]: true });
+  await ignored({ target: { closest: () => ({}) } });
+  await ignored({ repeat: true });
+  await ignored({}, (open) => { ui.get("settings-dialog").open = open; });
+  await ignored({}, (open) => { ui.get("palette-dialog").open = open; });
+
+  const dispatched = ui.press("r");
+  assert.equal(dispatched.defaultPrevented, true);
+  await ui.run("running");
+  assert.equal(calls(), 1);
+  assert.match(html, /<button id="refresh"[^>]* title="[^"]*\(R\)"[^>]* aria-keyshortcuts="r"/);
+});
+
+test("the Refresh button is disabled and busy while a refresh runs, and works again after it ends, also on failure", async (t) => {
+  let release;
+  let reached;
+  let fail = false;
+  let hold = false;
+  const ui = await dashboard(t, {
+    fetchRequest: async (path, _, request) => {
+      if (hold && path.startsWith("/api/factory?")) {
+        await new Promise((resolve) => { release = resolve; reached(); });
+        if (fail) throw new Error("boom");
+      }
+      return request();
+    },
+  });
+  const hit = () => new Promise((resolve) => { reached = resolve; });
+  const button = ui.get("refresh");
+  assert.equal(button.disabled === true, false);
+  hold = true;
+  let held = hit();
+  const first = button.fire("click");
+  assert.equal(button.disabled, true);
+  assert.equal(button["aria-busy"], "true");
+
+  await held;
+  const before = ui.run("running");
+  await ui.press("r");
+  await button.fire("click");
+  assert.equal(ui.run("running"), before, "Neither the key nor a click starts a second refresh.");
+
+  release();
+  await first;
+  assert.equal(button.disabled, false);
+  assert.equal(button["aria-busy"], "false");
+
+  fail = true;
+  held = hit();
+  const second = button.fire("click");
+  assert.equal(button.disabled, true);
+  await held;
+  release();
+  await second;
+  assert.equal(button.disabled, false);
+  assert.equal(button["aria-busy"], "false");
+
+  fail = false;
+  hold = false;
+  ui.press("r");
+  assert.equal(button.disabled, true, "The key shows the same busy state as a click.");
+  await ui.run("running");
+  await null;
+  assert.equal(button.disabled, false);
+});
+
+test("every button gets a pressed state, and the slide respects reduced motion", () => {
+  assert.match(html, /\n {6}button:active:not\(:disabled\), \.factory-item:active:not\(:disabled\) \{ background: var\(--btn-active\); \}/);
+  assert.match(html, /\n {6}\.action-primary:active:not\(:disabled\) \{ background: var\(--btn-primary-active\); \}/);
+  const motion = html.match(/@media \(prefers-reduced-motion: no-preference\) \{\s*button:active:not\(:disabled\) \{([^}]*)\}/);
+  assert.match(motion?.[1] ?? "", /transform: translateY\(1px\)/);
+  assert.doesNotMatch(html.replace(motion?.[0] ?? "", ""), /button:active[^{]*\{[^}]*transform/);
+});
+
 test("palette rows show the task reference with the same glyph as links", async (t) => {
   const ui = await dashboard(t);
   ui.press("k", { metaKey: true });
@@ -2069,7 +2162,7 @@ test("the page works on a phone: viewport, safe areas, touch sizes and contained
     assert.match(button, /<svg [^>]*aria-hidden="true"/, `${id} has an icon.`);
     assert.match(button, /<span class="label">/, `${id} keeps its text on desktop.`);
     const name = id === "refresh" ? "Refresh" : "Go to task";
-    assert.match(button, new RegExp(`aria-label="${name}" title="${name}"`));
+    assert.match(button, new RegExp(`aria-label="${name}" title="${name}( \\(R\\))?"`));
   }
 
   const blocks = (query) => {

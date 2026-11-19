@@ -18,8 +18,10 @@
         --border-emphasis: #818b98;
         --btn-bg: #f6f8fa;
         --btn-hover: #eff2f5;
+        --btn-active: #e6eaef;
         --btn-primary: #1f883d;
         --btn-primary-hover: #1a7f37;
+        --btn-primary-active: #176f32;
         --accent: #0969da;
         --success: #1a7f37;
         --attention: #9a6700;
@@ -51,8 +53,10 @@
           --border-emphasis: #656c76;
           --btn-bg: #212830;
           --btn-hover: #262c36;
+          --btn-active: #2e3540;
           --btn-primary: #238636;
           --btn-primary-hover: #29903b;
+          --btn-primary-active: #1f7a30;
           --accent: #4493f8;
           --success: #3fb950;
           --attention: #d29922;
@@ -113,6 +117,11 @@
       button:hover:not(:disabled) { background: var(--btn-hover); }
       .action-primary { color: #fff; background: var(--btn-primary); border-color: rgb(31 35 40 / .15); }
       .action-primary:hover:not(:disabled) { background: var(--btn-primary-hover); }
+      button:active:not(:disabled), .factory-item:active:not(:disabled) { background: var(--btn-active); }
+      .action-primary:active:not(:disabled) { background: var(--btn-primary-active); }
+      @media (prefers-reduced-motion: no-preference) {
+        button:active:not(:disabled) { transform: translateY(1px); }
+      }
       select { width: 480px; max-width: 100%; padding: 5px 12px; background: var(--bg); }
       textarea { width: 100%; padding: 8px 12px; background: var(--bg); resize: vertical; }
       input[type="search"] { width: 100%; padding: 5px 12px; background: var(--bg); }
@@ -210,7 +219,7 @@
       .summary-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
       .summary-text.clamped { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
       .summary-toggle { margin-top: 4px; padding: 0; border: 0; background: none; color: var(--accent); font-size: 12px; font-weight: 400; }
-      .summary-toggle:hover:not(:disabled) { background: none; text-decoration: underline; }
+      .summary-toggle:hover:not(:disabled), .summary-toggle:active:not(:disabled) { background: none; text-decoration: underline; }
       .feedback-note { white-space: pre-wrap; border-left: 3px solid var(--accent); padding-left: 12px; }
       .move { flex: none; padding: 3px 12px; font-size: 12px; }
       .move-form { padding: 16px 24px; }
@@ -282,6 +291,10 @@
       #project-menu .factory-item { width: 100%; max-width: 100%; }
       #open-palette, #refresh { display: inline-flex; align-items: center; gap: 8px; }
       #open-palette svg, #refresh svg { flex: none; }
+      @media (prefers-reduced-motion: no-preference) {
+        #refresh[aria-busy="true"] svg { animation: spin 1s linear infinite; }
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
       /* Phones and touch screens: 44px targets and 16px inputs (iOS zooms smaller ones). */
       @media (max-width: 700px), (pointer: coarse) {
         button, select, input, textarea { min-height: 44px; font-size: 16px; }
@@ -359,7 +372,7 @@
           </svg>
           <span class="label">Go to task</span>
         </button>
-        <button id="refresh" type="button" aria-label="Refresh" title="Refresh">
+        <button id="refresh" type="button" aria-label="Refresh" title="Refresh (R)" aria-keyshortcuts="r">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"
             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2v3h-3"/>
@@ -1086,6 +1099,9 @@
         if (index >= 0) {
           event.preventDefault();
           select(sidebar[index]);
+        } else if (event.key === "r" && !(event.metaKey || event.ctrlKey || event.altKey || event.shiftKey)) {
+          event.preventDefault();
+          refreshNow();
         }
       }
 
@@ -1910,12 +1926,32 @@
         draw();
       }
 
-      async function refresh() {
+      let running = null;
+      function refresh() {
         if (refreshing) {
           pendingRefresh = true;
-          return;
+          return running;
         }
         refreshing = true;
+        running = runRefresh();
+        return running;
+      }
+
+      // The button and the r key; the 30 second timer must not disable the button under a focused keyboard user.
+      async function refreshNow() {
+        const button = document.getElementById("refresh");
+        if (button.disabled) return;
+        button.disabled = true;
+        button.setAttribute("aria-busy", "true");
+        try {
+          await refresh();
+        } finally {
+          button.disabled = false;
+          button.setAttribute("aria-busy", "false");
+        }
+      }
+
+      async function runRefresh() {
         clearTimeout(refreshTimer);
         try {
           let found = null;
@@ -1986,7 +2022,7 @@
         etags.clear();
         return refresh();
       }
-      document.getElementById("refresh").addEventListener("click", refresh);
+      document.getElementById("refresh").addEventListener("click", refreshNow);
       document.getElementById("open-palette").addEventListener("click", () => {
         if (snapshot && !moveDialog.open && !settingsDialog.open && !paletteDialog.open) openPalette();
       });

@@ -256,7 +256,12 @@ flowchart shrinks while it is open) and can move a task back or directly
 to `resolved` with an operator comment. Manual resolution requires a non-merge
 outcome; it does not merge or close GitHub items. Cmd+K or Ctrl+K opens a task
 palette (`rankTasks` in `factory-data.mjs`) that docks the chosen task's list and
-focuses its row; the shortcut is ignored while another dialog is open. The header
+focuses its row; the shortcut is ignored while another dialog is open. Plain `r`
+refreshes like the header button; it is ignored while typing, with a modifier key, or
+with a dialog open. While a button refresh runs the button is disabled and `aria-busy`
+(the icon spins unless reduced motion is set), and it comes back when the request ends,
+also on failure; the 30 second timer never disables it. Every button has an `:active`
+pressed state (a darker background, and a 1px slide unless reduced motion is set). The header
 shows "Go to task" and "Refresh" with an icon and text; at 700px wide or less
 they are icon-only 44px buttons. The header has no freshness label. At that width the
 sidebar gives way to a project dropdown (the sidebar list, same sort order) with a

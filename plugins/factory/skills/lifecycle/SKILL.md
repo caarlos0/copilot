@@ -1476,7 +1476,7 @@ without it. Only use `--host` when the user asks to reach the
 dashboard from another device.
 
 The page shows the flow with a task count per state, task lists, the read-only
-"Find work" panel, Move and Unblock, settings, and a Cmd+K palette (see
+"Find work" panel, Move and Unblock, settings, a Cmd+K palette, and an `r` refresh key (see
 `AGENTS.md`). It rereads the file every 30 seconds and shows saved state, not
 live worker status. The server accepts writes only from its own origin, with
 JSON, through the shared writer. Do not add a polling schedule just for the
