@@ -1122,6 +1122,23 @@ test("a row shows one chip for a resource listed with a fragment, a query or ano
   assert.deepEqual(row.querySelector(".links").children.map((node) => node.href), [issue, "https://github.com/other/repo/issues/1009"]);
 });
 
+test("a row shows one chip when a link repeats the issue with another owner/repo case", async (t) => {
+  const ui = await dashboard(t);
+  const task = {
+    ...example.tasks[0],
+    issue: "https://github.com/githubcustomers/morgan-stanley/issues/1009",
+    pr: "https://github.com/github/copilot-agent-runtime/pull/44083",
+    links: [
+      "https://github.com/githubcustomers/Morgan-Stanley/issues/1009",
+      "https://github.com/github/copilot-agent-runtime/issues/24065",
+      "https://github.com/github/copilot-settings-engine/pull/508",
+      "https://github.com/githubcustomers/morgan-stanley/issues/1009",
+    ],
+  };
+  const row = ui.run(`taskRow(${JSON.stringify(task)}, new Set())`);
+  assert.deepEqual(row.querySelector(".links").children.map((node) => node.textContent), ["1009", "24065", "508", "44083"]);
+});
+
 test("a row without references has no links line", async (t) => {
   const ui = await dashboard(t);
   const task = { ...example.tasks[0], issue: null, pr: null, links: [] };
