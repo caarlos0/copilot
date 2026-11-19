@@ -1,14 +1,14 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 import { readFile, readdir, realpath, rename, stat, writeFile } from "node:fs/promises";
-import { networkInterfaces } from "node:os";
+import { homedir, networkInterfaces } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { countByState, isObject, validate } from "./factory-data.mjs";
 import { resolveAttention, sendAnswer } from "./attention.mjs";
 import { ConflictError, update } from "./factory.mjs";
-import { stateDirectories } from "./state-dir.mjs";
+import { candidates, stateDirectories } from "./state-dir.mjs";
 
 const factoryFile = /-factory\.json$/i;
 const maxBody = 16384;
@@ -100,12 +100,22 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
 
   // An explicit --directory means only that directory. Otherwise a file may live
   // in either state directory, and the first one that has it (the new one) wins.
-  const directories = [];
-  for (const configured of options.directory ? [resolve(options.directory)] : stateDirectories()) {
-    const directory = await realpath(configured);
-    await readdir(directory);
-    directories.push({ configured, directory });
+  // A directory that does not exist yet is skipped, and found when it appears.
+  const checked = options.directory ? [resolve(options.directory)] : candidates(homedir());
+  let directories = [];
+  async function resolveDirectories() {
+    const found = [];
+    for (const configured of options.directory ? checked : stateDirectories()) {
+      try {
+        found.push({ configured, directory: await realpath(configured) });
+      } catch (error) {
+        if (error.code !== "ENOENT") throw error;
+      }
+    }
+    directories = found;
   }
+  await resolveDirectories();
+  if (!directories.length) throw new Error(`No state directory exists. Checked: ${checked.join(", ")}`);
   const assets = dirname(fileURLToPath(import.meta.url));
 
   async function localFile(value) {
@@ -187,6 +197,7 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
   }
 
   async function factoryNames() {
+    await resolveDirectories();
     const names = new Set();
     for (const { directory } of directories) {
       for (const entry of await readdir(directory, { withFileTypes: true })) {

@@ -137,3 +137,28 @@ test("the cached factory follows the file when it moves between directories", as
   const back = await fetch(new URL(path, url));
   assert.equal((await back.json()).project, "legacy/repo");
 });
+
+test("the dashboard exits with the checked directories when none exists", async (t) => {
+  const directory = await home(t);
+  await assert.rejects(dashboard(t, directory), (error) => {
+    assert.match(error.message, /exited 1/);
+    assert.match(error.message, /No state directory exists/);
+    assert.ok(error.message.includes(state(directory, "copilot-factory")));
+    assert.ok(error.message.includes(state(directory, "copilot-coordinator")));
+    return true;
+  });
+});
+
+test("the dashboard lists a state directory created after it started", async (t) => {
+  const directory = await home(t, "copilot-coordinator");
+  await writeFile(join(state(directory, "copilot-coordinator"), "legacy.repo-factory.json"), withProject("legacy/repo"));
+  const url = await dashboard(t, directory);
+  const list = async () => (await (await fetch(new URL("/api/factories", url))).json()).factories.map((item) => item.file);
+  assert.deepEqual(await list(), ["legacy.repo-factory.json"]);
+
+  await mkdir(state(directory, "copilot-factory"), { recursive: true });
+  await writeFile(join(state(directory, "copilot-factory"), factoryFile), withProject("new/repo"));
+  assert.deepEqual((await list()).sort(), ["legacy.repo-factory.json", factoryFile]);
+  const served = await fetch(new URL(`/api/factory?file=${factoryFile}`, url));
+  assert.equal((await served.json()).project, "new/repo");
+});

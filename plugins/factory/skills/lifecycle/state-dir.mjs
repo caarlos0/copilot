@@ -11,7 +11,7 @@ const exists = (path) => {
   }
 };
 
-const candidates = (home) => [
+export const candidates = (home) => [
   join(home, ".local/state/copilot-factory"),
   join(home, ".local/state/copilot-coordinator"),
 ];
