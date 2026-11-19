@@ -901,6 +901,12 @@ test("on a phone the flow is one column at the screen width, drawn at scale 1", 
   assert.equal(desktop.get("flow").viewBox, "0 0 1160 560");
 });
 
+test("no hover or reach rule gives a state square a blue border", () => {
+  const rules = [...html.matchAll(/^\s*(\.node[^{\n]*)\{([^}]*)\}/gm)];
+  const blue = rules.filter(([, selector, body]) => /:hover|\.reach/.test(selector) && /stroke:[^;]*--accent/.test(body));
+  assert.deepEqual(blue.map(([, selector]) => selector.trim()), []);
+});
+
 for (const width of [0, 390]) test(`hovering or focusing a state lights only its direct moves and the states they reach (${width ? "vertical" : "horizontal"} chart)`, async (t) => {
   const { states, transitions } = await import("./factory-data.mjs");
   const ui = await dashboard(t);
