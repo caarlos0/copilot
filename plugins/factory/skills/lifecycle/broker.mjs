@@ -42,14 +42,22 @@ class UsageError extends Error {}
 function alive(pid) {
   try {
     process.kill(pid, 0);
-    return true;
   } catch (error) {
-    return error.code === "EPERM";
+    if (error.code !== "EPERM") return false;
+  }
+  // A reused PID is alive but not a waiter. When ps cannot run (some sandboxes),
+  // the process cannot be identified, so it counts as the waiter.
+  try {
+    const command = execFileSync("ps", ["-o", "command=", "-p", String(pid)], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    return /broker\.mjs\s+wait\b/.test(command);
+  } catch {
+    return true;
   }
 }
 
 // The PID of the armed waiter for this factory, or null when none runs. A PID file
-// whose process is gone is stale and counts as no waiter.
+// whose process is gone, or whose PID now belongs to another command, is stale and
+// counts as no waiter.
 export async function waiterPid(factory) {
   let text;
   try {
@@ -407,8 +415,10 @@ cursor  Prints {"cursor":"N"} for the current end of the log.
 armed   Read-only. Prints {"armed":true,"pid":N} and exits 0 when a waiter for this factory is
         alive, or {"armed":false} and exits 1 when none is. wait records its PID in
         <owner.repo>-factory-waiter.pid and removes it on exit; a PID file whose process is
-        gone is stale. A second wait for the same factory refuses with exit 1 unless the first
-        is stale, so there is exactly one waiter. A turn must never end while armed exits 1.
+        gone, or whose command line (ps -o command=) is not "broker.mjs wait", is stale (a
+        recycled PID). Without a usable ps, a live PID counts as the waiter. A second wait for
+        the same factory refuses with exit 1 unless the first is stale, so there is exactly one
+        waiter. A turn must never end while armed exits 1.
 
 Progress and errors go to stderr. Exit: 0 success, 1 operational failure, 2 invalid usage.`;
 

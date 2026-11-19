@@ -1,5 +1,5 @@
 const assert = require("node:assert/strict");
-const { spawnSync } = require("node:child_process");
+const { spawn, spawnSync } = require("node:child_process");
 const { mkdir, mkdtemp, rm, writeFile } = require("node:fs/promises");
 const { tmpdir } = require("node:os");
 const { join } = require("node:path");
@@ -7,6 +7,13 @@ const { test } = require("node:test");
 
 const hooks = require("../hooks.json");
 const [entry] = hooks.hooks.agentStop;
+
+// The waiter check reads the PID's command line, so the PID must belong to a "broker.mjs wait" process.
+function fakeWaiter(t) {
+  const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)", "broker.mjs", "wait"], { stdio: "ignore" });
+  t.after(() => child.kill());
+  return child.pid;
+}
 
 async function fixture(t) {
   const directory = await mkdtemp(join(tmpdir(), "stop-hook-test-"));
@@ -16,7 +23,7 @@ async function fixture(t) {
   return {
     directory,
     file,
-    async write({ status = "active", waiter = process.pid, tasks = [] } = {}) {
+    async write({ status = "active", waiter = fakeWaiter(t), tasks = [] } = {}) {
       await writeFile(file, JSON.stringify({ status, tasks }));
       if (waiter !== null) await writeFile(pidFile, `${waiter}\n`);
     },

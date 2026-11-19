@@ -471,6 +471,33 @@ test("a stale waiter file counts as no waiter and is replaced by the next wait",
   assert.equal(f.run("armed", f.factory).status, 1);
 });
 
+test("a recycled PID in the waiter file counts as no waiter, and a waiter-looking process still counts", async (t) => {
+  const psWorks = spawnSync("ps", ["-o", "command=", "-p", String(process.pid)]).status === 0;
+  if (!psWorks) return t.skip("ps is not usable here");
+  const f = await fixture(t);
+  const pidFile = join(f.directory, "owner.repo-factory-waiter.pid");
+  const idle = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { stdio: "ignore" });
+  t.after(() => idle.kill());
+  for (const pid of [1, idle.pid]) {
+    await writeFile(pidFile, `${pid}\n`);
+    const armed = f.run("armed", f.factory);
+    assert.equal(armed.status, 1, `pid ${pid}`);
+    assert.deepEqual(JSON.parse(armed.stdout), { armed: false });
+  }
+
+  // wait replaces the recycled PID.
+  const done = await f.wait();
+  assert.notEqual(JSON.parse(f.run("armed", f.factory).stdout).pid, idle.pid);
+  f.emit("worker.result");
+  await done();
+
+  // The old bare-PID format is armed only when the command line is a broker waiter.
+  const lookalike = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)", script, "wait", f.factory], { stdio: "ignore" });
+  t.after(() => lookalike.kill());
+  await writeFile(pidFile, `${lookalike.pid}\n`);
+  assert.deepEqual(JSON.parse(f.run("armed", f.factory).stdout), { armed: true, pid: lookalike.pid });
+});
+
 test("--due returns reconcile.due after the injected interval while the run is active", async (t) => {
   const f = await fixture(t);
   await writeFile(f.factory, JSON.stringify({ status: "active", rules: [] }));

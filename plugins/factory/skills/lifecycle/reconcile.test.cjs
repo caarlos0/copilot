@@ -1,5 +1,5 @@
 const assert = require("node:assert/strict");
-const { spawnSync } = require("node:child_process");
+const { spawn, spawnSync } = require("node:child_process");
 const { chmod, mkdir, mkdtemp, readFile, rm, writeFile } = require("node:fs/promises");
 const { tmpdir } = require("node:os");
 const { delimiter, join } = require("node:path");
@@ -7,6 +7,13 @@ const { test } = require("node:test");
 
 const script = join(__dirname, "reconcile.mjs");
 const window = "window:01a1ea3c-952d-7bdf-a621-95363a2bc34f";
+
+// The waiter check reads the PID's command line, so the PID must belong to a "broker.mjs wait" process.
+function fakeWaiter(t) {
+  const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)", "broker.mjs", "wait"], { stdio: "ignore" });
+  t.after(() => child.kill());
+  return child.pid;
+}
 
 function git(cwd, ...args) {
   const result = spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8" });
@@ -41,7 +48,7 @@ async function fixture(t, rex) {
   const file = join(directory, "owner.repo-factory.json");
   return {
     directory, repo, file,
-    async run(tasks, { status = "active", waiter = process.pid, rules, env, args = [] } = {}) {
+    async run(tasks, { status = "active", waiter = fakeWaiter(t), rules, env, args = [] } = {}) {
       await writeFile(file, JSON.stringify({ rex_session: "session:work", status, tasks, rules }));
       const pidFile = join(directory, "owner.repo-factory-waiter.pid");
       if (waiter === null) await rm(pidFile, { force: true });
