@@ -2281,7 +2281,7 @@ test("the factory payload lists pending attention oldest first, and its tag foll
   const { attention } = await changed.json();
   assert.deepEqual(attention.map((item) => item.session), ["s-old", "s-new"]);
   assert.deepEqual(attention[1], {
-    session: "s-new", kind: "ask-user", text: "Pick one", options: ["a", "b"], role: "implementation",
+    id: "e1", session: "s-new", kind: "ask-user", text: "Pick one", options: ["a", "b"], role: "implementation",
     pane: null, task: "issue-5", at: attention[1].at,
   });
   assert.equal((await read(tag)).status, 304);
@@ -2321,6 +2321,112 @@ esac
   const resolved = (await readFile(events, "utf8")).trim().split("\n").map((line) => JSON.parse(line))
     .filter(({ type }) => type === "attention.resolved");
   assert.deepEqual(resolved.map(({ source, data }) => [source, data.session, data.reason]), [["attention", "s-gone", "pane-gone"]]);
+});
+
+test("answering types the picked option into the pane of a pending ask_user prompt", async (t) => {
+  const bin = await mkdtemp(join(tmpdir(), "factory-dashboard-rex-"));
+  t.after(() => rm(bin, { recursive: true, force: true }));
+  const sent = join(bin, "sent.txt");
+  await writeFile(join(bin, "rex"), `#!/bin/sh
+[ "$1" = "--autostart=false" ] && shift
+case "$1" in
+  block) echo block:01a1f4e8-4bb0-72d2-bff2-25420482aad9 ;;
+  send-key)
+    if [ -e "${bin}/fail" ]; then echo "no such block" >&2; exit 1; fi
+    printf '%s\\n' "$*" >> "${sent}" ;;
+esac
+`);
+  await chmod(join(bin, "rex"), 0o755);
+  const { url, directory } = await server(t, { PATH: `${bin}${delimiter}${process.env.PATH}` });
+  const live = "block:01a1f4e8-4bb0-72d2-bff2-25420482aad9";
+  const at = new Date(Date.now() - 60_000).toISOString();
+  const request = (id, session, data) => ({ id, at, type: "attention.requested", task: null, source: "attention",
+    data: { session, kind: "ask-user", text: "Pick one", options: ["a", "b", "c"], role: "implementation", pane: live, ...data } });
+  await appendFile(join(directory, "owner.repo-factory-events.jsonl"), [
+    request("ask", "s-ask", {}),
+    request("perm", "s-perm", { kind: "permission", options: [] }),
+    request("odd", "s-odd", { pane: null }),
+    request("gone", "s-gone", { pane: "block:01a1f4d3-c03e-7f0b-bc24-060b0352db5f" }),
+  ].map((event) => `${JSON.stringify(event)}\n`).join(""));
+
+  const answer = (body, headers = {}) => get(url, `/api/attention/answer?file=${factoryFile}`, {
+    method: "POST",
+    headers: { Origin: new URL(url).origin, "Content-Type": "application/json", ...headers },
+    body: JSON.stringify(body),
+  });
+  const keys = async () => readFile(sent, "utf8").catch(() => "");
+
+  const ok = await answer({ id: "ask", index: 2 });
+  assert.equal(ok.status, 200, await ok.clone().text());
+  assert.equal(await keys(), `send-key -b ${live} down down enter\n`);
+
+  const refusals = [
+    [{ id: "ask", index: -1 }, 400, /option index/],
+    [{ id: "ask", index: "1" }, 400, /option index/],
+    [{ id: "ask", index: 1, extra: true }, 400, /option index/],
+    [{ id: "missing", index: 0 }, 409, /no longer waiting/],
+    [{ id: "perm", index: 0 }, 409, /no options/],
+    [{ id: "odd", index: 0 }, 409, /no pane/],
+    [{ id: "gone", index: 0 }, 409, /no longer waiting/],
+  ];
+  for (const [body, status, message] of refusals) {
+    const response = await answer(body);
+    assert.equal(response.status, status, JSON.stringify(body));
+    assert.match((await response.json()).error, message, JSON.stringify(body));
+  }
+  const outOfRange = await answer({ id: "ask", index: 3 });
+  assert.equal(outOfRange.status, 400);
+  assert.match((await outOfRange.json()).error, /from 0 to 2/);
+
+  await writeFile(join(bin, "fail"), "");
+  const failed = await answer({ id: "ask", index: 0 });
+  assert.equal(failed.status, 502);
+  assert.match((await failed.json()).error, /Rex could not send the answer: no such block/);
+  await rm(join(bin, "fail"));
+
+  const foreign = await answer({ id: "ask", index: 0 }, { Origin: "http://evil.example" });
+  assert.equal(foreign.status, 403);
+  const wrongType = await answer({ id: "ask", index: 0 }, { "Content-Type": "text/plain" });
+  assert.ok(wrongType.status >= 400 && wrongType.status < 500);
+  assert.equal(await keys(), `send-key -b ${live} down down enter\n`, "A refused request sends no key.");
+});
+
+test("an ask_user prompt shows its options as buttons that post the pick, and the others stay copy-only", async (t) => {
+  const posts = [];
+  let reply = { status: 409, body: { error: "That prompt is no longer waiting." } };
+  const ui = await dashboard(t, {
+    fetchRequest: async (path, init, request) => {
+      if (!path.startsWith("/api/attention/answer")) return request();
+      posts.push({ path, body: JSON.parse(init.body) });
+      return new Response(JSON.stringify(reply.body), { status: reply.status });
+    },
+  });
+  const base = { role: "implementation", pane: "block:p1", task: null, at: "2026-05-01T12:00:00Z" };
+  const items = [
+    { ...base, id: "e1", session: "s1", kind: "ask-user", text: "Pick one", options: ["red", "green"] },
+    { ...base, id: "e2", session: "s2", kind: "sandbox-bypass", text: "Run ls", options: ["yes", "no"] },
+    { ...base, id: "e3", session: "s3", kind: "permission", text: "Run rm", options: [] },
+  ];
+  ui.run(`load({ ...snapshot, attention: ${JSON.stringify(items)} }, lastSource)`);
+  await ui.get("attention-badge").fire("click");
+  const [ask, bypass, permission] = ui.get("attention-list").children;
+  assert.equal(bypass.querySelectorAll(".attention-answer").length, 0, "Sandbox bypass options are text.");
+  assert.equal(permission.querySelectorAll(".attention-answer").length, 0);
+  assert.match(bypass.textContent, /yes.*no/);
+  const [red, green] = ask.querySelectorAll(".attention-answer");
+  assert.deepEqual([red.textContent, green.textContent], ["red", "green"]);
+  assert.equal(red.type, "button");
+
+  await green.fire("click");
+  assert.deepEqual(posts, [{ path: `/api/attention/answer?file=${encodeURIComponent(factoryFile)}`, body: { id: "e1", index: 1 } }]);
+  assert.match(ask.textContent, /Not sent: That prompt is no longer waiting\./);
+  assert.equal(red.disabled, false, "A refused answer can be tried again.");
+
+  reply = { status: 200, body: { sent: true } };
+  await red.fire("click");
+  assert.deepEqual(posts.at(-1).body, { id: "e1", index: 0 });
+  assert.match(ask.textContent, /Sent "red"\. Waiting for the prompt to close\./);
+  assert.equal(red.disabled && green.disabled, true, "A sent answer is not sent twice.");
 });
 
 test("the badge, the page title and the waiting list show pending attention as data", async (t) => {

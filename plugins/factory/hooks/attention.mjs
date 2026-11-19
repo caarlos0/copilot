@@ -50,11 +50,12 @@ function observe(input) {
   if (!args || typeof args !== "object") return null;
   if (input.toolName === "ask_user") {
     if (typeof args.message !== "string") return null;
-    const options = Object.values(args.requestedSchema?.properties ?? {})
-      .flatMap((property) => (Array.isArray(property?.enum) ? property.enum : []))
-      .filter((option) => typeof option === "string")
-      .slice(0, MAX_OPTIONS)
-      .map((option) => clip(option, MAX_OPTION));
+    // Only a form with one enum field has options the dashboard can pick by position.
+    const fields = Object.values(args.requestedSchema?.properties ?? {});
+    const choices = fields.length === 1 && Array.isArray(fields[0]?.enum) ? fields[0].enum : [];
+    const options = choices.length > 0 && choices.every((option) => typeof option === "string")
+      ? choices.slice(0, MAX_OPTIONS).map((option) => clip(option, MAX_OPTION))
+      : [];
     return { type: "ask-user", text: args.message, options };
   }
   if (input.toolName === "bash" && typeof args.command === "string") {

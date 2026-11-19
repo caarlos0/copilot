@@ -164,3 +164,33 @@ export async function resolveAttention(file, { source, ...options }) {
   }
   return scan;
 }
+
+const fail = (status, message) => Object.assign(new Error(message), { status });
+
+// The keys that pick option `index` of an ask_user form with one enum field. It has no number
+// keys: Down moves the highlight from the first option and Enter submits the form.
+const answerKeys = (index) => [...Array(index).fill("down"), "enter"];
+
+// Types the user's click into the item's pane. The caller has checked that the item is pending.
+// Rex gets an argument array and no shell; the pane must be a plain block ID that Rex still lists.
+// Permission prompts name no options, so nothing is sent to them.
+export async function sendAnswer(item, index) {
+  if (item.kind !== "ask-user" || !item.options?.length) {
+    throw fail(409, "This prompt has no options to pick here. Answer it in its pane.");
+  }
+  if (!Number.isSafeInteger(index) || index < 0 || index >= item.options.length) {
+    throw fail(400, `Option must be a whole number from 0 to ${item.options.length - 1}.`);
+  }
+  if (typeof item.pane !== "string" || !/^block:[\w-]+$/.test(item.pane)) {
+    throw fail(409, "This prompt has no pane to answer in.");
+  }
+  const live = await liveBlocks();
+  if (!live) throw fail(502, "Rex did not list the panes, so the answer was not sent.");
+  if (!live.some((id) => sameId(id, item.pane))) throw fail(409, "The pane of this prompt no longer exists.");
+  try {
+    await run("rex", ["--autostart=false", "send-key", "-b", item.pane, ...answerKeys(index)], { timeout: 10_000 });
+  } catch (error) {
+    const reason = String(error.stderr ?? error.message).trim().split("\n")[0];
+    throw fail(502, `Rex could not send the answer: ${reason}`);
+  }
+}

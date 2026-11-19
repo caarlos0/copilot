@@ -103,6 +103,23 @@ test("an ask_user question carries its message and options", async (t) => {
   assert.deepEqual(event.data.options, ["red", "green", "blue"]);
 });
 
+test("a form with several fields or a non-enum field carries no options", async (t) => {
+  const { run, events, worker } = await setup(t);
+  const payload = await load("pre-tool-use-ask-user.json");
+  const color = payload.toolArgs.requestedSchema.properties.color;
+  const forms = [
+    { color, size: { type: "string", enum: ["s", "m"] } },
+    { count: { type: "integer" } },
+    { color: { ...color, enum: ["red", 3] } },
+  ];
+  for (const properties of forms) {
+    const form = { ...payload, toolArgs: { ...payload.toolArgs, requestedSchema: { properties } } };
+    assert.equal(run(form, worker).status, 0);
+    assert.equal(run(await load("notification-elicitation.json"), worker).status, 0);
+  }
+  assert.deepEqual((await events()).map((event) => event.data.options), [undefined, undefined, undefined]);
+});
+
 test("an elicitation without a note falls back to the notification message", async (t) => {
   const { run, events, worker } = await setup(t);
   assert.equal(run(await load("notification-elicitation.json"), worker).status, 0);

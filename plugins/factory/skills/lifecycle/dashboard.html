@@ -198,6 +198,9 @@
       #attention-list { list-style: none; margin: 16px 0 0; padding: 0; border-top: 1px solid var(--border); }
       .attention-text { white-space: pre-wrap; overflow-wrap: anywhere; }
       .attention-options { margin: 8px 0; padding-left: 20px; }
+      .attention-answers { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0; }
+      .attention-answer { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .attention-answers p { flex-basis: 100%; margin: 0; }
       .attention-focus { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0 0; }
       #attention-badge { display: inline-flex; align-items: center; gap: 6px; color: var(--attention);
         border-color: color-mix(in srgb, var(--attention) 45%, var(--border)); }
@@ -470,7 +473,7 @@
         <p id="ignored-empty" class="muted" hidden>Nothing skipped.</p>
       </div>
       <div id="attention-view" hidden>
-        <p id="attention-note" class="muted">Read only. Answer each prompt in its pane.</p>
+        <p id="attention-note" class="muted">Pick an option to type it into the pane. Answer other prompts in their pane.</p>
         <ul id="attention-list"></ul>
         <p id="attention-empty" class="muted" hidden>Nothing is waiting for you.</p>
       </div>
@@ -1788,6 +1791,7 @@
 
       const attentionKinds = { permission: "Permission", "sandbox-bypass": "Sandbox bypass", "ask-user": "Question", other: "Other" };
       const attentionLimit = 20;
+      const attentionHelp = "Pick an option to type it into the pane. Answer other prompts in their pane.";
 
       // Octicons (16px): copy and check.
       const COPY_PATHS = [
@@ -1815,6 +1819,53 @@
         setTimeout(() => setCopyState(button, label, COPY_PATHS), 2000);
       }
 
+      function optionList(options) {
+        const list = element("ul", null, "attention-options");
+        list.append(...options.map((option) => element("li", option)));
+        return list;
+      }
+
+      // One button per option. The server types the pick into the pane; the item leaves the list
+      // when the prompt is answered, so a sent answer only shows a note until the next refresh.
+      function answerButtons(item) {
+        const box = element("div", null, "attention-answers");
+        const buttons = item.options.map((option, index) => {
+          const button = element("button", option, "attention-answer");
+          button.type = "button";
+          button.title = option;
+          button.addEventListener("click", () => answer(item, index, box, buttons, status));
+          return button;
+        });
+        const status = element("p", null, "muted");
+        status.hidden = true;
+        status.setAttribute("role", "status");
+        box.append(...buttons, status);
+        return box;
+      }
+
+      async function answer(item, index, box, buttons, status) {
+        const file = selection;
+        for (const button of buttons) button.disabled = true;
+        box.setAttribute("aria-busy", "true");
+        status.hidden = true;
+        try {
+          await requestJSON(`/api/attention/answer?${new URLSearchParams({ file })}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: item.id, index }),
+          });
+          status.textContent = `Sent "${item.options[index]}". Waiting for the prompt to close.`;
+          status.hidden = false;
+          if (selection === file) refresh();
+        } catch (cause) {
+          status.textContent = `Not sent: ${cause.message}`;
+          status.hidden = false;
+          for (const button of buttons) button.disabled = false;
+        } finally {
+          box.setAttribute("aria-busy", "false");
+        }
+      }
+
       function attentionRow(item) {
         const node = element("li", null, "task-row");
         node.dataset.session = item.session;
@@ -1826,9 +1877,7 @@
         heading.append(element("h3", attentionKinds[item.kind] ?? item.kind), chips);
         node.append(heading, element("p", item.text, "attention-text"));
         if (item.options?.length) {
-          const options = element("ul", null, "attention-options");
-          options.append(...item.options.map((option) => element("li", option)));
-          node.append(options);
+          node.append(item.id && item.kind === "ask-user" ? answerButtons(item) : optionList(item.options));
         }
         const meta = [item.task && `Task ${item.task}`, item.role].filter(Boolean).join(", ");
         if (meta) node.append(element("p", meta, "muted"));
@@ -1862,8 +1911,8 @@
         refreshElapsedLabels(list);
         const note = document.getElementById("attention-note");
         note.textContent = items.length > attentionLimit
-          ? `Read only. Answer each prompt in its pane. Showing the oldest ${attentionLimit} of ${items.length}.`
-          : "Read only. Answer each prompt in its pane.";
+          ? `${attentionHelp} Showing the oldest ${attentionLimit} of ${items.length}.`
+          : attentionHelp;
         document.getElementById("attention-empty").hidden = items.length > 0;
       }
 

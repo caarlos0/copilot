@@ -6,7 +6,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { countByState, isObject, validate } from "./factory-data.mjs";
-import { resolveAttention } from "./attention.mjs";
+import { resolveAttention, sendAnswer } from "./attention.mjs";
 import { ConflictError, update } from "./factory.mjs";
 import { stateDirectories } from "./state-dir.mjs";
 
@@ -173,7 +173,7 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
   // clear without waiting for a reconcile run.
   async function factoryView(entry) {
     const attention = (await pendingAttention(entry.target))
-      .map(({ session, kind, text, options, role, pane, task, at }) => ({ session, kind, text, options, role, pane, task, at }))
+      .map(({ id, session, kind, text, options, role, pane, task, at }) => ({ id, session, kind, text, options, role, pane, task, at }))
       .sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
     const digest = createHash("sha1").update(JSON.stringify(attention)).digest("base64url");
     return {
@@ -308,6 +308,29 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
       task: body.task, state: body.state, note: body.comment,
       "expected-revision": String(body.revision), resolution: body.resolution,
     });
+  }
+
+  // Types one option of a pending prompt into its pane, as the user would. The browser names the
+  // item by event ID, so a newer prompt of the same session is never answered by an old button.
+  // The item stays listed: only the session log, the pane, or the clock resolves it.
+  const answering = new Set();
+  async function answerAttention(request, file) {
+    const body = await readJSONBody(request);
+    if (!isObject(body) || Object.keys(body).some((key) => !["id", "index"].includes(key)) ||
+        typeof body.id !== "string" || !Number.isSafeInteger(body.index) || body.index < 0) {
+      throw new HttpError(400, "Provide the id of the waiting item and a non-negative option index.");
+    }
+    const { target } = await factoryTag(file);
+    const item = (await pendingAttention(target)).find(({ id }) => id === body.id);
+    if (!item) throw new HttpError(409, "That prompt is no longer waiting.");
+    if (answering.has(item.id)) throw new HttpError(409, "An answer for this prompt is already being sent.");
+    answering.add(item.id);
+    try {
+      await sendAnswer(item, body.index);
+    } finally {
+      answering.delete(item.id);
+    }
+    return { sent: true };
   }
 
   // set holds only the sections the user changed; expected holds what the browser saw for each of them.
@@ -465,8 +488,10 @@ p{margin:0;color:#f87171}
         send(response, 200, await moveTask(request, url.searchParams.get("file")));
       } else if (request.method === "POST" && url.pathname === "/api/settings") {
         send(response, 200, await setSettings(request, url.searchParams.get("file")));
+      } else if (request.method === "POST" && url.pathname === "/api/attention/answer") {
+        send(response, 200, await answerAttention(request, url.searchParams.get("file")));
       } else if (request.method !== "GET") {
-        throw new HttpError(405, "Use GET, or POST /api/move or /api/settings for dashboard changes.");
+        throw new HttpError(405, "Use GET, or POST /api/move, /api/settings or /api/attention/answer for dashboard changes.");
       } else if (url.pathname === "/" || url.pathname === "/dashboard.html") {
         send(response, 200, await readFile(join(assets, "dashboard.html")), "text/html; charset=utf-8");
       } else if (url.pathname === "/factory-data.mjs") {
