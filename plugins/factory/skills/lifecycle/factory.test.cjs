@@ -65,16 +65,21 @@ test("the shipped example is a valid factory", async () => {
 test("rankTasks matches identifying fields only and ranks id, then title, then other fields", async () => {
   const { rankTasks } = await import("./factory-data.mjs");
   const ids = (query, limit) => rankTasks(example.tasks, query, limit).map((task) => task.id);
-  const at = (id, time) => ({ id, history: time ? [{ at: "2020-01-01T00:00:00Z" }, { at: time }] : [] });
+  const at = (id, updated, last) => ({
+    id,
+    ...(updated && { updated_at: updated }),
+    history: last ? [{ at: "2020-01-01T00:00:00Z" }, { at: last }] : [],
+  });
   const recent = [
-    at("b", "2026-01-02T00:00:00Z"),
-    at("c", "2026-01-03T00:00:00Z"),
-    at("a", "2026-01-02T00:00:00Z"),
-    at("none", null),
+    at("b", "2026-01-02T00:00:00Z", "2026-01-09T00:00:00Z"),
+    at("c", "2026-01-03T00:00:00Z", "2026-01-01T00:00:00Z"),
+    at("a", "2026-01-02T00:00:00Z", null),
+    at("old", null, "2026-01-01T12:00:00Z"),
+    at("none", null, null),
   ];
-  assert.deepEqual(rankTasks(recent, "").map((task) => task.id), ["c", "a", "b", "none"]);
+  assert.deepEqual(rankTasks(recent, "").map((task) => task.id), ["c", "a", "b", "old", "none"]);
   assert.deepEqual(rankTasks(recent, "", 2).map((task) => task.id), ["c", "a"]);
-  assert.deepEqual(recent.map((task) => task.id), ["b", "c", "a", "none"]);
+  assert.deepEqual(recent.map((task) => task.id), ["b", "c", "a", "old", "none"]);
   assert.deepEqual(ids("issue-7"), ["issue-7"]);
   assert.deepEqual(ids("  ISSUE-7  "), ["issue-7"]);
   assert.deepEqual(ids("issue-3 typo"), ["issue-3"]);

@@ -109,7 +109,7 @@ export function entered(task) {
 }
 
 export function byRecency(tasks) {
-  const time = (task) => Date.parse(task.history?.at(-1)?.at) || 0;
+  const time = (task) => Date.parse(task.updated_at) || Date.parse(task.history?.at(-1)?.at) || 0;
   return [...tasks].sort((a, b) => time(b) - time(a) || a.id.localeCompare(b.id));
 }
 
