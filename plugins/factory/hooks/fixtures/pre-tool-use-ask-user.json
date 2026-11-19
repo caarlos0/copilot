@@ -1,0 +1,19 @@
+{
+  "sessionId": "00000000-0000-4000-8000-000000000002",
+  "timestamp": 1795104533221,
+  "cwd": "/work/repo",
+  "toolCallId": "toolu_000000000000000000000002",
+  "toolName": "ask_user",
+  "toolArgs": {
+    "message": "Which color do you prefer?",
+    "requestedSchema": {
+      "properties": {
+        "color": {
+          "type": "string",
+          "title": "Color",
+          "enum": ["red", "green", "blue"]
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "sessionId": "00000000-0000-4000-8000-000000000001",
+  "timestamp": 1795104596000,
+  "cwd": "/work/repo",
+  "toolCallId": "toolu_000000000000000000000001",
+  "toolName": "bash",
+  "toolArgs": {
+    "command": "ls /home/user/other | head -3",
+    "description": "List first three entries in other directory",
+    "requestSandboxBypass": true,
+    "requestSandboxBypassReason": "Reads /home/user/other, which is outside the sandbox allowed paths."
+  }
+}

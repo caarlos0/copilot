@@ -1,0 +1,123 @@
+{
+  "_note": "Lines of ~/.copilot/session-state/<sessionId>/events.jsonl, one object per key. The permission pair and the notification hook.start come from the sandbox-bypass session; the ask_user pair from the ask_user session. Ids, paths and timestamps are redacted.",
+  "permissionRequested": {
+    "type": "permission.requested",
+    "data": {
+      "requestId": "00000000-0000-4000-8000-0000000000a1",
+      "permissionRequest": {
+        "kind": "shell",
+        "toolCallId": "toolu_000000000000000000000001",
+        "fullCommandText": "ls /home/user/other | head -3",
+        "intention": "List first 3 entries in other dir",
+        "commands": [
+          { "identifier": "ls", "readOnly": true, "allowMatchIdentifier": null },
+          { "identifier": "head", "readOnly": true, "allowMatchIdentifier": null }
+        ],
+        "hasParseErrors": false,
+        "possiblePaths": ["/home/user/other"],
+        "sandboxPathGrant": {
+          "path": "/home/user/other",
+          "persistedPath": "/home/user/other",
+          "access": "read"
+        },
+        "requestSandboxBypassReason": "`/home/user/other` is outside the sandbox's readable paths.",
+        "possibleUrls": [],
+        "hasWriteFileRedirection": false,
+        "canOfferSessionApproval": false,
+        "requestSandboxBypass": true
+      },
+      "promptRequest": {
+        "kind": "commands",
+        "fullCommandText": "ls /home/user/other | head -3",
+        "intention": "List first 3 entries in other dir",
+        "commandIdentifiers": ["ls", "head"],
+        "canOfferSessionApproval": false,
+        "requestSandboxBypass": true,
+        "requestSandboxBypassReason": "`/home/user/other` is outside the sandbox's readable paths.",
+        "sandboxPathGrant": {
+          "path": "/home/user/other",
+          "persistedPath": "/home/user/other",
+          "access": "read"
+        },
+        "toolCallId": "toolu_000000000000000000000001"
+      },
+      "assistedApprovalAssessment": { "status": "not-run", "reason": "inactive" },
+      "agentMode": "interactive",
+      "permissionMode": "allow-all",
+      "ownerSessionId": "00000000-0000-4000-8000-000000000001"
+    },
+    "id": "00000000-0000-4000-8000-0000000000b1",
+    "timestamp": "2026-01-01T00:00:00.000Z",
+    "parentId": "00000000-0000-4000-8000-0000000000c1"
+  },
+  "notificationHookStart": {
+    "type": "hook.start",
+    "data": {
+      "hookInvocationId": "00000000-0000-4000-8000-0000000000d1",
+      "hookType": "notification",
+      "input": {
+        "message": "Run command: ls /home/user/other | head -3",
+        "notificationType": "permission_prompt",
+        "title": "Permission needed",
+        "sessionId": "00000000-0000-4000-8000-000000000001",
+        "timestamp": 1795104600363,
+        "cwd": "/work/repo"
+      }
+    },
+    "id": "00000000-0000-4000-8000-0000000000b2",
+    "timestamp": "2026-01-01T00:00:00.001Z",
+    "parentId": "00000000-0000-4000-8000-0000000000b1"
+  },
+  "permissionCompleted": {
+    "type": "permission.completed",
+    "data": {
+      "requestId": "00000000-0000-4000-8000-0000000000a1",
+      "toolCallId": "toolu_000000000000000000000001",
+      "result": { "kind": "approved" },
+      "decisionSource": "human_response"
+    },
+    "id": "00000000-0000-4000-8000-0000000000b3",
+    "timestamp": "2026-01-01T00:00:25.000Z",
+    "parentId": "00000000-0000-4000-8000-0000000000c2"
+  },
+  "askUserStart": {
+    "type": "tool.execution_start",
+    "data": {
+      "toolCallId": "toolu_000000000000000000000002",
+      "toolName": "ask_user",
+      "arguments": {
+        "message": "Which color do you prefer?",
+        "requestedSchema": {
+          "properties": {
+            "color": { "type": "string", "title": "Color", "enum": ["red", "green", "blue"] }
+          }
+        }
+      },
+      "turnId": "0",
+      "model": "claude-sonnet-5.5",
+      "toolTitle": "Asking user"
+    },
+    "id": "00000000-0000-4000-8000-0000000000b4",
+    "timestamp": "2026-01-01T00:00:00.000Z",
+    "parentId": "00000000-0000-4000-8000-0000000000c3"
+  },
+  "askUserComplete": {
+    "type": "tool.execution_complete",
+    "data": {
+      "toolCallId": "toolu_000000000000000000000002",
+      "model": "claude-sonnet-5.5",
+      "turnId": "0",
+      "success": true,
+      "result": {
+        "content": "User responded: red",
+        "detailedContent": "User responded:\nColor: red"
+      },
+      "toolTelemetry": {
+        "properties": { "elicitation_action": "accept", "elicitation_field_types": "[\"enum\"]" }
+      }
+    },
+    "id": "00000000-0000-4000-8000-0000000000b5",
+    "timestamp": "2026-01-01T00:00:15.000Z",
+    "parentId": "00000000-0000-4000-8000-0000000000c4"
+  }
+}

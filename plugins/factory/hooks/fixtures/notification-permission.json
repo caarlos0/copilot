@@ -1,0 +1,9 @@
+{
+  "sessionId": "00000000-0000-4000-8000-000000000001",
+  "timestamp": 1795104600363,
+  "cwd": "/work/repo",
+  "message": "Run command: ls /home/user/other | head -3",
+  "title": "Permission needed",
+  "hook_event_name": "Notification",
+  "notification_type": "permission_prompt"
+}

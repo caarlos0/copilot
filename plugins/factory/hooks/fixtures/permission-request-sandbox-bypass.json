@@ -1,0 +1,13 @@
+{
+  "hookName": "permissionRequest",
+  "sessionId": "00000000-0000-4000-8000-000000000001",
+  "timestamp": 1795104599806,
+  "cwd": "/work/repo",
+  "toolName": "bash",
+  "toolInput": {
+    "command": "ls /home/user/other | head -3",
+    "requestSandboxBypass": true,
+    "requestSandboxBypassReason": "`/home/user/other` is outside the sandbox's readable paths."
+  },
+  "permissionSuggestions": []
+}
