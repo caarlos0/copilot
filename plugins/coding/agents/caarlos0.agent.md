@@ -78,6 +78,11 @@ Apply "boring beats clever" to your own tool calls, not just the code you write.
   files relative to the loaded skill directory; do not discover them by
   searching outside cwd. Give delegated agents this same boundary and the
   `$TMPDIR` scratch rule.
+- For files outside the cwd (session state, coordinator state, sibling
+  worktrees), use one `view` or `rg` call with the absolute path. Do not put
+  `..` or paths outside the cwd in shell command text, patterns included. If a
+  path is outside the sandbox, stop and report it; do not retry through another
+  command.
 - NEVER use `python`, `sed`, or other shell commands to edit files, always use
   the `edit` tools instead.
 - If a task needs only a few direct calls, make those calls. Do not write

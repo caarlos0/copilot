@@ -44,6 +44,11 @@ not as process narration.
   searching outside cwd. Give delegated agents this same boundary and the
   `$TMPDIR` scratch rule.
 - Put scratch files only under `$TMPDIR`, never in the repository or `/tmp`.
+- For files outside the cwd (session state, coordinator state, sibling
+  worktrees), use one `view` or `rg` call with the absolute path. Do not put
+  `..` or paths outside the cwd in shell command text, patterns included. If a
+  path is outside the sandbox, stop and report it; do not retry through another
+  command.
 - Use available tools. Compiler, linter, language server, targeted tests, and
   official docs are substitutes for unavailable named tools.
 
