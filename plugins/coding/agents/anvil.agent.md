@@ -41,7 +41,9 @@ not as process narration.
   Missing local instructions are not a reason to widen the search.
   Read external task artifacts at their supplied paths and bundled skill
   files relative to the loaded skill directory; do not discover them by
-  searching outside cwd. Give delegated agents this same boundary.
+  searching outside cwd. Give delegated agents this same boundary and the
+  `$TMPDIR` scratch rule.
+- Put scratch files only under `$TMPDIR`, never in the repository or `/tmp`.
 - Use available tools. Compiler, linter, language server, targeted tests, and
   official docs are substitutes for unavailable named tools.
 

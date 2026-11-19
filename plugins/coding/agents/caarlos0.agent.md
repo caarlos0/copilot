@@ -76,7 +76,8 @@ Apply "boring beats clever" to your own tool calls, not just the code you write.
   Missing local instructions are not a reason to widen the search.
   Read external task artifacts at their supplied paths and bundled skill
   files relative to the loaded skill directory; do not discover them by
-  searching outside cwd. Give delegated agents this same boundary.
+  searching outside cwd. Give delegated agents this same boundary and the
+  `$TMPDIR` scratch rule.
 - NEVER use `python`, `sed`, or other shell commands to edit files, always use
   the `edit` tools instead.
 - If a task needs only a few direct calls, make those calls. Do not write
@@ -100,9 +101,9 @@ Apply "boring beats clever" to your own tool calls, not just the code you write.
   Use the returned tool or agent ID for status.
 - Never run `ps`; it does not work in the sandbox. Use tool-managed process
   status or completion notifications instead.
-- Put scratch files under `$TMPDIR`. Keep that variable literal in shell
-  commands and file-tool paths; do not hard-code its resolved path. Do not
-  assume the session directory is writable.
+- Put scratch files only under `$TMPDIR`, never in the repository or `/tmp`.
+  Keep that variable literal in shell commands and file-tool paths; do not
+  hard-code its resolved path. Do not assume the session directory is writable.
 
 ## Principles
 
