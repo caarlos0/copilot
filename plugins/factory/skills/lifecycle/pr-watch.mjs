@@ -21,6 +21,8 @@ Watch a pull request and print one JSON line on the first event.
 Events: merged, closed, checks (a required check failed, was cancelled, or all
 passed), head, review, conflict, draft, base, timeout, rate_limited, error.
 Exit codes: 0 event, 1 error, 2 usage, 3 rate limited (retry_at in the JSON).
+A transient failure (HTTP 502/503/504, connection reset, timeout, EOF) is retried
+on the next check; the 5th one in a row is an error.
 A PR that already merged, closed, or has a failed required check exits at once.`;
 
 const QUERY = `query($owner: String!, $repo: String!, $number: Int!) {
@@ -42,6 +44,8 @@ const QUERY = `query($owner: String!, $repo: String!, $number: Int!) {
 
 const FAILED = new Set(["FAILURE", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE", "ERROR"]);
 const RATE_LIMIT = /rate limit|abuse detection|HTTP 429|RATE_LIMITED/i;
+const TRANSIENT = /HTTP 50[234]\b|bad gateway|service unavailable|gateway time-?out|ECONNRESET|connection reset|ETIMEDOUT|timed? ?out|\bEOF\b/i;
+const MAX_TRANSIENT = 5;
 const RETRY_AFTER = 5 * 60;
 
 function usageError(message) {
@@ -84,13 +88,16 @@ class RateLimited extends Error {
   }
 }
 
+class Transient extends Error {}
+
 async function gh(args) {
   try {
     return (await run("gh", args, { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 })).stdout;
   } catch (error) {
     const text = [error.stderr, error.stdout].filter(Boolean).join("\n").trim() || error.message;
     if (RATE_LIMIT.test(text)) throw new RateLimited(text.split("\n")[0], retryAt(text));
-    throw new Error(error.code === "ENOENT" ? "gh is not installed or not on PATH" : text);
+    if (error.code === "ENOENT") throw new Error("gh is not installed or not on PATH");
+    throw new (TRANSIENT.test(text) ? Transient : Error)(text);
   }
 }
 
@@ -199,8 +206,8 @@ function startupEvent(snapshot, mergeOnly) {
 function report(target, snapshot, extra) {
   const out = {
     ...extra,
-    pr: target.number,
-    url: target.url,
+    pr: target?.number ?? null,
+    url: target?.url ?? null,
     head: snapshot?.head ?? null,
     state: snapshot?.state ?? null,
     checks: snapshot ? { state: snapshot.checks.state, failed: snapshot.checks.failed, cancelled: snapshot.checks.cancelled } : null,
@@ -218,24 +225,37 @@ function sleep(ms) {
 }
 
 async function watch(opts) {
-  const target = await resolve(opts);
   const deadline = opts.timeout === null ? Infinity : Date.now() + opts.timeout * 1000;
+  let target = null;
   let base = null;
   let last = null;
+  let failures = 0;
   for (;;) {
-    const { snapshot, limit } = await fetchSnapshot(target);
-    last = snapshot;
-    let event;
-    if (base === null) {
-      base = snapshot;
-      event = startupEvent(snapshot, opts.merge);
-    } else {
-      if (base.mergeable === "UNKNOWN") base.mergeable = snapshot.mergeable;
-      event = detect(base, snapshot, opts.merge);
+    let fetched = null;
+    try {
+      target ??= await resolve(opts);
+      fetched = await fetchSnapshot(target);
+      failures = 0;
+    } catch (error) {
+      // A transient failure retries on the next tick; the Nth in a row is an error.
+      if (!(error instanceof Transient) || ++failures >= MAX_TRANSIENT) throw error;
+      process.stderr.write(`pr-watch: transient failure ${failures}/${MAX_TRANSIENT}: ${error.message.split("\n")[0]}\n`);
     }
-    if (event) return report(target, snapshot, event);
-    if (limit.remaining < limit.cost * 2) {
-      throw new RateLimited(`only ${limit.remaining} GraphQL points left`, new Date(limit.resetAt).toISOString());
+    if (fetched) {
+      const { snapshot, limit } = fetched;
+      last = snapshot;
+      let event;
+      if (base === null) {
+        base = snapshot;
+        event = startupEvent(snapshot, opts.merge);
+      } else {
+        if (base.mergeable === "UNKNOWN") base.mergeable = snapshot.mergeable;
+        event = detect(base, snapshot, opts.merge);
+      }
+      if (event) return report(target, snapshot, event);
+      if (limit.remaining < limit.cost * 2) {
+        throw new RateLimited(`only ${limit.remaining} GraphQL points left`, new Date(limit.resetAt).toISOString());
+      }
     }
     const remaining = deadline - Date.now();
     if (remaining <= 0) return report(target, last, { event: "timeout", timeout: true });

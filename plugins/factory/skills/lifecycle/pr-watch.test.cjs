@@ -179,6 +179,42 @@ test("another gh error exits 1 with a JSON error and stderr", async (t) => {
   assert.match(out.stderr, /Bad credentials/);
 });
 
+const bad502 = { exit: 1, stderr: "gh: HTTP 502: Bad Gateway (https://api.github.com/graphql)" };
+
+test("two transient failures then success still yield the normal event", async (t) => {
+  const { watch, calls } = await fixture(t, [
+    pr(), bad502, { exit: 1, stderr: "read tcp: connection reset by peer" }, pr({ state: "MERGED", merged: true }),
+  ]);
+  const out = watch("7");
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(out.json.event, "merged");
+  assert.equal((await calls()).length, 5);
+});
+
+test("a success resets the transient failure count", async (t) => {
+  const { watch } = await fixture(t, [
+    pr(), bad502, bad502, bad502, bad502, pr(), bad502, bad502, bad502, bad502, pr({ state: "MERGED", merged: true }),
+  ]);
+  assert.equal(watch("7").json.event, "merged");
+});
+
+test("five consecutive transient failures exit 1 with an error", async (t) => {
+  const { watch, calls } = await fixture(t, [pr(), bad502, bad502, bad502, bad502, bad502, pr({ state: "MERGED", merged: true })]);
+  const out = watch("7");
+  assert.equal(out.status, 1);
+  assert.equal(out.json.event, "error");
+  assert.match(out.json.message, /502/);
+  assert.equal((await calls()).length, 7);
+});
+
+test("a permanent error is not retried", async (t) => {
+  const { watch, calls } = await fixture(t, [pr(), { exit: 1, stderr: "gh: HTTP 404: Not Found" }, pr({ state: "MERGED", merged: true })]);
+  const out = watch("7");
+  assert.equal(out.status, 1);
+  assert.equal(out.json.event, "error");
+  assert.equal((await calls()).length, 3);
+});
+
 test("--timeout exits 0 with a timeout event", async (t) => {
   const { watch } = await fixture(t, Array.from({ length: 200 }, () => pr()));
   const out = watch("7", "--timeout", "0.05");

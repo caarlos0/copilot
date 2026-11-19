@@ -897,7 +897,9 @@ It makes one GraphQL call per tick, covers PR changes and required checks
 (fail-fast), and prints one JSON line on the first event, then exits: `merged`,
 `closed`, `checks` (`checks.state` is `failed`, `cancelled`, or `passed`),
 `head`, `review`, `conflict`, `draft`, `base`, `timeout`, `rate_limited`, or
-`error`. Exit 0 is an event, 1 an error, 3 a rate limit. `passed` means every
+`error`. Exit 0 is an event, 1 an error, 3 a rate limit. A transient gh failure
+(502, 503, 504, connection reset, timeout, EOF) is retried on the next tick; only
+the 5th in a row prints `error`. `passed` means every
 reported required check succeeded; confirm with `gh pr checks --required`
 once before you land. `--merge` reports only `merged` or `closed` while a merge
 is pending. Run one watcher per PR, restart it after each event, and stop it
