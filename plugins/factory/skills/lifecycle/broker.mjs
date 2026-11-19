@@ -13,6 +13,8 @@ const reconcileEvery = "5m";
 const reconcileMs = 5 * 60_000;
 const defaultBranch = "main";
 const workerOutcomes = ["working", "waiting", "complete", "blocked"];
+const attentionKinds = ["permission", "sandbox-bypass", "ask-user", "other"];
+const maxAttentionText = 2000;
 
 // Each type lists whether it needs --task and the data keys it must carry.
 const eventTypes = {
@@ -25,6 +27,8 @@ const eventTypes = {
   "budget.updated": { task: false, data: ["max_parallel_workers"] },
   "limits.updated": { task: false, data: ["investigation", "implementation"] },
   "lever.updated": { task: false, data: ["spend", "autonomy_cap"] },
+  "attention.requested": { task: false, data: ["session", "kind", "text"] },
+  "attention.resolved": { task: false, data: ["session"] },
 };
 
 const eventsFile = (file) =>
@@ -103,6 +107,25 @@ function validateEvent({ type, task, source, data }) {
   }
   if (type === "worker.result" && !workerOutcomes.includes(data.outcome)) {
     throw new UsageError(`worker.result outcome must be one of: ${workerOutcomes.join(", ")}.`);
+  }
+  if (type.startsWith("attention.")) validateAttention(type, data);
+}
+
+function validateAttention(type, data) {
+  const text = (key) => {
+    if (typeof data[key] !== "string") throw new UsageError(`${type} data "${key}" must be a string.`);
+  };
+  text("session");
+  if (data.session === "") throw new UsageError(`${type} data "session" must not be empty.`);
+  for (const key of ["role", "pane"]) {
+    if (data[key] !== undefined) text(key);
+  }
+  if (type === "attention.resolved") return;
+  text("text");
+  if (data.text.length > maxAttentionText) throw new UsageError(`${type} data "text" is at most ${maxAttentionText} characters.`);
+  if (!attentionKinds.includes(data.kind)) throw new UsageError(`${type} kind must be one of: ${attentionKinds.join(", ")}.`);
+  if (data.options !== undefined && !(Array.isArray(data.options) && data.options.every((option) => typeof option === "string"))) {
+    throw new UsageError(`${type} data "options" must be an array of strings.`);
   }
 }
 
@@ -369,6 +392,12 @@ emit    Appends one event and prints it. Types: ${Object.keys(eventTypes).join("
         worker.result with data.head must match HEAD of the task's worktree and, for a task
         without a PR, descend from main (skipped when the task has no worktree record).
         pr.merged needs a full merge_commit SHA.
+        attention.requested and attention.resolved need no --task (a rule worker or the
+        coordinator has none). A hook emits them with --source attention when a Copilot session
+        waits for the user. attention.requested data: session (the Copilot session ID, a string),
+        kind (${attentionKinds.join(", ")}), text (a string of at most ${maxAttentionText} characters), and
+        optional role, pane (strings) and options (an array of strings). attention.resolved needs
+        only session. Wait with --exclude-source attention so these never wake the factory.
         pr.merged is a hint from the implementation worker (role, pr, merge_commit, head); the
         factory verifies the merge on GitHub before it resolves the task.
         factory.mjs emits task.moved, task.updated, and feedback.pending after every task write,

@@ -311,6 +311,57 @@ test("budget.updated emits without a task, needs its data key, and wakes a waite
     [["budget.updated", null, "dashboard", { max_parallel_workers: 4 }]]);
 });
 
+test("attention events need no task and validate their data", async (t) => {
+  const f = await fixture(t);
+  const data = { session: "s1", kind: "permission", text: "Run rm -rf build?" };
+  const emit = (type, body, ...args) => f.run("emit", f.factory, type, "--source", "attention", "--data", JSON.stringify(body), ...args);
+
+  const requested = emit("attention.requested", { ...data, role: "implementation", pane: "block:1", options: ["Allow", "Deny"] });
+  assert.equal(requested.status, 0, requested.stderr);
+  assert.deepEqual(JSON.parse(requested.stdout).task, null);
+  assert.equal(emit("attention.requested", data, "--task", "t1").status, 0);
+  for (const kind of ["sandbox-bypass", "ask-user", "other"]) assert.equal(emit("attention.requested", { ...data, kind }).status, 0, kind);
+  assert.equal(emit("attention.requested", { ...data, text: "x".repeat(2000) }).status, 0);
+  assert.equal(emit("attention.resolved", { session: "s1" }).status, 0);
+
+  for (const bad of [
+    { ...data, session: undefined }, { ...data, session: "" }, { ...data, session: 7 },
+    { ...data, kind: undefined }, { ...data, kind: "approval" },
+    { ...data, text: undefined }, { ...data, text: 7 }, { ...data, text: "x".repeat(2001) },
+    { ...data, role: 1 }, { ...data, pane: 1 },
+    { ...data, options: "Allow" }, { ...data, options: ["Allow", 1] },
+  ]) assert.equal(emit("attention.requested", bad).status, 2, JSON.stringify(bad));
+  assert.equal(emit("attention.resolved", {}).status, 2);
+  assert.equal(emit("attention.resolved", { session: 1 }).status, 2);
+  assert.equal((await readFile(f.log, "utf8")).trim().split("\n").length, 7);
+});
+
+test("attention events never wake a waiter that skips their source, and other readers ignore them", async (t) => {
+  const f = await fixture(t);
+  const attention = (type, data) => {
+    const out = f.run("emit", f.factory, type, "--source", "attention", "--data", JSON.stringify(data));
+    assert.equal(out.status, 0, out.stderr);
+    return JSON.parse(out.stdout);
+  };
+  const done = await f.wait("--exclude-source", "attention");
+  attention("attention.requested", { session: "s1", kind: "ask-user", text: "Pick one" });
+  attention("attention.resolved", { session: "s1" });
+  const mine = f.emit("worker.result");
+  const out = await done();
+  assert.deepEqual(out.events.map(({ id }) => id), [mine.id]);
+  assert.equal(out.cursor, String((await stat(f.log)).size));
+
+  const woken = await f.wait("--since", "0");
+  assert.deepEqual((await woken()).events.map(({ type, task }) => [type, task]),
+    [["attention.requested", null], ["attention.resolved", null], ["worker.result", "t1"]]);
+
+  // reconcile.mjs and the sweep around the log must not trip over a task-less event.
+  await writeFile(f.factory, JSON.stringify({ status: "finished", tasks: [] }));
+  const swept = spawnSync(process.execPath, [join(__dirname, "reconcile.mjs"), f.factory], { encoding: "utf8" });
+  assert.equal(swept.status, 0, swept.stderr);
+  assert.deepEqual(JSON.parse(swept.stdout), { findings: [], errors: [] });
+});
+
 test("--due follows run-status and rule edits made while the waiter is armed", async (t) => {
   const f = await fixture(t);
   const factory = (...args) => {

@@ -1174,7 +1174,7 @@ attached async command:
 
 ```sh
 node broker.mjs wait /abs/state/owner.repo-factory.json --since CURSOR \
-  --exclude-source coordinator --due
+  --exclude-source coordinator --exclude-source attention --due
 ```
 
 It exits with `{"events":[...],"cursor":"N"}` as soon as one event exists after
@@ -1188,6 +1188,8 @@ the cursor. Each event has `id`, `at`, `type`, `task`, `source`, and `data`:
 | `worker.result` | a worker after each result write | `role`, `outcome`, `head`, `result`, `feedback_id`, `summary` |
 | `worker.blocked` | a worker that cannot continue | `role`, `reason` |
 | `pr.merged` | the implementation worker after its final `merged: true` result | `role`, `pr`, `merge_commit`, `head` |
+| `attention.requested` | a hook (`--source attention`) when a Copilot session waits for the user; no `--task` | `session`, `kind` (`permission`, `sandbox-bypass`, `ask-user`, `other`), `text` (at most 2000 characters), optional `role`, `pane`, `options` (strings) |
+| `attention.resolved` | a hook (`--source attention`) when that wait ends; no `--task` | `session` |
 | `rule.due` | `wait --due` itself, never stored | `rules`: due rule IDs |
 | `reconcile.due` | `wait --due` itself, every 5 minutes while the run is `active`, never stored | `every`: `"5m"` |
 
@@ -1202,7 +1204,10 @@ Rules:
 2. `--exclude-source coordinator` skips events from your own `factory.mjs`
    writes (the default source), so they never wake you. Skipped events still
    advance the cursor. Dashboard events have source `dashboard` and always
-   wake you, even when every worker is blocked.
+   wake you, even when every worker is blocked. `--exclude-source attention`
+   skips `attention.requested` and `attention.resolved`: hooks emit them with
+   source `attention` for the dashboard, and a session waiting for the user
+   is not work for you, so they never wake you.
 3. Every turn of a non-finished factory ends with exactly one armed `wait`
    (async bash, latest cursor). Never end a turn without one: not after a
    notification, a merge, a test run, a tool completion, or a user message. Arm

@@ -333,12 +333,13 @@ session's totals are cumulative over its whole life.
 The factory waits with `broker.mjs wait`. The broker keeps one
 append-only JSONL log, `<owner.repo>-factory-events.jsonl` (mode 0600), beside
 the factory file. Events are typed notifications (`task.moved`, `task.updated`,
-`feedback.pending`, `budget.updated`, `limits.updated`, `lever.updated`, `worker.result`, `worker.blocked`, `pr.merged`; `rule.due` and `reconcile.due` are computed by
+`feedback.pending`, `budget.updated`, `limits.updated`, `lever.updated`, `worker.result`, `worker.blocked`, `pr.merged`, `attention.requested`, `attention.resolved`; `rule.due` and `reconcile.due` are computed by
 `wait --due` and never stored), each with a `source`. A cursor is a byte offset,
 so no event is lost between two `wait` calls. `factory.mjs` emits after every
 successful write (source `coordinator`, or `dashboard` for operator moves), and
-the factory waits with `--exclude-source coordinator` so its own writes never
-wake it. Workers write their result file atomically, then run
+the factory waits with `--exclude-source coordinator --exclude-source attention`
+so its own writes and the attention events (no task; hooks emit them with source
+`attention` when a session waits for the user) never wake it. Workers write their result file atomically, then run
 `broker.mjs emit worker.result` (or `worker.blocked`). `emit` validates before it
 appends and exits 1 with a reason when it refuses: a `worker.result` needs
 `data.result`, a JSON file in the state directory whose `task`, `role` and
