@@ -782,7 +782,8 @@ no PR, run `git rebase main` (never merge main); if it has a PR, run
 `git merge main` and push, never rebase and never force-push.
 Never use `git stash`: the stash list is shared by all worktrees.
 To compare against the base, use a scratch worktree or
-`git diff > $TMPDIR/x.patch`."
+`git diff > $TMPDIR/x.patch`.
+Tests that run git in a temp repo must ignore the global git config (signing, hooks, templates)."
 
 Every implementation brief also carries this block, word for word (the
 "standing cost lines"). They answer the largest costs in the factory's own

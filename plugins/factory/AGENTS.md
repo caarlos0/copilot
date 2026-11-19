@@ -40,7 +40,8 @@ PR checks gate it, so `emit` does not check that its head descends from `main`.
 
 Standing worker rules: never use `git stash`, because the stash list is shared
 by all worktrees. To compare against the base, use a scratch worktree or
-`git diff > $TMPDIR/x.patch`. Workers use `claude-sonnet-5.5`
+`git diff > $TMPDIR/x.patch`. Tests that run git in a temp repo must ignore the
+global git config (signing, hooks, templates). Workers use `claude-sonnet-5.5`
 (`--model claude-sonnet-5.5` in the launch command); use a bigger model only
 when the user asks for it. Two opus sessions caused 32% of spend.
 
