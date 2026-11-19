@@ -171,7 +171,6 @@
         .task-row.task-flash { animation: task-flash 1.2s ease-out; }
       }
       @keyframes task-flash { from { background: color-mix(in srgb, var(--accent) 25%, transparent); } }
-      #title-row { display: flex; align-items: center; gap: 8px; }
       .icon-button { display: inline-flex; flex: none; align-items: center; justify-content: center;
         width: 32px; height: 32px; padding: 0; line-height: 1; }
       .icon-button svg { display: block; }
@@ -207,8 +206,6 @@
       .chip { padding: 0 7px; border: 1px solid var(--border); border-radius: 2em; color: var(--fg-muted);
         font-size: 12px; font-weight: 500; line-height: 18px; }
       .chip.state { color: var(--c); border-color: var(--c); }
-      /* The sidebar section already says "Finished"; phones have no sidebar. */
-      @media (min-width: 701px) { #run-status[data-status="finished"] { display: none; } }
       .summary h4 { margin: 8px 0 2px; text-transform: capitalize; }
       .summary-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
       .summary-text.clamped { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
@@ -305,7 +302,6 @@
         #open-palette .label, #refresh .label { display: none; }
         .layout { padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
         main { min-width: 0; padding-top: 16px; }
-        #title-row { flex-wrap: wrap; }
         /* The vertical chart is drawn at the screen width, so its text is at its real size. */
         #flow { min-width: 0; max-height: none; }
         #flow.vertical .node .name { font-size: 17px; text-anchor: start; }
@@ -387,9 +383,6 @@
       </div>
     </aside>
     <main>
-      <div id="title-row">
-        <span id="run-status" class="chip" hidden></span>
-      </div>
       <p id="discovery-error" role="alert" hidden></p>
       <details id="skipped" hidden>
         <summary>Some factories could not be listed</summary>
@@ -1885,10 +1878,6 @@
         snapshot = data;
         lastSource = file;
         document.getElementById("error").hidden = true;
-        const runStatus = document.getElementById("run-status");
-        runStatus.textContent = data.status;
-        runStatus.dataset.status = data.status;
-        runStatus.hidden = data.status === "active";
         document.title = `${data.project} - Factory`;
         draw();
       }

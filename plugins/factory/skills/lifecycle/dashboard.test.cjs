@@ -1624,23 +1624,8 @@ test("the popup can resolve an initial task with an outcome and comment", async 
   assert.equal(ui.get("detail").dataset.state, "initial");
 });
 
-test("the header shows the run status only when the factory is not active", async (t) => {
-  const ui = await dashboard(t);
-  assert.equal(ui.get("run-status").hidden, true);
-  await writeFile(join(ui.directory, factoryFile), JSON.stringify({ ...structuredClone(example), status: "paused" }));
-  await ui.run("refresh()");
-  assert.equal(ui.get("run-status").hidden, false);
-  assert.equal(ui.get("run-status").textContent, "paused");
-  assert.equal(ui.get("run-status").dataset.status, "paused");
-});
-
-test("the run status pill is hidden for finished factories on desktop only", async (t) => {
-  assert.match(html, /@media \(min-width: 701px\) \{ #run-status\[data-status="finished"\] \{ display: none; \} \}/);
-  const ui = await dashboard(t);
-  await writeFile(join(ui.directory, factoryFile), JSON.stringify({ ...structuredClone(example), status: "finished" }));
-  await ui.run("refresh()");
-  assert.equal(ui.get("run-status").hidden, false);
-  assert.equal(ui.get("run-status").dataset.status, "finished");
+test("the header has no run status pill", () => {
+  assert.doesNotMatch(html, /run-status|title-row/);
 });
 
 test("the Settings item at the bottom of the sidebar opens one settings dialog", async (t) => {
