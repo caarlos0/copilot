@@ -7,7 +7,7 @@ const { join } = require("node:path");
 
 const load = () => import("./score.mjs");
 
-const git = (repo, ...args) => execFileSync("git", ["-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", ...args], { encoding: "utf8" }).trim();
+const git = (repo, ...args) => execFileSync("git", ["-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false", ...args], { encoding: "utf8" }).trim();
 
 function put(root, file, text) {
   mkdirSync(join(root, file, ".."), { recursive: true });

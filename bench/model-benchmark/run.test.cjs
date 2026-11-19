@@ -9,7 +9,7 @@ const load = () => import("./run.mjs");
 const lifecycle = join(__dirname, "../../plugins/factory/skills/lifecycle");
 // The pinned factory tools run main() only when argv[1] is the real path, so tests need a resolved temp root too.
 const scratch = (name) => mkdtempSync(join(realpathSync(tmpdir()), `bench-${name}-`));
-const git = (repo, ...args) => execFileSync("git", ["-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", ...args], { encoding: "utf8" }).trim();
+const git = (repo, ...args) => execFileSync("git", ["-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false", ...args], { encoding: "utf8" }).trim();
 
 test("deny flags match the launch rules in the lifecycle SKILL.md", async () => {
   const { denyPatterns } = await load();

@@ -25,7 +25,7 @@ const git = (cwd, ...args) => execFileSync("git", ["-C", cwd, ...args], { encodi
 // One commit with no history, so the fix cannot be read with git log or git show.
 function initRepo(task, { work, branch }) {
   git(work, "init", "-q", "-b", "main");
-  for (const [key, value] of [["user.name", "bench"], ["user.email", "bench@example.invalid"], ["commit.gpgsign", "false"]]) {
+  for (const [key, value] of [["user.name", "bench"], ["user.email", "bench@example.invalid"], ["commit.gpgsign", "false"], ["tag.gpgsign", "false"]]) {
     git(work, "config", key, value);
   }
   git(work, "add", "-A");
