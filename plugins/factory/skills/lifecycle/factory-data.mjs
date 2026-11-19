@@ -163,6 +163,20 @@ export function operatorStates(task) {
 
 const openStates = ["initial", "investigation", "implementation", "review"];
 const maxBlockerOptions = 8;
+export const blockerClasses = ["user-decision", "outside-action", "external-wait", "ci-infra", "approval"];
+const blockerOwner = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
+
+function validateBlockerOwner(owner, field) {
+  if (typeof owner !== "string" || !blockerOwner.test(owner)) {
+    throw new Error(`${field} must be a GitHub login or operator.`);
+  }
+}
+
+// "Class: user-decision. Owner: alice.", or null for an old blocker with neither.
+export function blockerMeta(blocker) {
+  const parts = [blocker.class && `Class: ${blocker.class}.`, blocker.owner && `Owner: ${blocker.owner}.`];
+  return parts.filter(Boolean).join(" ") || null;
+}
 const maxOptionLabel = 300;
 
 function validateBlockerOptions(options, field) {
@@ -188,7 +202,7 @@ function validateBlockerOptions(options, field) {
 // The Recommended badge comes from the `recommended` flag, so a typed "(recommended)" suffix is noise.
 export const stripRecommended = (label) => label.replace(/\s*[(\[]\s*recommended\s*[)\]]\s*$/i, "");
 
-// --blocker is plain text, or a JSON object {"reason": "...", "options": [...]}.
+// --blocker is plain text, or a JSON object {"reason": "...", "options": [...], "class": "...", "owner": "..."}.
 export function parseBlocker(value) {
   const input = typeof value === "string" ? value.trim() : "";
   let parsed;
@@ -196,17 +210,26 @@ export function parseBlocker(value) {
     try { parsed = JSON.parse(input); } catch { /* plain text that starts with a brace */ }
   }
   if (!isObject(parsed)) return { reason: value };
-  const extra = Object.keys(parsed).filter((key) => key !== "reason" && key !== "options");
+  const extra = Object.keys(parsed).filter((key) => !["reason", "options", "class", "owner"].includes(key));
   if (extra.length) throw new Error(`--blocker JSON has unknown keys: ${extra.join(", ")}.`);
   text(parsed.reason, "--blocker reason");
-  if (parsed.options === undefined) return { reason: parsed.reason };
+  const meta = {};
+  if (parsed.class !== undefined) {
+    oneOf(parsed.class, blockerClasses, "--blocker class");
+    meta.class = parsed.class;
+  }
+  if (parsed.owner !== undefined) {
+    validateBlockerOwner(parsed.owner, "--blocker owner");
+    meta.owner = parsed.owner;
+  }
+  if (parsed.options === undefined) return { reason: parsed.reason, ...meta };
   const options = Array.isArray(parsed.options)
     ? parsed.options.map((option) => (isObject(option) && typeof option.label === "string"
       ? { ...option, label: stripRecommended(option.label) }
       : option))
     : parsed.options;
   validateBlockerOptions(options, "--blocker options");
-  return { reason: parsed.reason, options };
+  return { reason: parsed.reason, ...meta, options };
 }
 
 // The destination an Unblock popup selects first: where the task was blocked from, else the first open one.
@@ -316,6 +339,8 @@ function validateTask(task, seen) {
       `${at} blocker.from`);
     text(task.blocker.reason, `${at} blocker.reason`);
     timestamp(task.blocker.since, `${at} blocker.since`);
+    if (task.blocker.class !== undefined) oneOf(task.blocker.class, blockerClasses, `${at} blocker.class`);
+    if (task.blocker.owner !== undefined) validateBlockerOwner(task.blocker.owner, `${at} blocker.owner`);
     if (task.blocker.options !== undefined) validateBlockerOptions(task.blocker.options, `${at} blocker.options`);
   } else if (task.blocker != null) {
     throw new Error(`${at}: blocker is allowed only in the blocked state.`);
@@ -374,7 +399,7 @@ export function validateArchive(data, project, day) {
   for (const task of data.tasks) validateTask(task, { ids, issue: new Set(), pr: new Set() });
 }
 
-function intervalMs(every) {
+export function intervalMs(every) {
   const match = /^([1-9]\d{0,3})([mhd])$/.exec(every);
   if (!match) throw new Error(`every must look like 30m, 6h, or 1d (up to 9999 units), not ${JSON.stringify(every)}.`);
   return Number(match[1]) * everyUnits[match[2]];

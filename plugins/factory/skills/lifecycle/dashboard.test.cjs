@@ -1357,6 +1357,42 @@ test("Unblock lists options, fills the comment verbatim and saves through the mo
   assert.equal(saved.feedback.acknowledged_id, null);
 });
 
+test("the blocker class and owner show in the Unblock popup, and blocked tasks filter by class", async (t) => {
+  const ui = await dashboard(t);
+  const data = structuredClone(example);
+  const base = data.tasks.find((item) => item.id === "issue-5");
+  const extra = (id, blocker) => ({ ...structuredClone(base), id, title: id, issue: null, pr: null, blocker: { ...base.blocker, ...blocker } });
+  const plain = extra("plain", { reason: "Old blocker" });
+  delete plain.blocker.class;
+  delete plain.blocker.owner;
+  data.tasks.push(extra("infra", { class: "ci-infra", owner: "alice" }), plain);
+  await writeFile(join(ui.directory, factoryFile), JSON.stringify(data));
+  await ui.run("refresh()");
+  ui.run("choose('blocked')");
+  const filter = ui.get("blocker-filter");
+  assert.equal(filter.hidden, false);
+  assert.deepEqual(filter.options.map((option) => [option.value, option.textContent]), [
+    ["", "All classes (3)"], ["outside-action", "outside-action (1)"], ["ci-infra", "ci-infra (1)"], ["none", "No class (1)"],
+  ]);
+  const ids = () => ui.get("task-list").children.map((row) => row.dataset.taskId).sort();
+  assert.deepEqual(ids(), ["infra", "issue-5", "plain"]);
+  assert.match(ui.get("task-list").textContent, /Class: ci-infra\. Owner: alice\./);
+  filter.value = "ci-infra";
+  await filter.fire("change");
+  assert.deepEqual(ids(), ["infra"]);
+  filter.value = "none";
+  await filter.fire("change");
+  assert.deepEqual(ids(), ["plain"]);
+  assert.doesNotMatch(ui.get("task-list").textContent, /Class:|Owner:/);
+  filter.value = "";
+  await filter.fire("change");
+  await ui.get("task-list").children.find((row) => row.dataset.taskId === "issue-5").querySelector(".move").fire("click");
+  const context = ui.get("move-body").querySelector(".unblock-context");
+  assert.equal(context.children[1].textContent, "Class: outside-action. Owner: operator.");
+  ui.run("choose('initial')");
+  assert.equal(filter.hidden, true);
+});
+
 test("Unblock without options shows only the state and the comment; other rows keep Move", async (t) => {
   const ui = await dashboard(t);
   const data = structuredClone(example);

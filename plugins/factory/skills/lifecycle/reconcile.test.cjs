@@ -41,12 +41,12 @@ async function fixture(t, rex) {
   const file = join(directory, "owner.repo-factory.json");
   return {
     directory, repo, file,
-    async run(tasks, { status = "active", waiter = process.pid, rules, env } = {}) {
+    async run(tasks, { status = "active", waiter = process.pid, rules, env, args = [] } = {}) {
       await writeFile(file, JSON.stringify({ rex_session: "session:work", status, tasks, rules }));
       const pidFile = join(directory, "owner.repo-factory-waiter.pid");
       if (waiter === null) await rm(pidFile, { force: true });
       else await writeFile(pidFile, `${waiter}\n`);
-      const result = spawnSync(process.execPath, [script, file], {
+      const result = spawnSync(process.execPath, [script, file, ...args], {
         encoding: "utf8",
         env: { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH}`, ...env },
       });
@@ -156,6 +156,29 @@ test("flags a finished rule worker whose window is open or whose status is still
     { kind: "rule-worker-done", rule: "scan", window: null, result: "scan-result.json" },
     { kind: "rule-worker-done", rule: "open", window, result: "open-result.json" },
   ]);
+});
+
+test("flags a task blocked longer than the threshold, with its class and owner", async (t) => {
+  const f = await fixture(t, fakeRex);
+  const hoursAgo = (hours) => new Date(Date.now() - hours * 3_600_000).toISOString();
+  const blocker = (since, extra = {}) => ({ from: "implementation", reason: "Need a token", since, ...extra });
+  const tasks = [
+    task("old-classed", "blocked", { blocker: blocker(hoursAgo(30), { class: "outside-action", owner: "alice" }) }),
+    task("old-plain", "blocked", { blocker: blocker(hoursAgo(25)) }),
+    task("fresh", "blocked", { blocker: blocker(hoursAgo(2), { class: "user-decision", owner: "operator" }) }),
+    task("working", "implementation"),
+  ];
+  const stale = (findings) => findings.filter((finding) => finding.kind === "stale-blocked")
+    .map(({ task, class: kind, owner, reason }) => ({ task, class: kind, owner, reason }));
+  let { findings } = await f.run(tasks);
+  assert.deepEqual(stale(findings), [
+    { task: "old-classed", class: "outside-action", owner: "alice", reason: "Need a token" },
+    { task: "old-plain", class: null, owner: null, reason: "Need a token" },
+  ]);
+  ({ findings } = await f.run(tasks, { args: ["--blocked-after", "1h"] }));
+  assert.deepEqual(stale(findings).map((finding) => finding.task), ["old-classed", "old-plain", "fresh"]);
+  ({ findings } = await f.run(tasks, { args: ["--blocked-after", "3d"] }));
+  assert.deepEqual(stale(findings), []);
 });
 
 test("is quiet when everything is reconciled", async (t) => {

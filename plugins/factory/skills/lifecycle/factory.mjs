@@ -623,7 +623,9 @@ Task options:
   --next-action VALUE   Next action (new task)
   --blocker VALUE       Reason; with --state blocked, or to edit a blocked task. For a user decision pass
                         JSON '{"reason":"...","options":[{"label":"...","state":"implementation","recommended":true}]}'
-                        (1-8 options; state and recommended optional; one recommended at most)
+                        (1-8 options; state and recommended optional; one recommended at most).
+                        Optional "class" (user-decision, outside-action, external-wait, ci-infra, approval)
+                        and "owner" (a GitHub login, or operator) say why the task is blocked and who unblocks it
   --resolution VALUE    ${outcomes.join(", ")}; with --state resolved
   --links JSON          Replace the GitHub issue/PR URL array
   --workers JSON        Merge worker records by role, e.g.

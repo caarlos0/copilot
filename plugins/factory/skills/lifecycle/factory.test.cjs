@@ -437,6 +437,41 @@ test("a blocker may carry validated options; plain text and old blockers stay va
   assert.equal((await f.read()).tasks[0].blocker.reason, "{not json");
 });
 
+test("a blocker may carry a validated class and owner; old blockers stay valid", async (t) => {
+  const f = await started(t);
+  f.ok("--task", "issue-1", "--state", "blocked", "--blocker",
+    JSON.stringify({ reason: "Need a token", class: "outside-action", owner: "alice-b" }));
+  let blocker = (await f.read()).tasks[0].blocker;
+  assert.equal(blocker.class, "outside-action");
+  assert.equal(blocker.owner, "alice-b");
+  f.ok("--task", "issue-1", "--blocker", JSON.stringify({ reason: "Pick", class: "user-decision", owner: "operator" }));
+  blocker = (await f.read()).tasks[0].blocker;
+  assert.deepEqual([blocker.class, blocker.owner], ["user-decision", "operator"]);
+  f.ok("--task", "issue-1", "--blocker", "Plain again");
+  blocker = (await f.read()).tasks[0].blocker;
+  assert.equal(blocker.class, undefined, "Editing with plain text clears the class.");
+  assert.equal(blocker.owner, undefined);
+
+  const before = await readFile(f.file, "utf8");
+  const bad = (reason, blockerValue) => {
+    f.fails(reason, "--task", "issue-1", "--blocker", JSON.stringify(blockerValue));
+  };
+  bad(/class must be one of: user-decision, outside-action, external-wait, ci-infra, approval/, { reason: "R", class: "soon" });
+  bad(/owner must be a GitHub login or operator/, { reason: "R", owner: "not a login" });
+  bad(/owner must be a GitHub login or operator/, { reason: "R", owner: "" });
+  assert.equal(await readFile(f.file, "utf8"), before, "An invalid class or owner must not change the file.");
+
+  const { validate } = await import("./factory-data.mjs");
+  const data = structuredClone(example);
+  validate(data);
+  const task = data.tasks.find((item) => item.state === "blocked");
+  task.blocker.class = "whenever";
+  assert.throws(() => validate(data), /blocker\.class must be one of/);
+  task.blocker.class = "ci-infra";
+  task.blocker.owner = "bad owner";
+  assert.throws(() => validate(data), /blocker\.owner must be a GitHub login or operator/);
+});
+
 test("a task can be reopened unless it was merged", async (t) => {
   const f = await started(t);
   f.ok("--task", "issue-1", "--state", "resolved", "--resolution", "completed");

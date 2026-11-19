@@ -17,7 +17,11 @@ Rex tab with a brief, a result file, and `broker.mjs emit`. Keep this rule
 in `agents/general.agent.md` and the lifecycle skill's "Delegate every task to
 workers" section in sync.
 
-`blocked` is only for a user decision or an outside action. A worker never waits
+`blocked` is only for a user decision or an outside action. Its `--blocker` JSON
+carries a `class` (`user-decision`, `outside-action`, `external-wait`,
+`ci-infra`, `approval`) and an `owner` (a GitHub login or `operator`); both are
+optional so old blockers stay valid, and the dashboard shows them and filters by
+class. A worker never waits
 on another task or an unmerged branch: for a conflict, a missing dependency, or
 a broken default branch it brings in the default branch (`git rebase main`
 for a task without a PR; `git merge` for a task with a PR) and makes the small fix, or the coordinator creates a new task.
@@ -378,7 +382,9 @@ whose window is open or whose status is still `running` (`rule-worker-done`),
 the factory relaunches them in their existing worktrees, never creating or
 renaming a session), `running` workers of resolved tasks (`stale-running`, with the
 `factory.mjs` fix command; the writer sets every worker of a task to `closed` when it
-moves to `resolved`, unless the write sets a status), a missing waiter (`no-waiter`), and an owner lock whose
+moves to `resolved`, unless the write sets a status), a task blocked longer than
+`--blocked-after` (default 24h; `stale-blocked`, naming its blocker class and owner),
+a missing waiter (`no-waiter`), and an owner lock whose
 session the coordinator hooks would not match (`hooks-inactive`). The
 factory runs it at startup, on every wake and user message, and before every
 report, so a missed waiter wake cannot leave finished work unmerged. The waiter

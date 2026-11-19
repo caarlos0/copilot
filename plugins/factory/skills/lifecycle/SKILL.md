@@ -209,9 +209,12 @@ The helper:
   `{"reason":"...","options":[{"label":"...","state":"implementation","recommended":true}]}`.
   Options are optional: 1 to 8, each with a `label` (at most 300 characters),
   an optional open `state` (`initial`, `investigation`, `implementation`,
-  `review`), and an optional `recommended` flag (at most one). Editing a
-  blocked task's `--blocker` replaces the options. Old blockers without
-  `options` stay valid.
+  `review`), and an optional `recommended` flag (at most one). It may also
+  carry `class` (why: `user-decision`, `outside-action`, `external-wait`,
+  `ci-infra`, `approval`) and `owner` (who unblocks it: a GitHub login or
+  `operator`); both are validated and stored. Editing a
+  blocked task's `--blocker` replaces the options, class, and owner. Old blockers without
+  `options`, `class`, or `owner` stay valid.
 - clears the head-specific `merge` decision when `--head` changes; standing
   grants in `details.lever` remain subject to fresh policy and gate checks.
 - moves `resolved` tasks last updated more than seven days ago into
@@ -311,7 +314,7 @@ until the file is reread and the drift is resolved.
 Start every sweep with the bundled read-only check, beside this skill:
 
 ```sh
-node reconcile.mjs /abs/state/owner.repo-factory.json [--default-branch main]
+node reconcile.mjs /abs/state/owner.repo-factory.json [--default-branch main] [--blocked-after 24h]
 ```
 
 It prints `{findings, errors}` as JSON. Run it at startup, on every wake, on
@@ -343,6 +346,10 @@ leave work behind. Treat each finding as unfinished work:
   default branch, or it has a merged PR. If `created_by_run` is true, remove it with
   `worktree.mjs delete NAME` as in "Release panes"; for a task with a PR the finding
   carries the exact `command`, which has `--merged-pr URL`. Leave a reused worktree (`false`).
+- `stale-blocked`: a task has been `blocked` longer than `--blocked-after`
+  (default `24h`; `30m`, `6h`, `2d`). It names the blocker `class` and `owner`
+  (null for an old blocker without them). Check whether the cause is now
+  worker-fixable, then chase the owner or move the task on.
 - `worker-missing`: a worker (a task role or a rule worker) has status `running`,
   but its window is not in the live Rex session. It carries the role, window,
   pane, worktree, brief, and result. Recover it as in "Recover after a restart".
@@ -677,12 +684,24 @@ missing feedback ID after the task has received dashboard feedback.
 | PR merged on GitHub | `resolved` (`merged`) |
 | Task without an issue merged locally into the default branch | `resolved` (`merged`), with the merge commit SHA in `details.merge_commit` |
 | PR closed without a merge | `blocked`; keep the panes |
-| Worker blocked on a user decision or outside action | `blocked` with its reason. For a user decision you MUST pass the choices in `--blocker` JSON as `options`, with one marked `recommended` (and a `state` when a choice implies one); the dashboard shows them in the Unblock popup. Never write "(recommended)" in a label; set the `recommended` flag. The blocker text stays neutral. The `reason` is shown alone in the Unblock popup, so write it self-contained: what is needed, why, what each option does; never refer to chat, a result file, or "above". |
+| Worker blocked on a user decision or outside action | `blocked` with its reason, plus `class` and `owner` in the `--blocker` JSON. For a user decision you MUST pass the choices in `--blocker` JSON as `options`, with one marked `recommended` (and a `state` when a choice implies one); the dashboard shows them in the Unblock popup. Never write "(recommended)" in a label; set the `recommended` flag. The blocker text stays neutral. The `reason` is shown alone in the Unblock popup, so write it self-contained: what is needed, why, what each option does; never refer to chat, a result file, or "above". |
 | Worker blocked on a worker-fixable cause | stay in the state; send a follow-up now |
 
 ### Never park a worker-fixable task
 
-`blocked` is only for a user decision or an outside action. These causes are
+`blocked` is only for a user decision or an outside action. Every new blocker names
+its `class` and `owner` in the `--blocker` JSON (old blockers without them stay valid):
+
+| `class` | Use when | Usual `owner` |
+| --- | --- | --- |
+| `user-decision` | The operator must choose; pass `options` too | `operator` |
+| `outside-action` | Someone must act outside the factory (a secret, an access grant) | a login or `operator` |
+| `external-wait` | A third party must answer or ship | a login |
+| `ci-infra` | CI or infrastructure is broken for a reason no worker can fix | a login or `operator` |
+| `approval` | A review or approval gate needs a named person | a login |
+
+The dashboard shows both in the Unblock popup and filters blocked tasks by class;
+`reconcile.mjs` reports `stale-blocked` after 24 hours. These causes are
 worker-fixable, so they never justify `blocked`, a wait, or a schedule:
 
 - a conflict with the default branch;

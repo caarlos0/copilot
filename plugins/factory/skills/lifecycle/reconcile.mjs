@@ -5,9 +5,10 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { resolveFactory, waiterPid } from "./broker.mjs";
+import { intervalMs } from "./factory-data.mjs";
 import { hooksInactive } from "./gate.mjs";
 
-const usage = "Usage: node reconcile.mjs FACTORY_FILE [--default-branch NAME]";
+const usage = "Usage: node reconcile.mjs FACTORY_FILE [--default-branch NAME] [--blocked-after 24h]";
 
 async function readJSON(file) {
   try {
@@ -51,7 +52,7 @@ function liveState(session) {
 const bare = (id) => id.replace(/^\w+:/, "");
 const sameId = (a, b) => bare(a).endsWith(bare(b)) || bare(b).endsWith(bare(a));
 
-async function reconcile(file, defaultBranch = "main") {
+async function reconcile(file, defaultBranch = "main", blockedAfter = intervalMs("24h")) {
   const factory = JSON.parse(await readFile(file, "utf8"));
   const directory = dirname(file);
   const findings = [];
@@ -109,6 +110,18 @@ async function reconcile(file, defaultBranch = "main") {
       } else {
         checkMissing(worker, { kind: "worker-missing", task: task.id, role, worktree: task.worktree?.path ?? null });
       }
+    }
+
+    const blocked = task.state === "blocked" ? task.blocker : null;
+    if (blocked && Date.now() - Date.parse(blocked.since) > blockedAfter) {
+      findings.push({
+        kind: "stale-blocked",
+        task: task.id,
+        class: blocked.class ?? null,
+        owner: blocked.owner ?? null,
+        since: blocked.since,
+        reason: blocked.reason,
+      });
     }
 
     // Tasks with an issue or PR land on GitHub; only local-merge tasks can be left behind.
@@ -203,10 +216,19 @@ async function reconcile(file, defaultBranch = "main") {
 try {
   const { values, positionals } = parseArgs({
     allowPositionals: true,
-    options: { "default-branch": { type: "string", default: "main" } },
+    options: {
+      "default-branch": { type: "string", default: "main" },
+      "blocked-after": { type: "string", default: "24h" },
+    },
   });
   if (positionals.length !== 1) throw new Error(usage);
-  console.log(JSON.stringify(await reconcile(positionals[0], values["default-branch"]), null, 2));
+  let blockedAfter;
+  try {
+    blockedAfter = intervalMs(values["blocked-after"]);
+  } catch {
+    throw new Error(`--blocked-after must look like 30m, 24h, or 2d, not ${JSON.stringify(values["blocked-after"])}.`);
+  }
+  console.log(JSON.stringify(await reconcile(positionals[0], values["default-branch"], blockedAfter), null, 2));
 } catch (error) {
   console.error(error.message);
   process.exitCode = 1;

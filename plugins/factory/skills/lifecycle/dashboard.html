@@ -196,6 +196,7 @@
       .counter { display: inline-block; min-width: 20px; margin-left: 8px; padding: 0 6px; border-radius: 2em;
         background: color-mix(in srgb, var(--neutral) 20%, transparent); font-size: 12px; font-weight: 500;
         line-height: 18px; text-align: center; vertical-align: middle; }
+      #blocker-filter { margin: 12px 24px 0; }
       #task-list { list-style: none; margin: 0; padding: 0; }
       .task-row { padding: 16px 24px; overflow-wrap: anywhere; }
       .task-row + .task-row { border-top: 1px solid var(--border); }
@@ -425,6 +426,7 @@
           aria-label="Close task list" title="Close task list">&times;</button>
       </div>
       <div id="task-view">
+        <select id="blocker-filter" aria-label="Filter blocked tasks by class" hidden></select>
         <ul id="task-list"></ul>
         <p id="detail-empty" class="muted" hidden>No tasks in this state.</p>
       </div>
@@ -441,7 +443,7 @@
     </div>
     <noscript>Enable JavaScript to read the factory.</noscript>
     <script type="module">
-      import { states, outcomes, transitions, artifactName, githubURL, validate, countByState, entered, byRecency, cardSummary, rankTasks, compareFactories, factorySection, factorySections, fitProjectLabel, sortReferences, cyclesOf, operatorStates, operatorOutcomes, unblockState, unblockChoice, stripRecommended, nextRun, nextDue, leverSpends, leverAutonomyCaps, maxParallelWorkers, maxRoleLimit, digitIndex } from "./factory-data.mjs";
+      import { states, outcomes, transitions, artifactName, githubURL, validate, countByState, entered, byRecency, cardSummary, rankTasks, compareFactories, factorySection, factorySections, fitProjectLabel, sortReferences, cyclesOf, operatorStates, operatorOutcomes, unblockState, unblockChoice, stripRecommended, blockerClasses, blockerMeta, nextRun, nextDue, leverSpends, leverAutonomyCaps, maxParallelWorkers, maxRoleLimit, digitIndex } from "./factory-data.mjs";
 
       const SVG = "http://www.w3.org/2000/svg";
       const NODE = { w: 160, h: 110 };
@@ -573,6 +575,7 @@
       let listed = [];
       const seen = {};
       let mutation = 0;
+      let blockerFilter = "";
 
       const flow = document.getElementById("flow");
       const panel = document.getElementById("detail");
@@ -1251,7 +1254,10 @@
         body.tabIndex = 0;
         body.setAttribute("role", "region");
         body.setAttribute("aria-label", "Blocker reason");
-        const nodes = [heading, body];
+        const nodes = [heading];
+        const meta = blockerMeta(task.blocker);
+        if (meta) nodes.push(element("p", meta, "muted"));
+        nodes.push(body);
         const notes = task.history.filter((item) => item.note && item.note !== reason).slice(-3).reverse();
         if (notes.length) {
           const list = element("ul", null, "unblock-notes");
@@ -1556,6 +1562,8 @@
         if (summary) node.append(summary);
         if (task.blocker) {
           node.append(rich("p", `Blocked in ${task.blocker.from}: ${task.blocker.reason}`));
+          const meta = blockerMeta(task.blocker);
+          if (meta) node.append(element("p", meta, "muted"));
           if (task.blocker.options) {
             const choices = element("ul", null, "blocker-options");
             for (const option of task.blocker.options) {
@@ -1627,6 +1635,24 @@
         return node;
       }
 
+      // Blocked tasks can be filtered by blocker class; "none" matches old blockers without one.
+      function renderBlockerFilter(state) {
+        const filter = document.getElementById("blocker-filter");
+        const blocked = state === "blocked" ? snapshot.tasks.filter((task) => task.state === "blocked") : [];
+        filter.hidden = blocked.length === 0;
+        if (filter.hidden) return;
+        const count = (value) => blocked.filter((task) => (task.blocker?.class ?? "none") === value).length;
+        const choices = [["", `All classes (${blocked.length})`],
+          ...[...blockerClasses, "none"].filter(count).map((value) => [value, `${value === "none" ? "No class" : value} (${count(value)})`])];
+        if (!choices.some(([value]) => value === blockerFilter)) blockerFilter = "";
+        filter.replaceChildren(...choices.map(([value, label]) => {
+          const option = element("option", label);
+          option.value = value;
+          return option;
+        }));
+        filter.value = blockerFilter;
+      }
+
       function renderDetail(state) {
         const list = document.getElementById("task-list");
         const finder = !state && producersOpen();
@@ -1650,12 +1676,15 @@
         const outcome = openOutcome();
         const sameList = panel.dataset.state === state && panel.dataset.outcome === (outcome ?? "");
         const expanded = new Set([...list.querySelectorAll("details[open]")].map((node) => node.dataset.taskId));
-        const inList = (task) => task.state === state && (!outcome || task.resolution.outcome === outcome);
+        renderBlockerFilter(state);
+        const byClass = state === "blocked" ? blockerFilter : "";
+        const inList = (task) => task.state === state && (!outcome || task.resolution.outcome === outcome)
+          && (!byClass || (task.blocker?.class ?? "none") === byClass);
         const tasks = byRecency(snapshot.tasks.filter(inList));
         const title = document.getElementById("detail-title");
         title.textContent = outcome ? `Resolved: ${outcomeTitles[outcome]}` : places[state].title;
         title.append(element("span", String(tasks.length), "counter"));
-        const signature = JSON.stringify([selection, state, outcome,
+        const signature = JSON.stringify([selection, state, outcome, byClass,
           tasks.map((task) => [task.id, task.revision, task.updated_at, task.history.length])]);
         if (list.dataset.signature !== signature) {
           const rows = tasks.map((task) => taskRow(task, expanded));
@@ -1970,6 +1999,10 @@
       window.addEventListener("hashchange", draw);
       const closeChoice = () => choose(null);
       document.getElementById("close-detail").addEventListener("click", closeChoice);
+      document.getElementById("blocker-filter").addEventListener("change", (event) => {
+        blockerFilter = event.target.value;
+        renderDetail(openState());
+      });
       document.addEventListener("keydown", onGlobalKey);
       paletteInput.addEventListener("keydown", onPaletteKey);
       paletteInput.addEventListener("input", renderPalette);
