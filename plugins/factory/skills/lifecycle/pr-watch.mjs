@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Watches one pull request with one GraphQL call per tick and exits on the
+// Watches one pull request with one GraphQL call per tick (one more per extra
+// page of 100 checks or review threads) and exits on the
 // first typed event. Dependency-free; talks to GitHub only through `gh`.
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -25,19 +26,24 @@ A transient failure (HTTP 502/503/504, connection reset, timeout, EOF) is retrie
 on the next check; the 5th one in a row is an error.
 A PR that already merged, closed, or has a failed required check exits at once.`;
 
-const QUERY = `query($owner: String!, $repo: String!, $number: Int!) {
+// Both connections are paged. The first call has no cursors; a PR with 100 items
+// or fewer needs no other call.
+const QUERY = `query($owner: String!, $repo: String!, $number: Int!, $threadsAfter: String, $contextsAfter: String) {
   rateLimit { cost remaining resetAt }
   repository(owner: $owner, name: $repo) {
     pullRequest(number: $number) {
       state merged mergeCommit { oid } headRefOid baseRefOid isDraft
       mergeable mergeStateStatus reviewDecision
       reviews(last: 1) { nodes { id state } }
-      reviewThreads(first: 100) { nodes { isResolved } }
-      commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { nodes {
-        __typename
-        ... on CheckRun { name status conclusion isRequired(pullRequestNumber: $number) }
-        ... on StatusContext { context state isRequired(pullRequestNumber: $number) }
-      } } } } } }
+      reviewThreads(first: 100, after: $threadsAfter) { pageInfo { hasNextPage endCursor } nodes { isResolved } }
+      commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100, after: $contextsAfter) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          __typename
+          ... on CheckRun { name status conclusion isRequired(pullRequestNumber: $number) }
+          ... on StatusContext { context state isRequired(pullRequestNumber: $number) }
+        }
+      } } } } }
     }
   }
 }`;
@@ -144,14 +150,39 @@ function summarizeChecks(contexts) {
   return { state, failed, cancelled };
 }
 
+// Follows both cursors until neither connection has another page. A finished
+// connection keeps its last cursor and returns an empty page. A failed page
+// throws, so a partial list is never summarized.
+async function fetchPages(target) {
+  let first = null;
+  let threads = [];
+  let contexts = [];
+  let threadsAfter = null;
+  let contextsAfter = null;
+  for (;;) {
+    const out = await gh([
+      "api", "graphql", "--hostname", target.host,
+      "-f", `query=${QUERY}`, "-f", `owner=${target.owner}`, "-f", `repo=${target.repo}`, "-F", `number=${target.number}`,
+      ...(threadsAfter ? ["-f", `threadsAfter=${threadsAfter}`] : []),
+      ...(contextsAfter ? ["-f", `contextsAfter=${contextsAfter}`] : []),
+    ]);
+    const { data } = JSON.parse(out);
+    const pr = data.repository.pullRequest;
+    first ??= pr;
+    if (pr.headRefOid !== first.headRefOid) throw new Transient("head changed while paging");
+    const rollup = pr.commits.nodes[0]?.commit?.statusCheckRollup?.contexts;
+    threads = threads.concat(pr.reviewThreads.nodes);
+    contexts = contexts.concat(rollup?.nodes ?? []);
+    if (!pr.reviewThreads.pageInfo.hasNextPage && !rollup?.pageInfo.hasNextPage) {
+      return { pr: first, limit: data.rateLimit, threads, contexts };
+    }
+    threadsAfter = pr.reviewThreads.pageInfo.endCursor;
+    contextsAfter = rollup?.pageInfo.endCursor ?? null;
+  }
+}
+
 async function fetchSnapshot(target) {
-  const out = await gh([
-    "api", "graphql", "--hostname", target.host,
-    "-f", `query=${QUERY}`, "-f", `owner=${target.owner}`, "-f", `repo=${target.repo}`, "-F", `number=${target.number}`,
-  ]);
-  const { data } = JSON.parse(out);
-  const pr = data.repository.pullRequest;
-  const commit = pr.commits.nodes[0]?.commit;
+  const { pr, limit, threads, contexts } = await fetchPages(target);
   const review = pr.reviews.nodes[0];
   return {
     snapshot: {
@@ -166,11 +197,11 @@ async function fetchSnapshot(target) {
       review: {
         decision: pr.reviewDecision,
         latest: review ? { id: review.id, state: review.state } : null,
-        unresolved: pr.reviewThreads.nodes.filter((thread) => !thread.isResolved).length,
+        unresolved: threads.filter((thread) => !thread.isResolved).length,
       },
-      checks: summarizeChecks(commit?.statusCheckRollup?.contexts.nodes ?? []),
+      checks: summarizeChecks(contexts),
     },
-    limit: data.rateLimit,
+    limit,
   };
 }
 

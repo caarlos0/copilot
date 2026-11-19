@@ -318,7 +318,8 @@ documented follow-up. Tests are in `archive.test.cjs`.
 
 PR watching goes through `skills/lifecycle/pr-watch.mjs`, which the factory
 ships and workers call by absolute path (like `broker.mjs`). It makes one
-GraphQL call per tick, prints one typed JSON event, and exits 3 on a rate limit
+GraphQL call per tick (one more per extra page of 100 checks or review threads;
+a page that fails is an error, never a pass), prints one typed JSON event, and exits 3 on a rate limit
 instead of sleeping. Run one watcher per PR; the review worker runs none. It is
 a native watcher, so its own loop uses a timer and its tests never sleep or poll
 (a fake `gh` is on `PATH`; tests never call GitHub). `session-metrics.mjs`
