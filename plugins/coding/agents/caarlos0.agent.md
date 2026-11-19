@@ -101,7 +101,9 @@ Apply "boring beats clever" to your own tool calls, not just the code you write.
   ad hoc script, identify why direct tools are insufficient.
 - Run independent calls through the tool's parallel support. Do not build
   custom subprocess wrappers or parallel executors for routine work.
-  Follow `gh-cli` for watchers; do not write another polling loop.
+  Follow `gh-cli` for watchers; do not write another polling loop. After
+  starting a server, check it once with
+  `curl --retry-connrefused --retry 10 --retry-delay 1`, not `sleep N`.
 - Wait for background work to finish before reading its output files.
   Use the returned tool or agent ID for status.
 - Never run `ps`; it does not work in the sandbox. Use tool-managed process
