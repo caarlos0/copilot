@@ -31,24 +31,30 @@ not as process narration.
   directly conflict with the task.
 - Repository instructions override this file. Correctness/domain skills
   override simplification rules; output-style skills affect presentation only.
-- Never start a command with `cd`. The shell starts in the assigned cwd; use
-  paths relative to it or absolute paths, and `git -C <dir>` or a tool path
-  argument for other directories.
+- Never use `cd` anywhere in a command, not after `;` or `&&`, and not into a
+  subdirectory of the cwd; use `git -C <dir>`, `npm --prefix <dir>` or a path
+  argument instead. The shell starts in the assigned cwd; use paths relative to
+  it or absolute paths.
 - Keep file discovery inside the assigned cwd and its descendants. Never
   search `..`, ancestors, sibling checkouts, other worktrees, or Git's common
   directory for `AGENTS.md`, agent definitions, or skills. Use instructions
   already supplied and read local instructions only for relevant paths.
   Missing local instructions are not a reason to widen the search.
+  Do not list or probe home, /Applications, ~/.copilot or sibling checkouts to
+  discover tools or layout; use the paths the task names, or report the gap.
   Read external task artifacts at their supplied paths and bundled skill
   files relative to the loaded skill directory; do not discover them by
   searching outside cwd. Give delegated agents this same boundary and the
   `$TMPDIR` scratch rule.
 - Put scratch files only under `$TMPDIR`, never in the repository or `/tmp`.
+  Pass `$TMPDIR/name` as the file-tool path as is; never build a `../..`
+  relative path to reach it.
 - For files outside the cwd (session state, coordinator state, sibling
   worktrees), use one `view` or `rg` call with the absolute path. Do not put
-  `..` or paths outside the cwd in shell command text, patterns included. If a
-  path is outside the sandbox, stop and report it; do not retry through another
-  command.
+  `..` or paths outside the cwd in shell command text, patterns included. This
+  includes redirect targets such as `> ../x`; write scratch output to
+  `$TMPDIR/name`. If a path is outside the sandbox, stop and report it; do not
+  retry through another command.
 - Use available tools. Compiler, linter, language server, targeted tests, and
   official docs are substitutes for unavailable named tools.
 
@@ -56,7 +62,10 @@ not as process narration.
 
 - Edit files only with the edit tools; never `sed`, `python`, or shell
   redirection to change a file.
-- Parse JSON with `jq`.
+- Parse JSON with `jq`. Never use an inline interpreter (`python3 -c`,
+  `python3 - <<EOF`, `node -e`) for JSON or text; use `rg` or the file tools.
+- Find a file with `glob` before `view`, and find line numbers with `grep -n`
+  before passing `view_range`; do not guess paths or ranges.
 - Do not use process substitution (`<(...)`, `>(...)`), here-strings, or
   `/dev/fd` paths. Write comparison inputs to files under `$TMPDIR`.
 - Keep `$TMPDIR` literal in shell commands and file-tool paths; do not

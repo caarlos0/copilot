@@ -64,25 +64,32 @@ Apply "boring beats clever" to your own tool calls, not just the code you write.
 
 - Prefer dedicated file tools and existing project commands. Use `glob`, `rg`,
   `view`, and `apply_patch` for files; native `git` and `gh` commands for repository
-  and GitHub work. Parse JSON with `jq` or `gh --json`/`--jq` only; never
-  `python -c`, `node -e` or `sed -i` for JSON or file edits.
-- Never start a command with `cd`. The shell starts in the assigned cwd; use
-  paths relative to it or absolute paths, and `git -C <dir>` or a tool path
-  argument for other directories.
+  and GitHub work. Parse JSON with `jq` or `gh --json`/`--jq` only; never an
+  inline interpreter (`python3 -c`, `python3 - <<EOF`, `node -e`) for JSON or
+  text; use `jq`, `rg` or the file tools. Never use `sed -i` for file edits.
+  Find a file with `glob` before `view`, and find line numbers with `grep -n`
+  before passing `view_range`; do not guess paths or ranges.
+- Never use `cd` anywhere in a command, not after `;` or `&&`, and not into a
+  subdirectory of the cwd; use `git -C <dir>`, `npm --prefix <dir>` or a path
+  argument instead. The shell starts in the assigned cwd; use paths relative to
+  it or absolute paths.
 - Keep file discovery inside the assigned cwd and its descendants. Never
   search `..`, ancestors, sibling checkouts, other worktrees, or Git's common
   directory for `AGENTS.md`, agent definitions, or skills. Use instructions
   already supplied and read local instructions only for relevant paths.
   Missing local instructions are not a reason to widen the search.
+  Do not list or probe home, /Applications, ~/.copilot or sibling checkouts to
+  discover tools or layout; use the paths the task names, or report the gap.
   Read external task artifacts at their supplied paths and bundled skill
   files relative to the loaded skill directory; do not discover them by
   searching outside cwd. Give delegated agents this same boundary and the
   `$TMPDIR` scratch rule.
 - For files outside the cwd (session state, coordinator state, sibling
   worktrees), use one `view` or `rg` call with the absolute path. Do not put
-  `..` or paths outside the cwd in shell command text, patterns included. If a
-  path is outside the sandbox, stop and report it; do not retry through another
-  command.
+  `..` or paths outside the cwd in shell command text, patterns included. This
+  includes redirect targets such as `> ../x`; write scratch output to
+  `$TMPDIR/name`. If a path is outside the sandbox, stop and report it; do not
+  retry through another command.
 - NEVER use `python`, `sed`, or other shell commands to edit files, always use
   the `edit` tools instead.
 - If a task needs only a few direct calls, make those calls. Do not write
@@ -111,6 +118,8 @@ Apply "boring beats clever" to your own tool calls, not just the code you write.
 - Put scratch files only under `$TMPDIR`, never in the repository or `/tmp`.
   Keep that variable literal in shell commands and file-tool paths; do not
   hard-code its resolved path. Do not assume the session directory is writable.
+  Pass `$TMPDIR/name` as the file-tool path as is; never build a `../..`
+  relative path to reach it.
 
 ## Principles
 
