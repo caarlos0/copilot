@@ -44,12 +44,12 @@ test("sums models, credits, tokens and active time per worker and per task", asy
     review: { session: ids.a },
   }), directory);
   assert.deepEqual(usage.workers.investigation, {
-    models: ["m1", "m2"], credits: 3.75, input_tokens: 300, output_tokens: 30, active_minutes: 5,
+    models: ["m1", "m2"], credits: 3.75, usd: 0.0375, input_tokens: 300, output_tokens: 30, active_minutes: 5,
   });
   assert.equal(usage.workers.implementation.credits, 0.5);
   assert.deepEqual(usage.workers.review, usage.workers.investigation);
   assert.deepEqual(usage.total, {
-    models: ["m1", "m2"], credits: 4.25, input_tokens: 350, output_tokens: 35, active_minutes: 7,
+    models: ["m1", "m2"], credits: 4.25, usd: 0.0425, input_tokens: 350, output_tokens: 35, active_minutes: 7,
   }, "A session shared by two roles counts once in the total.");
   assert.equal(usage.started_at, "2026-05-01T10:00:00Z");
   assert.equal(usage.ended_at, null, "An open task has no end.");
@@ -64,6 +64,7 @@ test("falls back to tokens when a log has no credits, and the total follows", as
   const usage = await taskUsage(task({ investigation: { session: ids.a }, implementation: { session: ids.b } }), directory);
   assert.equal(usage.workers.investigation.credits, 1);
   assert.equal(usage.workers.implementation.credits, null);
+  assert.equal(usage.workers.implementation.usd, null);
   assert.equal(usage.total.credits, null);
   assert.deepEqual([usage.total.input_tokens, usage.total.output_tokens], [30, 3]);
 });

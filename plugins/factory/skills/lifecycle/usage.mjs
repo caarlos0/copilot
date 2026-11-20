@@ -6,6 +6,12 @@ import { sessionID } from "./sessions.mjs";
 const maxLogBytes = 512 * 1024 * 1024;
 const refreshMs = 30_000;
 
+// 1 AI credit = $0.01 (docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing).
+// totalNanoAiu is 1e9 per credit: the log's costPerBatch for Claude Sonnet 5.5 input is 2e11
+// nano AIU per 1M tokens, which is the published $2.00 per 1M tokens.
+const usdPerCredit = 0.01;
+const usdOf = (credits) => credits === null ? null : Math.round(credits * usdPerCredit * 1e4) / 1e4;
+
 // Session logs are streamed once per file change, and a log that keeps growing is not read
 // again for refreshMs. Only numbers and model names leave this module.
 const cache = new Map();
@@ -21,9 +27,11 @@ async function readLog(file) {
     if (!reading.has(file)) {
       reading.set(file, measureFile(file).then((metrics) => {
         const { usage } = metrics;
+        const credits = usage.nano_aiu > 0 ? Math.round(usage.nano_aiu / 1e7) / 100 : null;
         const value = metrics.events === 0 ? null : {
           models: usage.models,
-          credits: usage.nano_aiu > 0 ? Math.round(usage.nano_aiu / 1e7) / 100 : null,
+          credits,
+          usd: usdOf(credits),
           input_tokens: usage.input_tokens,
           output_tokens: usage.output_tokens,
           active_minutes: metrics.wall_minutes,
@@ -48,9 +56,11 @@ function total(items) {
   if (!found.length) return null;
   // A partial credit sum would understate the cost, so mixed sessions fall back to tokens.
   const credited = found.every((item) => item.credits !== null);
+  const credits = credited ? Math.round(found.reduce((sum, item) => sum + item.credits, 0) * 100) / 100 : null;
   return {
     models: [...new Set(found.flatMap((item) => item.models))].sort(),
-    credits: credited ? Math.round(found.reduce((sum, item) => sum + item.credits, 0) * 100) / 100 : null,
+    credits,
+    usd: usdOf(credits),
     input_tokens: found.reduce((sum, item) => sum + item.input_tokens, 0),
     output_tokens: found.reduce((sum, item) => sum + item.output_tokens, 0),
     active_minutes: Math.round(found.reduce((sum, item) => sum + item.active_minutes, 0) * 100) / 100,

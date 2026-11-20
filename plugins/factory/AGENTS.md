@@ -285,16 +285,18 @@ and the latest implementation step the "Copy worktree path" link (only while the
 `details` from the factory file.
 
 The chip row of a task card shows usage: "Elapsed" (first history entry to `resolved`, or live
-while open), "Cost: N AIC" (or "Tokens: ..." when a log has no credits), one chip per model, and
-"Active" (first to last session event). The cost chip's tooltip lists each worker role. Each
-worker line on a history step shows that worker's model and cost chips. Unknown values show no
+while open), "Cost: $N.NN" (or "Tokens: ..." when a log has no credits), one chip per model, and
+"Active" (first to last session event). The cost chip's tooltip has the AIC value and lists each
+worker role. Each worker line on a history step shows that worker's model and cost chips (the cost
+chip's tooltip has the AIC value). Unknown values show no
 chip. `usage.mjs` computes it on the server for
 `/api/factory` (`usage`, keyed by task ID, in the ETag). It reads only
 `$FACTORY_SESSION_STATE` (default `~/.copilot/session-state`) logs of the session IDs in the
 factory file, through `session-metrics.mjs` `measureFile` (streamed, no log over 512 MiB), and
 caches by file mtime and size, with no reread of a changing log within 30 seconds. Credits are
-`totalNanoAiu` of the `session.usage_record` events divided by 1e9 (assumed to be AI credits); a
-log without them shows tokens instead, and a task total shows credits only when every session has
+`totalNanoAiu` of the `session.usage_record` events divided by 1e9 (verified: the log's
+`costPerBatch` rates equal GitHub's published per-token prices at 1 AI credit = $0.01); `usd` is
+credits times `usdPerCredit` in `usage.mjs`. A log without credits shows tokens instead, and a task total shows credits only when every session has
 them. A missing or unreadable session is `null` and shows nothing. Only numbers and model names
 leave the module.
 

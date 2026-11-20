@@ -2870,14 +2870,14 @@ test("cards show usage chips in the header and per worker on history steps, and 
   };
   await log("11111111-1111-4111-8111-111111111111", [
     line(0, "session.start", {}),
-    line(1, "session.usage_record", { usage: { model: "m1 <b>", inputTokens: 1500, outputTokens: 20, copilotUsage: { totalNanoAiu: 2_500_000_000 } } }),
+    line(1, "session.usage_record", { usage: { model: "m1 <b>", inputTokens: 1500, outputTokens: 20, copilotUsage: { totalNanoAiu: 41_380_000_000 } } }),
     line(5, "assistant.turn_end", {}),
   ]);
   const ui = await dashboard(t, { now: Date.parse("2026-05-01T12:05:00Z"), env: { FACTORY_SESSION_STATE: state } });
 
   const payload = await (await get(await ui.run("location.origin + '/'"), `/api/factory?file=${factoryFile}`)).json();
   assert.deepEqual(payload.usage["issue-9"].workers.investigation, {
-    models: ["m1 <b>"], credits: 2.5, input_tokens: 1500, output_tokens: 20, active_minutes: 5,
+    models: ["m1 <b>"], credits: 41.38, usd: 0.4138, input_tokens: 1500, output_tokens: 20, active_minutes: 5,
   });
   assert.equal(payload.usage["issue-9"].workers.implementation, null, "A session with no log is null.");
 
@@ -2885,13 +2885,14 @@ test("cards show usage chips in the header and per worker on history steps, and 
   const row = ui.get("task-list").children[0];
   const chips = row.querySelector(".chips").textContent;
   assert.match(chips, /Elapsed: 2h 5m/);
-  assert.match(chips, /Cost: 2\.5 AIC/);
+  assert.match(chips, /Cost: \$0\.41/);
+  assert.match(row.querySelector(".chips").children.find((chip) => chip.textContent.startsWith("Cost")).title, /^41\.38 AIC\n/);
   assert.match(chips, /m1 <b>/);
   assert.match(chips, /Active: 5m/);
   assert.equal(row.querySelector("details"), null);
 
   const [, investigation, implementation] = row.querySelector("ol").children;
-  assert.match(investigation.textContent, /m1 <b>2\.5 AIC/);
+  assert.match(investigation.textContent, /m1 <b>\$0\.41/);
   assert.doesNotMatch(implementation.textContent, /AIC|n\/a/, "A session with no log shows nothing.");
 });
 
