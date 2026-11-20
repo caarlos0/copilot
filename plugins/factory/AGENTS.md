@@ -268,20 +268,26 @@ The dashboard task cards show one worker summary (`cardSummary` in
 dashboard reads only the factory file. A `--workers` write that sets a worker
 `running` with a different `pane` or `window` (a relaunch) first drops its stored
 `session`, `summary` and `summary_at`; `result` stays, as it is the planned filename.
-A worker's `result` link (Task details, Find work) and the "View result" link under
+A worker's `result` link (history step, Find work) and the "View result" link under
 a card summary open one popup with the result file, pretty-printed and highlighted
-(`highlightText`, built with `textContent`). It loads the file through
-`/api/artifact`, so the server's access checks apply. The popup shows only the title,
-a close button and the JSON. The link keeps its `href`, so a modified click still opens
-the raw file in a new tab. The "Evidence and task details" link in Task details opens the
-same popup with the task's `details` from the factory file. Task details shows a worker's
-pane ID and the "Copy focus command" button only while the worker is `running` or `unknown`
-with a pane and the task is not `resolved`, and the Worktree row only while the task is not
-`resolved`.
+(`highlightText`, built with `textContent`). A worker's `brief` link opens the same popup
+with the brief rendered as Markdown (`renderMarkdown`: headings, flat lists, fenced code,
+inline code, bold and http(s) links; nodes are built, never parsed from HTML). Both load the
+file through `/api/artifact`, so the server's access checks apply. The popup shows only the
+title, a close button and the document. The links keep their `href`, so a modified click still
+opens the raw file in a new tab. A task card has no "Task details" section. The history steps
+carry the worker lines (`stepExtras`): each worker sits on the latest step of its role's state
+(else the last step) with its status, name, usage, "Copy Rex command" (only while the worker is
+`running` or `unknown` with a pane and the task is not `resolved`; the pane ID is never shown),
+`brief` and `result`. The latest review step carries the merge decision (open tasks with a PR),
+and the latest implementation step the "Copy worktree path" link (only while the task is not
+`resolved`). Both copy links are plain text links that show "Copied" for a moment. The
+"Evidence and task details" link under the history opens the result popup with the task's
+`details` from the factory file.
 
-The "Task details" section of a task card has a "Usage" block: elapsed time (first history
-entry to `resolved`, or live while open) and, per worker role plus a task total, models, credits
-and active time (first to last session event). `usage.mjs` computes it on the server for
+A task card shows, under the history, elapsed time (first history entry to `resolved`, or live
+while open) and the all-roles usage total; each worker's usage (models, credits and active time
+(first to last session event)) is on its history step. `usage.mjs` computes it on the server for
 `/api/factory` (`usage`, keyed by task ID, in the ETag). It reads only
 `$FACTORY_SESSION_STATE` (default `~/.copilot/session-state`) logs of the session IDs in the
 factory file, through `session-metrics.mjs` `measureFile` (streamed, no log over 512 MiB), and

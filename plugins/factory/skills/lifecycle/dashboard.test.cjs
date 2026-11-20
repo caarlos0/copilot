@@ -683,13 +683,10 @@ test("unchanged refresh updates elapsed labels without replacing expanded rows o
   const row = ui.get("task-list").children[0];
   assert.equal(row.querySelector(".state").textContent, "started 15m ago");
   assert.match(row.textContent, /20h 35m ago/);
-  const details = row.querySelectorAll("details");
-  details.forEach((detail) => { detail.open = true; });
 
   ui.setNow(Date.parse("2026-05-01T12:10:00Z"));
   await ui.run("refresh()");
   assert.equal(ui.get("task-list").children[0], row);
-  assert.deepEqual(details.map((detail) => detail.open), [true]);
   assert.equal(row.querySelector(".state").textContent, "started 20m ago");
   assert.match(row.textContent, /20h 40m ago/);
 
@@ -1016,7 +1013,7 @@ test("the evidence link opens the popup with the task details and is absent with
   const task = structuredClone(example.tasks.find((item) => item.id === "issue-9"));
   task.details = { notes: "<b>x</b>", verdict: "implement" };
   const row = ui.run(`taskRow(${JSON.stringify(task)}, new Set())`);
-  assert.equal(row.querySelectorAll("details").length, 1, "Only Task details is collapsible.");
+  assert.equal(row.querySelectorAll("details").length, 0, "There is no Task details section.");
   const trigger = row.querySelectorAll("button").find((node) => node.textContent === "Evidence and task details");
   await trigger.fire("click");
   assert.equal(ui.get("result-dialog").open, true);
@@ -2002,12 +1999,12 @@ test("rows wrap UUIDs, SHAs, panes, paths and backticked text in code and keep l
   task.history.at(-1).note = "Merged as 0123abc.";
   const row = ui.run(`taskRow(${JSON.stringify(task)}, new Set())`);
   const codes = row.querySelectorAll("code").map((node) => node.textContent);
-  for (const expected of ["npm test", "be66032", "/tmp/work/tree", "a.json", "9a8b7c6", pane, "0123abc"]) {
+  for (const expected of ["npm test", "be66032", "/tmp/work/tree", "a.json", "9a8b7c6", "0123abc"]) {
     assert.ok(codes.includes(expected), `${expected} in ${JSON.stringify(codes)}`);
   }
   assert.ok(codes.every((value) => !value.includes("`")));
-  const worker = row.querySelector(".workers").querySelector("li");
-  assert.ok(worker.querySelectorAll("code").some((node) => node.textContent === pane));
+  const worker = row.querySelector(".step-extra");
+  assert.equal(worker.querySelectorAll("code").some((node) => node.textContent === pane), false, "The block ID is not shown.");
   assert.ok(worker.querySelectorAll("a").length >= 1, "Artifact links stay links.");
   assert.equal(row.querySelector(".blocker-options").querySelectorAll("li").length, task.blocker.options.length);
 });
@@ -2697,7 +2694,7 @@ test("the result highlighter colours each token class and never renders a string
   assert.equal(pre.querySelectorAll("script").length, 0, "Result text is data, never an element.");
 });
 
-test("the result link in Task details and the card summary both open the result popup", async (t) => {
+test("the result link in a history step and the card summary both open the result popup", async (t) => {
   const ui = await dashboard(t);
   const name = "owner.repo-issue-9-implementation-result.json";
   const raw = '{"outcome":"complete","note":"<script>alert(1)</script>","count":3}';
@@ -2756,72 +2753,104 @@ test("the result popup shows the error and the raw body for a missing file or in
   assert.equal(ui.get("result-body").querySelectorAll("b").length, 0);
 });
 
-test("task details show the pane and its focus command only for a live worker of an open task", async (t) => {
+test("history steps carry the worker, its Rex command link and the worktree link only while live, and no pane ID or chips", async (t) => {
   const ui = await dashboard(t);
   const task = structuredClone(example.tasks.find((item) => item.id === "issue-9"));
   const row = (value) => ui.run(`taskRow(${JSON.stringify(value)}, new Set())`);
-  const labels = (node) => node.querySelectorAll("button").map((button) => button.title);
+  const labels = (node) => node.querySelectorAll("button").map((button) => button.textContent).filter((text) => /^Copy /.test(text));
+  const steps = (node) => node.querySelector("ol").children;
 
   let node = row(task);
-  const [closed, running] = node.querySelectorAll(".worker-row");
-  assert.equal(closed.querySelectorAll("code").some((code) => code.textContent === "pane-1"), false, "A closed worker hides its pane.");
-  assert.equal(labels(closed).includes("Copy focus command"), false);
-  const pane = running.querySelectorAll("code").find((code) => code.textContent === "pane-2");
-  assert.equal(pane.title, "pane-2", "The tooltip carries the full value.");
-  assert.deepEqual(labels(running), ["Copy focus command"]);
-  assert.ok(labels(node).includes("Copy worktree path"));
+  const [, investigation, implementation] = steps(node);
+  for (const code of ["pane-1", "pane-2", "owner/repo", "issue-9"]) {
+    assert.equal(node.querySelectorAll("code").some((item) => item.textContent === code), false, `${code} is not shown as a chip.`);
+  }
+  assert.equal(node.querySelector("details"), null, "There is no Task details section.");
+  assert.equal(node.textContent.includes("Worktree"), false, "No Worktree label.");
+  assert.deepEqual(labels(investigation), []);
+  assert.deepEqual(investigation.querySelectorAll("a").map((a) => a.textContent), ["brief", "result"]);
+  assert.deepEqual(labels(implementation), ["Copy Rex command", "Copy worktree path"]);
+  assert.deepEqual(implementation.querySelectorAll("a").map((a) => a.textContent), ["brief", "result"]);
+  assert.equal(implementation.querySelectorAll("svg").length, 0, "The links have no glyph.");
 
   task.workers.implementation.status = "unknown";
-  assert.ok(labels(row(task).querySelectorAll(".worker-row")[1]).includes("Copy focus command"), "unknown with a pane is live");
+  assert.deepEqual(labels(steps(row(task))[2]), ["Copy Rex command", "Copy worktree path"], "unknown with a pane is live");
   delete task.workers.implementation.pane;
   delete task.workers.implementation.window;
-  assert.equal(labels(row(task).querySelectorAll(".worker-row")[1]).includes("Copy focus command"), false, "No pane recorded.");
+  assert.deepEqual(labels(steps(row(task))[2]), ["Copy worktree path"], "No pane recorded.");
 
   task.workers.implementation.status = "running";
   task.workers.implementation.pane = "pane-2";
   task.state = "resolved";
   task.resolution = { outcome: "merged", note: null };
   node = row(task);
-  assert.equal(labels(node).includes("Copy focus command"), false, "A resolved task has no live pane.");
-  assert.equal(labels(node).includes("Copy worktree path"), false, "A resolved task hides the worktree.");
-  assert.equal(node.querySelector(".worktree-row"), null);
-  assert.equal(node.querySelectorAll(".worker-row").length, 2, "Workers and their links stay.");
+  assert.deepEqual(labels(node), [], "A resolved task has no live pane or worktree.");
+  assert.equal(node.querySelectorAll("a").filter((a) => a.textContent === "brief").length, 2, "Workers and their links stay.");
 });
 
-test("task details copy the focus command of each live worker pane and the worktree path", async (t) => {
+test("history steps copy the Rex command of each live worker and the worktree path with brief feedback", async (t) => {
   const ui = await dashboard(t);
   ui.run("choose('implementation')");
-  const row = ui.get("task-list").children.find((node) => /issue-9/.test(node.textContent));
-  const [pane, path] = ["Copy focus command", "Copy worktree path"]
-    .map((label) => row.querySelectorAll("button").filter((button) => button.title === label));
-  assert.equal(pane.length, 1, "Only the running worker gets a focus button.");
+  const row = ui.get("task-list").children.find((node) => /Retry loop never stops/.test(node.textContent));
+  const [pane, path] = ["Copy Rex command", "Copy worktree path"]
+    .map((label) => row.querySelectorAll("button").filter((button) => button.textContent === label));
+  assert.equal(pane.length, 1, "Only the running worker gets a Rex command link.");
   assert.equal(path.length, 1);
-  for (const button of [...pane, path[0]]) {
-    assert.equal(button["aria-label"], button.title);
-    assert.equal(button.type, "button");
-    assert.equal(button.textContent, "", "The button shows a glyph, not text.");
-    assert.ok(button.querySelector("svg"));
-  }
+  for (const button of [pane[0], path[0]]) assert.equal(button.type, "button");
 
   ui.run("navigator = { clipboard: { writeText: async (value) => { globalThis.copied = value; } } }");
   await pane[0].fire("click");
   assert.equal(ui.run("copied"), "rex focus -s work pane-2");
-  assert.equal(pane[0]["aria-label"], "Copied");
+  assert.equal(pane[0].textContent, "Copied");
   await path[0].fire("click");
   assert.equal(ui.run("copied"), "/Users/me/src/repo.worktrees/issue-9");
-  assert.equal(path[0]["aria-label"], "Copied");
+  assert.equal(path[0].textContent, "Copied");
 
   const timer = ui.timers.at(-1);
   assert.equal(timer.delay, 1500);
   timer.callback();
-  assert.equal(path[0]["aria-label"], "Copy worktree path");
+  assert.equal(path[0].textContent, "Copy worktree path");
 });
 
-test("copy buttons fall back to the selection when the clipboard API is missing", async (t) => {
+test("the brief link opens the popup with the brief rendered as safe Markdown", async (t) => {
+  const ui = await dashboard(t);
+  const name = "owner.repo-issue-9-implementation-brief.md";
+  await writeFile(join(ui.directory, name), [
+    "# Task <b>nine</b>", "", "Intro with `code`, **bold** and [a link](https://example.com/x).",
+    "[bad](javascript:alert(1)) <script>alert(1)</script>", "", "- one", "- two", "", "1. first", "", "```", "<i>raw</i>", "```",
+  ].join("\n"));
+  const task = structuredClone(example.tasks.find((item) => item.id === "issue-9"));
+  const row = ui.run(`taskRow(${JSON.stringify(task)}, new Set())`);
+  const href = `/api/artifact?file=${encodeURIComponent(factoryFile)}&name=${encodeURIComponent(name)}`;
+  const brief = row.querySelectorAll("a").find((node) => node.textContent === "brief" && node.href === href);
+  assert.ok(brief, "The brief keeps a real href.");
+
+  const click = await brief.fire("click");
+  assert.equal(click.defaultPrevented, true);
+  assert.equal(ui.get("result-dialog").open, true);
+  assert.equal(ui.get("result-title").textContent, "issue-9: implementation brief");
+  assert.equal(ui.get("result-error").hidden, true);
+  const body = ui.get("result-body");
+  assert.equal(body.querySelector("h2").textContent, "Task <b>nine</b>");
+  assert.equal(body.querySelector("code").textContent, "code");
+  assert.equal(body.querySelector("strong").textContent, "bold");
+  assert.equal(body.querySelectorAll("a").length, 1);
+  assert.equal(body.querySelector("a").href, "https://example.com/x");
+  assert.equal(body.querySelector("a").rel, "noopener noreferrer");
+  assert.equal(body.querySelector("ul").querySelectorAll("li").length, 2);
+  assert.equal(body.querySelector("ol").querySelectorAll("li").length, 1);
+  assert.equal(body.querySelector("pre").textContent, "<i>raw</i>");
+  for (const tag of ["script", "b", "i"]) assert.equal(body.querySelectorAll(tag).length, 0, `No ${tag} element.`);
+  assert.match(body.textContent, /\[bad\]\(javascript:alert\(1\)\) <script>alert\(1\)<\/script>/);
+
+  await brief.fire("click", { ctrlKey: true });
+});
+
+test("copy links fall back to the selection when the clipboard API is missing", async (t) => {
   const ui = await dashboard(t);
   ui.run("choose('implementation')");
-  const row = ui.get("task-list").children.find((node) => /issue-9/.test(node.textContent));
-  const button = row.querySelectorAll("button").find((node) => node.title === "Copy worktree path");
+  const row = ui.get("task-list").children.find((node) => /Retry loop never stops/.test(node.textContent));
+  const button = row.querySelectorAll("button").find((node) => node.textContent === "Copy worktree path");
 
   const copied = [];
   const create = ui.document.createElement;
@@ -2838,14 +2867,14 @@ test("copy buttons fall back to the selection when the clipboard API is missing"
   ui.run("navigator = {}");
   await button.fire("click");
   assert.deepEqual(copied, [["copy", "/Users/me/src/repo.worktrees/issue-9", true]]);
-  assert.equal(button["aria-label"], "Copied");
+  assert.equal(button.textContent, "Copied");
 
   ui.document.execCommand = () => false;
   await button.fire("click");
-  assert.equal(button["aria-label"], "Copy failed");
+  assert.equal(button.textContent, "Copy failed");
 });
 
-test("task details show elapsed time and per role usage from the session logs, n/a when missing", async (t) => {
+test("history steps show elapsed time and per role usage from the session logs, n/a when missing", async (t) => {
   const state = await mkdtemp(join(tmpdir(), "factory-dashboard-sessions-"));
   t.after(() => rm(state, { recursive: true, force: true }));
   const line = (minute, type, data) => JSON.stringify({ type, timestamp: new Date(Date.UTC(2026, 4, 1, 10, minute)).toISOString(), data });
@@ -2867,10 +2896,10 @@ test("task details show elapsed time and per role usage from the session logs, n
   assert.equal(payload.usage["issue-9"].workers.implementation, null, "A session with no log is null.");
 
   ui.run("choose('implementation')");
-  const text = ui.get("task-list").children[0].querySelector("details").textContent;
-  assert.match(text, /Usage/);
-  assert.match(text, /Elapsed: 2h 5m/);
-  assert.match(text, /investigation: m1 <b>; 2\.5 credits; active 5m/);
-  assert.match(text, /implementation: n\/a/);
-  assert.match(text, /Total: m1 <b>; 2\.5 credits; active 5m/);
+  const row = ui.get("task-list").children[0];
+  const [, investigation, implementation] = row.querySelector("ol").children;
+  assert.match(investigation.textContent, /m1 <b>; 2\.5 credits; active 5m/);
+  assert.match(implementation.textContent, /n\/a/);
+  assert.equal(row.querySelector("details"), null);
+  assert.match(row.textContent, /Elapsed: 2h 5m\. Total: m1 <b>; 2\.5 credits; active 5m/);
 });

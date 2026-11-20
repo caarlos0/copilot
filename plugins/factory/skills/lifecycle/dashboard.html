@@ -188,7 +188,6 @@
       .icon-button { display: inline-flex; flex: none; align-items: center; justify-content: center;
         width: 32px; height: 32px; padding: 0; line-height: 1; }
       .icon-button svg { display: block; }
-      .inline-copy { width: 24px; height: 24px; flex: none; }
       .settings-form h3 { margin: 24px 0 4px; padding-top: 16px; border-top: 1px solid var(--border); font-size: 14px; }
       .settings-form h3:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
       .settings-form input { display: block; width: 100%; margin-top: 4px; padding: 5px 12px; background: var(--bg); font-weight: 400; }
@@ -260,17 +259,17 @@
       .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: var(--neutral); }
       .dot.running { background: var(--success); }
       .dot.unknown { background: var(--attention); }
-      ul.workers { margin: 8px 0; padding: 0; list-style: none; }
-      .worker-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 16px; padding: 4px 0; }
-      .worker-main, .worker-actions, .worktree-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
-      .worker-main .dot { margin-right: 0; }
-      .worktree-row { margin: 8px 0; flex-wrap: nowrap; }
-      .copy-value { display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; }
-      .worktree-row .copy-value { flex: 0 1 auto; }
-      code.ellipsis { min-width: 0; max-width: 32ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .worktree-row code.ellipsis { max-width: 100%; }
-      .details-link { margin-top: 4px; padding: 0; border: 0; background: none; color: var(--accent); font-size: 12px; font-weight: 400; }
-      .details-link:hover:not(:disabled), .details-link:active:not(:disabled) { background: none; text-decoration: underline; }
+      .step-extra { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; margin-top: 6px; }
+      .step-extra .dot { margin-right: 0; }
+      .details-link, .link-button { padding: 0; border: 0; background: none; color: var(--accent); font-size: 12px; font-weight: 400; }
+      .details-link { display: block; margin-top: 4px; }
+      .details-link:hover:not(:disabled), .details-link:active:not(:disabled),
+      .link-button:hover:not(:disabled), .link-button:active:not(:disabled) { background: none; text-decoration: underline; }
+      #result-body.markdown { overflow-wrap: anywhere; }
+      #result-body.markdown > :first-child { margin-top: 0; }
+      #result-body.markdown h1, #result-body.markdown h2, #result-body.markdown h3, #result-body.markdown h4 { margin: 16px 0 8px; font-size: 14px; color: var(--fg); }
+      #result-body.markdown p, #result-body.markdown ul, #result-body.markdown ol { margin: 8px 0; }
+      #result-body.markdown ul, #result-body.markdown ol { padding-left: 24px; }
       h4 { margin: 12px 0 0; font-size: 12px; font-weight: 600; color: var(--fg-muted); }
       ol.history { margin: 8px 0; padding: 0; list-style: none; font-size: 12px; }
       .history-gap { position: relative; display: flex; align-items: center; gap: 8px; min-height: 22px; margin-left: 24px;
@@ -326,7 +325,7 @@
       /* Phones and touch screens: 44px targets and 16px inputs (iOS zooms smaller ones). */
       @media (max-width: 700px), (pointer: coarse) {
         button, select, input, textarea { min-height: 44px; font-size: 16px; }
-        .icon-button, .inline-copy { width: 44px; height: 44px; }
+        .icon-button { width: 44px; height: 44px; }
         .move { padding: 3px 16px; }
         .summary-toggle { padding: 0 8px 0 0; }
         summary { padding: 12px 0; }
@@ -456,7 +455,7 @@
             aria-label="Close result" title="Close result">&times;</button>
         </div>
         <p id="result-error" class="muted" role="alert" hidden></p>
-        <div id="result-body" tabindex="0" role="region" aria-label="Result JSON"></div>
+        <div id="result-body" tabindex="0" role="region" aria-label="Result"></div>
       </dialog>
       <dialog id="palette-dialog" aria-label="Go to task">
         <div class="detail-head">
@@ -1088,15 +1087,94 @@
         resultOpener = null;
       }
 
-      // Shows one JSON document pretty-printed and highlighted: a result file loaded through the
-      // artifact route (href), or a value the page already holds (data).
-      async function openResult({ title, href, data, trigger }) {
+      const MARKDOWN_INLINE = /`([^`\n]+)`|\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)|\*\*([^*\n]+)\*\*/g;
+
+      // Inline code, bold and http(s) links; everything else is text, set with textContent.
+      function markdownInline(text) {
+        const parts = [];
+        let last = 0;
+        for (const match of text.matchAll(MARKDOWN_INLINE)) {
+          if (match.index > last) parts.push(text.slice(last, match.index));
+          if (match[1] != null) parts.push(element("code", match[1]));
+          else if (match[4] != null) parts.push(element("strong", match[4]));
+          else {
+            const node = link(match[2], match[3]);
+            node.target = "_blank";
+            node.rel = "noopener noreferrer";
+            parts.push(node);
+          }
+          last = match.index + match[0].length;
+        }
+        if (last < text.length) parts.push(text.slice(last));
+        return parts;
+      }
+
+      // Headings, flat lists, fenced code and paragraphs. Nodes are built, never parsed from HTML.
+      function renderMarkdown(source) {
+        const root = element("div");
+        const lines = source.replace(/\r\n?/g, "\n").split("\n");
+        let paragraph = [];
+        let list = null;
+        let listTag = null;
+        const flush = () => {
+          if (paragraph.length) {
+            const node = element("p");
+            node.append(...markdownInline(paragraph.join(" ")));
+            root.append(node);
+          }
+          paragraph = [];
+        };
+        for (let index = 0; index < lines.length; index += 1) {
+          const line = lines[index];
+          const fence = /^\s*```/.test(line);
+          const heading = /^(#{1,6})\s+(.*)$/.exec(line);
+          const item = /^\s*(?:([-*+])|\d+[.)])\s+(.*)$/.exec(line);
+          if (fence) {
+            flush();
+            list = null;
+            const code = [];
+            while (++index < lines.length && !/^\s*```/.test(lines[index])) code.push(lines[index]);
+            root.append(element("pre", code.join("\n")));
+          } else if (heading) {
+            flush();
+            list = null;
+            const node = element(`h${Math.min(heading[1].length + 1, 4)}`);
+            node.append(...markdownInline(heading[2]));
+            root.append(node);
+          } else if (item) {
+            flush();
+            const tag = item[1] ? "ul" : "ol";
+            if (!list || listTag !== tag) {
+              list = element(tag);
+              listTag = tag;
+              root.append(list);
+            }
+            const node = element("li");
+            node.append(...markdownInline(item[2]));
+            list.append(node);
+          } else if (!line.trim()) {
+            flush();
+            list = null;
+          } else {
+            list = null;
+            paragraph.push(line.trim());
+          }
+        }
+        flush();
+        return root;
+      }
+
+      // Shows one document in the popup: a file loaded through the artifact route (href), parsed as
+      // JSON (pretty-printed and highlighted) or, with markdown, rendered as Markdown; or a value the
+      // page already holds (data).
+      async function openResult({ title, href, data, markdown = false, trigger }) {
         const load = ++resultLoad;
         resultOpener = trigger;
         const body = document.getElementById("result-body");
         const error = document.getElementById("result-error");
         document.getElementById("result-title").textContent = title;
         error.hidden = true;
+        body.classList.toggle("markdown", markdown);
         body.replaceChildren(element("p", "Loading…", "muted"));
         resultDialog.showModal();
         body.focus();
@@ -1113,11 +1191,13 @@
           if (!response.ok) {
             try { message = JSON.parse(text).error; } catch {}
             message ??= `The server answered ${response.status}.`;
+          } else if (markdown) {
+            parsed = text;
           } else {
             try { parsed = JSON.parse(text); } catch (cause) { message = `Not valid JSON: ${cause.message}`; }
           }
         } catch (cause) {
-          message = `Could not load the result: ${cause.message}`;
+          message = `Could not load the file: ${cause.message}`;
         }
         if (load !== resultLoad) return;
         if (message) {
@@ -1125,7 +1205,7 @@
           error.hidden = false;
           body.replaceChildren(element("pre", text));
         } else {
-          body.replaceChildren(highlightJSON(parsed));
+          body.replaceChildren(markdown ? renderMarkdown(parsed) : highlightJSON(parsed));
         }
       }
 
@@ -1600,28 +1680,25 @@
         return form;
       }
 
-      // A plain click opens the result popup; the href keeps new tab, copy link and middle-click working.
-      function resultLink(label, worker, context) {
-        const name = artifactName(worker.result, "result");
+      // A plain click opens the popup; the href keeps new tab, copy link and middle-click working.
+      // A brief renders as Markdown, a result as JSON.
+      function artifactLink(label, field, worker, context) {
+        const name = artifactName(worker[field], field);
         const href = `/api/artifact?${new URLSearchParams({ file: selection, name })}`;
         const node = link(label, href);
         node.addEventListener("click", (event) => {
           if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
           event.preventDefault();
-          return openResult({ title: `${context.task}: ${context.role} result`, href, trigger: node });
+          return openResult({ title: `${context.task}: ${context.role} ${field}`, href, markdown: field === "brief", trigger: node });
         });
         return node;
       }
 
+      const resultLink = (label, worker, context) => artifactLink(label, "result", worker, context);
+
       function appendArtifacts(parent, worker, context) {
         for (const field of ["brief", "result"]) {
-          if (!worker[field]) continue;
-          if (field === "result") {
-            parent.append(resultLink(field, worker, context), " ");
-            continue;
-          }
-          const query = new URLSearchParams({ file: selection, name: artifactName(worker[field], field) });
-          parent.append(link(field, `/api/artifact?${query}`), " ");
+          if (worker[field]) parent.append(artifactLink(field, field, worker, context), " ");
         }
       }
 
@@ -1648,7 +1725,7 @@
         });
       }
 
-      function historyItem(step, index) {
+      function historyItem(step, index, extras = []) {
         const entry = element("li");
         if (index > 0) {
           const gap = element("div", null, "history-gap");
@@ -1665,20 +1742,21 @@
         if (step.operator) head.append(element("span", "operator", "history-badge"));
         box.append(head);
         if (step.note) box.append(rich("p", step.note, "history-note"));
+        box.append(...extras);
         entry.append(box);
         return entry;
       }
 
       // Long histories fold the older steps into a details element; every step stays in the DOM.
       const HISTORY_RECENT = 8;
-      function historyFlow(task, expanded) {
+      function historyFlow(task, expanded, extras = []) {
         const steps = historySteps(task.history);
         const earlier = Math.max(0, steps.length - HISTORY_RECENT);
         const list = (from, to) => {
           const items = element("ol", null, "history");
           items.setAttribute("role", "list");
           items.start = from + 1;
-          items.append(...steps.slice(from, to).map((step, index) => historyItem(step, from + index)));
+          items.append(...steps.slice(from, to).map((step, index) => historyItem(step, from + index, extras[from + index])));
           return items;
         };
         if (!earlier) return [list(0, steps.length)];
@@ -1738,23 +1816,58 @@
         return `${item.models.length ? item.models.join(", ") : "no model"}; ${cost}; active ${span(Math.round(item.active_minutes * 60))}`;
       }
 
-      function usageBlock(task) {
+      // Elapsed time and the all-roles total; the per-role usage sits on the matching history step.
+      function usageSummary(task) {
         const usage = snapshot.usage?.[task.id];
         if (!usage) return null;
-        const block = element("div", null, "usage");
-        const elapsed = element("p", "Elapsed: ");
-        elapsed.append(usage.ended_at
+        const block = element("p", "Elapsed: ", "muted");
+        block.append(usage.ended_at
           ? span(Math.max(0, Math.floor((Date.parse(usage.ended_at) - Date.parse(usage.started_at)) / 1000)))
           : elapsedLabel(usage.started_at));
-        block.append(element("h4", "Usage"), elapsed);
-        const roles = Object.entries(usage.workers);
-        if (roles.length) {
-          const list = element("ul", null, "workers");
-          for (const [role, item] of roles) list.append(element("li", `${role}: ${usageText(item)}`));
-          block.append(list);
-        }
-        if (roles.length > 1) block.append(element("p", `Total: ${usageText(usage.total)}`));
+        if (Object.keys(usage.workers).length > 1) block.append(`. Total: ${usageText(usage.total)}`);
         return block;
+      }
+
+      // The worker, merge decision and worktree link of a task, as lines for its history steps: a
+      // worker goes on the latest step of its role's state (else the last step), the merge decision on
+      // the latest review step, the worktree on the latest implementation step.
+      function stepExtras(task) {
+        const extras = task.history.map(() => []);
+        const stepOf = (state) => {
+          const index = task.history.findLastIndex((item) => item.state === state);
+          return index === -1 ? task.history.length - 1 : index;
+        };
+        const open = task.state !== "resolved";
+        const usage = snapshot.usage?.[task.id];
+        for (const [role, worker] of Object.entries(task.workers).filter(([, item]) => item)) {
+          const line = element("div", null, "step-extra");
+          line.append(element("span", null, `dot ${worker.status}`));
+          if (task.history[stepOf(role)]?.state !== role) line.append(element("strong", role));
+          line.append(element("span", worker.status, "muted"));
+          if (worker.name) line.append(...codeParts(worker.name));
+          if (usage && role in usage.workers) line.append(element("span", usageText(usage.workers[role]), "muted"));
+          const live = open && ["running", "unknown"].includes(worker.status) && Boolean(worker.pane || worker.window);
+          if (live && plainID(worker.pane)) line.append(copyLink("Copy Rex command", focusCommand(snapshot.rex_session, worker.pane)));
+          appendArtifacts(line, worker, { task: task.id, role });
+          extras[stepOf(role)]?.push(line);
+        }
+        if (task.pr && open) {
+          const merge = element("div", null, "step-extra muted");
+          if (task.merge) {
+            merge.append(`Merge decision recorded for ${task.merge.authorized_by} (${task.merge.source}) `,
+              elapsedLabel(task.merge.authorized_at, " ago"),
+              task.merge.requested_at ? "; landing requested" : "");
+          } else {
+            merge.textContent = "Merge: no current-head decision recorded";
+          }
+          extras[stepOf("review")]?.push(merge);
+        }
+        if (task.worktree && open) {
+          const worktree = element("div", null, "step-extra");
+          worktree.append(copyLink("Copy worktree path", task.worktree.path));
+          extras[stepOf("implementation")]?.push(worktree);
+        }
+        return extras;
       }
 
       function taskRow(task, expanded) {
@@ -1812,64 +1925,17 @@
             element("p", task.feedback.acknowledged_id === task.feedback.id
               ? "Factory acknowledged this direction." : "Awaiting factory acknowledgement.", "muted"));
         }
-        node.append(element("h4", `History (${task.history.length})`), ...historyFlow(task, expanded));
-        const more = element("details");
-        more.dataset.taskId = `${task.id}:details`;
-        more.open = expanded.has(more.dataset.taskId);
-        const identity = element("p", null, "muted");
-        identity.append(element("code", snapshot.project), " / ", element("code", task.id));
-        more.append(element("summary", "Task details"), identity);
-        const usageSection = usageBlock(task);
-        if (usageSection) more.append(usageSection);
-        if (task.pr && task.state !== "resolved") {
-          const merge = element("p");
-          if (task.merge) {
-            merge.append(`Merge decision recorded for ${task.merge.authorized_by} (${task.merge.source}) `,
-              elapsedLabel(task.merge.authorized_at, " ago"),
-              task.merge.requested_at ? "; landing requested" : "");
-          } else {
-            merge.textContent = "Merge: no current-head decision recorded";
-          }
-          more.append(merge);
-        }
-
-        const workers = Object.entries(task.workers).filter(([, worker]) => worker);
-        if (workers.length) {
-          const list = element("ul", null, "workers");
-          for (const [role, worker] of workers) {
-            const item = element("li", null, "worker-row");
-            const main = element("span", null, "worker-main");
-            main.append(element("span", null, `dot ${worker.status}`), element("strong", role), element("span", worker.status, "muted"));
-            if (worker.name) main.append(...codeParts(worker.name));
-            const actions = element("span", null, "worker-actions");
-            const live = task.state !== "resolved" && ["running", "unknown"].includes(worker.status)
-              && Boolean(worker.pane || worker.window);
-            if (live && worker.pane) {
-              actions.append(copyValue(worker.pane, plainID(worker.pane) && focusCommand(snapshot.rex_session, worker.pane),
-                "Copy focus command"));
-            }
-            appendArtifacts(actions, worker, { task: task.id, role });
-            item.append(main, actions);
-            list.append(item);
-          }
-          more.append(list);
-        }
-        if (task.worktree && task.state !== "resolved") {
-          const worktree = element("p", null, "worktree-row");
-          worktree.append(element("span", "Worktree", "muted"),
-            copyValue(task.worktree.path, task.worktree.path, "Copy worktree path"));
-          more.append(worktree);
-        }
-
+        node.append(element("h4", `History (${task.history.length})`), ...historyFlow(task, expanded, stepExtras(task)));
+        const usageSection = usageSummary(task);
+        if (usageSection) node.append(usageSection);
         if (task.details && Object.keys(task.details).length) {
           const evidence = element("button", "Evidence and task details", "details-link");
           evidence.type = "button";
           evidence.addEventListener("click", () => openResult({
             title: `${task.id}: evidence and task details`, name: `${task.id} details`, data: task.details, trigger: evidence,
           }));
-          more.append(evidence);
+          node.append(evidence);
         }
-        node.append(more);
         return node;
       }
 
@@ -2008,14 +2074,17 @@
         return button;
       }
 
-      // A long value shows truncated, with the full text in the tooltip; the copy button is left out when there is nothing safe to copy.
-      function copyValue(value, copied, label) {
-        const node = element("span", null, "copy-value");
-        const code = element("code", value, "ellipsis");
-        code.title = value;
-        node.append(code);
-        if (copied) node.append(copyButton(label, copied, "inline-copy"));
-        return node;
+      // A plain text link that copies a value and shows "Copied" for a moment.
+      function copyLink(label, value) {
+        const button = element("button", label, "link-button");
+        button.type = "button";
+        button.addEventListener("click", async () => {
+          let result = "Copied";
+          try { await writeClipboard(value); } catch { result = "Copy failed"; }
+          button.textContent = result;
+          setTimeout(() => { button.textContent = label; }, 1500);
+        });
+        return button;
       }
 
       // The pane and session go into a shell command, so only plain IDs are copied. Rex resolves a
