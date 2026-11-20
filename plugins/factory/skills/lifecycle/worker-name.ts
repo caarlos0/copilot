@@ -18,14 +18,14 @@ const VERBS: Record<string, string> = {
   improve: "Improve",
 };
 
-const clean = (text) =>
+const clean = (text?: string) =>
   String(text ?? "")
     .replace(/["'`\u2018\u2019\u201c\u201d]/g, "")
     .replace(/\s+/g, " ")
     .trim();
 
 export function workerName({ role, ref, summary }: { role?: string; ref?: string; summary?: string }) {
-  const verb = VERBS[role];
+  const verb = VERBS[role as string];
   if (!verb) throw new Error(`unknown role "${role}"; use ${Object.keys(VERBS).join(", ")}`);
   let id = clean(ref);
   if (!id) throw new Error("ref is required");
@@ -47,7 +47,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     });
     console.log(workerName(values));
   } catch (error) {
-    console.error(`${error.message}\n\n${usage}`);
+    console.error(`${(error as Error).message}\n\n${usage}`);
     process.exit(1);
   }
 }

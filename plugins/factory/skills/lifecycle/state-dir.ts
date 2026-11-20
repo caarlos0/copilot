@@ -8,7 +8,7 @@ export async function readJSON(file: string) {
   try {
     return JSON.parse(await readFile(file, "utf8"));
   } catch (error) {
-    if (error.code === "ENOENT" || error instanceof SyntaxError) return null;
+    if ((error as NodeJS.ErrnoException).code === "ENOENT" || error instanceof SyntaxError) return null;
     throw error;
   }
 }
@@ -18,7 +18,7 @@ export function alive(pid: number) {
     process.kill(pid, 0);
     return true;
   } catch (error) {
-    return error.code === "EPERM";
+    return (error as NodeJS.ErrnoException).code === "EPERM";
   }
 }
 

@@ -1,0 +1,254 @@
+import { createReadStream } from "node:fs";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
+import { createInterface } from "node:readline";
+import { pathToFileURL } from "node:url";
+import { parseArgs } from "node:util";
+import { readSessions, sessionID } from "./sessions.mjs";
+import type { SessionEntry } from "./sessions.ts";
+
+type LogEvent = {
+  type?: string;
+  timestamp?: string;
+  data?: {
+    toolCallId?: string;
+    toolName?: string;
+    arguments?: { command?: unknown };
+    success?: boolean;
+    usage?: {
+      cost?: number;
+      copilotUsage?: { totalNanoAiu?: number };
+      inputTokens?: number;
+      outputTokens?: number;
+      cacheReadTokens?: number;
+      duration?: number;
+      model?: string;
+    };
+  };
+};
+
+type UsageTotals = {
+  cost: number;
+  nano_aiu: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  model_seconds: number;
+};
+
+type Commands = { sleep: number; gh_wait: number; watch: number; status_reads: number };
+
+const idleOver = 10 * 60_000;
+const minutes = (ms: number) => Math.round(ms / 600) / 100;
+
+const commandPatterns = {
+  sleep: /\bsleep\s+\d/,
+  gh_wait: /\bgh\s+wait\b|\bpr-watch\.mjs\b/,
+  watch: /--watch\b|\bgh\s+run\s+watch\b/,
+};
+const statusRead = /\bgh\s+(?:pr\s+(?:view|checks)|run\s+(?:view|list))\b/;
+
+// Counts only: no message, command, or file content leaves this function.
+// With `from` (ms), only events at or after it count: window-only deltas.
+async function measure(lines: AsyncIterable<string>, from: number | null = null) {
+  const tools: Record<string, { calls: number; failures: number }> = {};
+  const calls = new Map<string | undefined, string | undefined>();
+  const commands: Commands = { sleep: 0, gh_wait: 0, watch: 0, status_reads: 0 };
+  const usage: UsageTotals = { cost: 0, nano_aiu: 0, input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, model_seconds: 0 };
+  const models = new Set<string>();
+  const idle = { ms: 0, over_10_minutes: 0, longest: 0 };
+  let userMessages = 0;
+  let turns = 0;
+  let waitingSince: number | null = null;
+  let began: number | null = null;
+  let first: number | null = null;
+  let last: number | null = null;
+  let skipped = 0;
+  let events = 0;
+
+  const endIdle = (at: number) => {
+    if (waitingSince === null) return;
+    const gap = at - waitingSince;
+    idle.ms += gap;
+    idle.longest = Math.max(idle.longest, gap);
+    if (gap > idleOver) idle.over_10_minutes += 1;
+    waitingSince = null;
+  };
+
+  for await (const line of lines) {
+    if (!line) continue;
+    let event: LogEvent;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      skipped += 1;
+      continue;
+    }
+    const at = Date.parse(event.timestamp as string);
+    if (Number.isNaN(at)) continue;
+    began ??= at;
+    if (from !== null && at < from) continue;
+    events += 1;
+    first ??= at;
+    last = at;
+    const data = event.data ?? {};
+    if (event.type === "user.message") {
+      userMessages += 1;
+      endIdle(at);
+    } else if (event.type === "assistant.turn_start") {
+      turns += 1;
+      endIdle(at);
+    } else if (event.type === "assistant.turn_end") {
+      waitingSince = at;
+    } else if (event.type === "tool.execution_start") {
+      const toolName = data.toolName as string;
+      calls.set(data.toolCallId, toolName);
+      tools[toolName] ??= { calls: 0, failures: 0 };
+      tools[toolName].calls += 1;
+      const command = data.arguments?.command;
+      if (typeof command === "string") {
+        for (const [name, pattern] of Object.entries(commandPatterns)) {
+          if (pattern.test(command)) commands[name as keyof Commands] += 1;
+        }
+        if (statusRead.test(command) && !commandPatterns.watch.test(command)) commands.status_reads += 1;
+      }
+    } else if (event.type === "tool.execution_complete") {
+      if (data.success === false && calls.has(data.toolCallId)) tools[calls.get(data.toolCallId) as string].failures += 1;
+    } else if (event.type === "session.usage_record" && data.usage) {
+      const item = data.usage;
+      usage.cost += item.cost ?? 0;
+      usage.nano_aiu += item.copilotUsage?.totalNanoAiu ?? 0;
+      usage.input_tokens += item.inputTokens ?? 0;
+      usage.output_tokens += item.outputTokens ?? 0;
+      usage.cache_read_tokens += item.cacheReadTokens ?? 0;
+      usage.model_seconds += (item.duration ?? 0) / 1000;
+      if (item.model) models.add(item.model);
+    }
+  }
+
+  return {
+    events,
+    skipped_lines: skipped,
+    started_at: first === null ? null : new Date(first).toISOString(),
+    ended_at: last === null ? null : new Date(last).toISOString(),
+    wall_minutes: first === null ? 0 : minutes((last as number) - first),
+    user_messages: userMessages,
+    turns,
+    idle: { minutes: minutes(idle.ms), over_10_minutes: idle.over_10_minutes, longest_minutes: minutes(idle.longest) },
+    tools,
+    commands,
+    usage: { ...usage, model_seconds: Math.round(usage.model_seconds), models: [...models].sort() },
+    ...(from === null ? {} : { started_before_window: began !== null && began < from }),
+  };
+}
+
+type Metrics = Awaited<ReturnType<typeof measure>>;
+
+function sum(sessions: Metrics[]) {
+  const total = {
+    sessions: sessions.length, wall_minutes: 0, user_messages: 0, turns: 0,
+    idle_minutes: 0, idle_over_10_minutes: 0,
+    ask_user_calls: 0,
+    commands: { sleep: 0, gh_wait: 0, watch: 0, status_reads: 0 } as Commands,
+    usage: { cost: 0, nano_aiu: 0, input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, model_seconds: 0 } as UsageTotals,
+  };
+  for (const item of sessions) {
+    total.wall_minutes += item.wall_minutes;
+    total.user_messages += item.user_messages;
+    total.turns += item.turns;
+    total.idle_minutes += item.idle.minutes;
+    total.idle_over_10_minutes += item.idle.over_10_minutes;
+    total.ask_user_calls += item.tools.ask_user?.calls ?? 0;
+    for (const key of Object.keys(total.commands) as (keyof Commands)[]) total.commands[key] += item.commands[key];
+    for (const key of Object.keys(total.usage) as (keyof UsageTotals)[]) total.usage[key] += item.usage[key];
+  }
+  for (const key of ["wall_minutes", "idle_minutes"] as const) total[key] = minutes(total[key] * 60_000);
+  return total;
+}
+
+export async function measureFile(file: string, from: number | null = null) {
+  const input = createReadStream(file, "utf8");
+  return measure(createInterface({ input, crlfDelay: Infinity }), from);
+}
+
+export async function report(entries: (Partial<SessionEntry> & { id: string })[], directory: string, activeSince: string | null = null) {
+  const from = activeSince === null ? null : Date.parse(activeSince);
+  const sessions: (Metrics & { id: string; role?: string; task?: string; rule?: string })[] = [];
+  const missing: string[] = [];
+  for (const entry of entries) {
+    try {
+      const metrics = await measureFile(join(directory, entry.id, "events.jsonl"), from);
+      if (from !== null && metrics.events === 0) continue;
+      sessions.push({ id: entry.id, role: entry.role, task: entry.task, rule: entry.rule, ...metrics });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      missing.push(entry.id);
+    }
+  }
+  const window = from === null ? {} : {
+    active_since: new Date(from).toISOString(),
+    started_before_window: sessions.filter((item) => item.started_before_window).map((item) => item.id),
+  };
+  return { ...window, totals: sum(sessions), missing, sessions };
+}
+
+async function main() {
+  let values: { help?: boolean; registry?: string; since?: string; "active-since"?: string; directory: string };
+  let positionals: string[];
+  try {
+    ({ values, positionals } = parseArgs({
+      options: {
+        help: { type: "boolean", short: "h" },
+        registry: { type: "string" },
+        since: { type: "string" },
+        "active-since": { type: "string" },
+        directory: { type: "string", default: join(homedir(), ".copilot", "session-state") },
+      },
+      allowPositionals: true,
+    }));
+    if (values.help) {
+      console.log(`Measure Copilot sessions without reading their content.
+
+Usage: node session-metrics.mjs --registry FILE [--since ISO | --active-since ISO] [--directory DIR]
+       node session-metrics.mjs [--directory DIR] [--active-since ISO] SESSION_UUID...
+
+FILE is the <owner.repo>-factory-sessions.jsonl registry that factory.mjs keeps beside the
+factory file. --since keeps sessions registered at or after that time, and always keeps the
+long-lived factory session (role factory). Their totals are cumulative over the whole session.
+--active-since keeps every session with an event at or after that time, however early it
+started, and counts only the events in the window (window-only deltas). Output then lists
+started_before_window: the sessions that began earlier, and each session has the same flag. A
+tool call that began before the window is not counted as a failure when it ends inside it. DIR defaults to
+~/.copilot/session-state. Prints JSON: totals, missing session IDs, and per-session wall
+minutes, model seconds, user messages, turns, idle time (turn end to the next user message or turn),
+tool call and failure counts, wait/watch command counts, and usage. Tool run times are not
+reported: the event log does not record them reliably.
+Exit: 0 success, 1 I/O or invalid registry, 2 usage.`);
+      return;
+    }
+    if (values.registry === undefined && !positionals.length) throw new Error("Pass --registry FILE or session IDs.");
+    if (values.registry !== undefined && positionals.length) throw new Error("Pass --registry or session IDs, not both.");
+    if (values.since !== undefined && Number.isNaN(Date.parse(values.since))) throw new Error("--since must be an ISO 8601 time.");
+    if (values["active-since"] !== undefined && Number.isNaN(Date.parse(values["active-since"]))) throw new Error("--active-since must be an ISO 8601 time.");
+    if (values["active-since"] !== undefined && values.since !== undefined) throw new Error("Pass --since or --active-since, not both.");
+    for (const id of positionals) {
+      if (sessionID(id) !== id) throw new Error(`Not a session UUID: ${id}`);
+    }
+  } catch (error) {
+    console.error(`${(error as Error).message}\nRun with --help for usage.`);
+    process.exitCode = 2;
+    return;
+  }
+  try {
+    const entries = values.registry === undefined
+      ? positionals.map((id) => ({ id }))
+      : (await readSessions(resolve(values.registry)))
+        .filter((entry) => values.since === undefined || entry.role === "factory" || Date.parse(entry.at) >= Date.parse(values.since));
+    console.log(JSON.stringify(await report(entries, resolve(values.directory), values["active-since"] ?? null), null, 2));
+  } catch (error) {
+    console.error((error as Error).message);
+    process.exitCode = 1;
+  }
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) await main();

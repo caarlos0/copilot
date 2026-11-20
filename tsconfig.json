@@ -5,8 +5,9 @@
     "moduleResolution": "NodeNext",
     "allowJs": true,
     "checkJs": false,
+    "allowImportingTsExtensions": true,
     "noEmit": true,
-    "strict": false,
+    "strict": true,
     "skipLibCheck": true,
     "types": ["node", "bun"]
   },
