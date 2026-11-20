@@ -218,24 +218,11 @@ schema and is shared by the writer,
 factory file may live in either directory, even when both exist. The new
 directory wins, then the legacy one; a file in neither is created in the new
 directory. `serve.mjs` lists and serves the factories of both directories
-(deduped by name, the new one wins) and writes the file where it lives; it
-caches each parsed file and sends an `ETag` (mtime, size, inode) on
-`/api/factory` and `/api/factories`, answering `If-None-Match` with 304, and the
-dashboard skips load and redraw on a 304; it gzips (level 1, `Vary: Accept-Encoding`) the
-dashboard page, `factory-data.mjs` and both API responses for a client that sends
-`Accept-Encoding: gzip`, keeping the latest compressed body per resource and tag; the ETag is the
-same with or without gzip, and a 304 has no body; it binds `127.0.0.1` with no token
-by default, and a non-loopback `--host` (for reaching the dashboard from
-another device) requires a token on every request (`--token`, else the one saved with mode 0600
-as `dashboard-token` in the first state directory, created on the first start
-and reused after a restart; an empty or corrupt file is replaced),
-checked in constant time, with a cookie (`HttpOnly; SameSite=Strict`, 30 days) set
-after the first `?token=` load or after a `POST /login` from the login form, and
-an `Authorization: Bearer` header also accepted. A browser page request without a
-valid token gets the login form (401); other requests get a JSON 401, and the
-dashboard reloads on a 401 so the form appears. The login redirect keeps a
-same-origin path only, a wrong token waits 500 ms, and the bound Host is checked to
-block DNS rebinding;
+(deduped by name, the new one wins) and writes the file where it lives. It
+binds `127.0.0.1` with no token by default, and a non-loopback `--host` (for
+reaching the dashboard from another device) requires a token on every request
+(`--token`, else the one saved with mode 0600 as `dashboard-token` in the first
+state directory);
 `migrate.mjs` reads each handoff the same way and writes the factory file to
 the new directory. The lock, events log, waiter PID, archive, and sessions file
 sit beside the factory file, so they follow it. An explicit `--directory` means
@@ -262,33 +249,13 @@ dashboard reads only the factory file. A `--workers` write that sets a worker
 `running` with a different `pane` or `window` (a relaunch) first drops its stored
 `session`, `summary` and `summary_at`; `result` stays, as it is the planned filename.
 
-The dashboard sidebar sorts factories with `compareFactories` in `factory-data.mjs`:
-active with open tasks, then paused or blocked with open tasks, then nothing open,
-then finished; ties go by name without case, then file. It shows them in sections
-(`factorySection`): Active (open tasks, running, paused, or blocked), Idle (nothing
-open), and Finished, with dimmer text; an empty section has no header, and the 1-9
-shortcuts follow the visible order. The dashboard shows no run-status pill above the
-flowchart, on any width. `paused`, `blocked`, and `finished` show in the Find work
-panel note ("Scheduled rules do not run while the factory is ..."). The sidebar has a fixed width,
-`clamp(240px, 22vw, 360px)`; neither a project name nor the selected item changes it (the selected
-item changes only colors, never weight or border width). A name that does not fit loses its owner first, then
-its start (`fitProjectLabel`); the full name stays in `title` and `aria-label`.
-The dashboard opens task lists, and the read-only "Find work" rules and skipped
-list, in one panel docked on the right edge, beside the flowchart (the
-flowchart shrinks while it is open) and can move a task back or directly
-to `resolved` with an operator comment. Manual resolution requires a non-merge
-outcome; it does not merge or close GitHub items. Cmd+K or Ctrl+K opens a task
-palette (`rankTasks` in `factory-data.mjs`) that docks the chosen task's list and
-focuses its row; the shortcut is ignored while another dialog is open. Plain `r`
-refreshes like the header button; it is ignored while typing, with a modifier key, or
-with a dialog open. While a button refresh runs the button is disabled and `aria-busy`
-(the icon spins unless reduced motion is set), and it comes back when the request ends,
-also on failure; the 30 second timer never disables it. Every button has an `:active`
-pressed state (a darker background, and a 1px slide unless reduced motion is set). The header
-shows "Go to" and "Refresh" with an icon and text; at 700px wide or less
-they are icon-only 44px buttons. The header has no freshness label. At that width the
-sidebar gives way to a project dropdown (the sidebar list, same sort order) with a
-settings button beside it. Resolved tasks with pending
+The dashboard sorts and groups factories in the sidebar with `compareFactories`
+and `factorySection` in `factory-data.mjs`. `paused`, `blocked`, and `finished`
+show in the Find work panel note ("Scheduled rules do not run while the factory
+is ..."). The dashboard opens task lists, and the read-only "Find work" rules and
+skipped list, in one panel docked on the right edge, and can move a task back or
+directly to `resolved` with an operator comment. Manual resolution requires a
+non-merge outcome; it does not merge or close GitHub items. Resolved tasks with pending
 feedback are not archived. Archived tasks go to
 `<owner.repo>-factory-archive/YYYY-MM-DD.json`, are never deleted, and come
 back only through `factory.mjs --restore` after the user agrees. Task
