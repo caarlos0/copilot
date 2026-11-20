@@ -67,9 +67,9 @@ so it stays independent of the factory plugin. Share types between modules with
 
 Run from the repository root:
 
-- `node --test plugins/coordination/skills/coordinator/board.test.cjs` for board
+- `node --test plugins/coordination/skills/coordinator/board.test.ts` for board
   changes.
-- `node --test plugins/coordination/skills/coordinator/handoff.test.cjs` for
+- `node --test plugins/coordination/skills/coordinator/handoff.test.ts` for
   handoff writes.
-- `node --test plugins/coordination/skills/coordinator/wait.test.cjs` for
+- `node --test plugins/coordination/skills/coordinator/wait.test.ts` for
   result notification changes.

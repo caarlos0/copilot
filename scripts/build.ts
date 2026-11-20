@@ -57,7 +57,7 @@ function check(entry: string, path: string, importer: string) {
 }
 
 const entries = [...new Bun.Glob(`${pluginDir}/**/*.ts`).scanSync(".")]
-  .filter((file) => !file.includes("node_modules/") && !file.endsWith(".d.ts"))
+  .filter((file) => !file.includes("node_modules/") && !file.endsWith(".d.ts") && !file.endsWith(".test.ts"))
   .sort();
 
 for (const entry of entries) {

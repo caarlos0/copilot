@@ -1,15 +1,17 @@
-const assert = require("node:assert/strict");
-const { readFileSync } = require("node:fs");
-const { mkdtemp, readFile, readdir, rm, stat, writeFile } = require("node:fs/promises");
-const { spawnSync } = require("node:child_process");
-const { join } = require("node:path");
-const { tmpdir } = require("node:os");
-const { test } = require("node:test");
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import type { SpawnSyncReturns } from "node:child_process";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { test } from "node:test";
+import type { TestContext } from "node:test";
 
-const script = join(__dirname, "handoff.mjs");
-const example = JSON.parse(readFileSync(join(__dirname, "handoff.example.json"), "utf8"));
+const script = join(import.meta.dirname, "handoff.mjs");
+const example = JSON.parse(readFileSync(join(import.meta.dirname, "handoff.example.json"), "utf8"));
 
-async function fixture(t, data = example, now) {
+async function fixture(t: TestContext, data: any = example, now?: string) {
   const directory = await mkdtemp(join(tmpdir(), "coordinator-handoff-test-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const file = join(directory, "project-coordinator.json");
@@ -24,11 +26,11 @@ async function fixture(t, data = example, now) {
     directory,
     file,
     read: async () => JSON.parse(await readFile(file, "utf8")),
-    run: (...args) => spawnSync(process.execPath, [...nodeArgs, script, file, ...args], { encoding: "utf8" }),
+    run: (...args: string[]) => spawnSync(process.execPath, [...nodeArgs, script, file, ...args], { encoding: "utf8" }),
   };
 }
 
-function success(result) {
+function success(result: SpawnSyncReturns<string>) {
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stdout, "");
   assert.equal(result.stderr, "");
@@ -121,7 +123,7 @@ test("adding a task removes only existing done tasks older than seven days and k
     "--task-updated-at", "2000-01-01T00:00:00Z",
   ));
   const data = await f.read();
-  assert.deepEqual(data.tasks.map((task) => task.id), [
+  assert.deepEqual(data.tasks.map((task: { id: string }) => task.id), [
     "cutoff", "recent", "pending", "running", "verifying", "blocked", "new",
   ]);
   assert.deepEqual(data.tasks.slice(0, -1), initial.tasks.slice(2));
@@ -218,7 +220,7 @@ test("saves multiple issue and PR links, preserves omitted links, and replaces o
 test("rejects invalid flags without changing the saved file", async (t) => {
   const f = await fixture(t);
   const original = await readFile(f.file, "utf8");
-  const cases = [
+  const cases: [string[], RegExp][] = [
     [["--task", "task-1", "--worker", ""], /task.worker must be a non-empty string/],
     [["--task", "task-1", "--blocker", ""], /task.blocker must be a non-empty string/],
     [["--task", "task-1", "--blocker", "Needs approval"], /task-1.*blocker.*blocked/],
@@ -362,7 +364,7 @@ test("conflicts and publish failures preserve concurrent state and remove staged
 
 test("CLI help, usage, missing files, and dash-prefixed paths have stable streams and exits", async (t) => {
   const f = await fixture(t, null);
-  const invoke = (...args) => spawnSync(process.execPath, [script, ...args], { encoding: "utf8" });
+  const invoke = (...args: string[]) => spawnSync(process.execPath, [script, ...args], { encoding: "utf8" });
   for (const args of [["--help"], ["-h"]]) {
     const result = invoke(...args);
     assert.equal(result.status, 0, result.stderr);

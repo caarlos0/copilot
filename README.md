@@ -174,5 +174,5 @@ then follow the GitHub installation steps.
 Run the coordination and factory checks from the repository root:
 
 ```sh
-node --test plugins/coordination/skills/coordinator/*.test.cjs plugins/factory/skills/lifecycle/*.test.cjs
+node --test plugins/coordination/skills/coordinator/*.test.ts plugins/factory/skills/lifecycle/*.test.ts
 ```

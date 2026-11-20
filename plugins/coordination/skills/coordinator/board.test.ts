@@ -1,54 +1,73 @@
-const assert = require("node:assert/strict");
-const { readFileSync } = require("node:fs");
-const { mkdtemp, writeFile, rename, rm, unlink, symlink } = require("node:fs/promises");
-const { spawn, spawnSync } = require("node:child_process");
-const { join } = require("node:path");
-const { tmpdir } = require("node:os");
-const { test } = require("node:test");
-const vm = require("node:vm");
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { mkdtemp, writeFile, rename, rm, unlink, symlink } from "node:fs/promises";
+import { spawn, spawnSync } from "node:child_process";
+import type { ChildProcessByStdio } from "node:child_process";
+import type { Readable } from "node:stream";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { test } from "node:test";
+import type { TestContext } from "node:test";
+import vm from "node:vm";
 
-const html = readFileSync(`${__dirname}/board.html`, "utf8");
-const script = html.match(/<script type="module">([\s\S]*?)<\/script>/)[1]
+const html = readFileSync(`${import.meta.dirname}/board.html`, "utf8");
+const script = html.match(/<script type="module">([\s\S]*?)<\/script>/)![1]
   .replace(/^\s*import .+;\s*/m, "");
-const example = JSON.parse(readFileSync(`${__dirname}/handoff.example.json`, "utf8"));
+const example = JSON.parse(readFileSync(`${import.meta.dirname}/handoff.example.json`, "utf8"));
 
-async function serverFixture(t) {
+type Server = Awaited<ReturnType<typeof serverFixture>>;
+type Timer = { callback: () => unknown; delay: number };
+type Intercept = (url: URL, options: RequestInit) => unknown;
+
+async function serverFixture(t: TestContext) {
   const directory = await mkdtemp(join(tmpdir(), "coordinator-board-test-"));
-  let child;
-  let closed;
+  let child: ChildProcessByStdio<null, Readable, Readable> | undefined;
+  let closed: Promise<unknown> | undefined;
   t.after(async () => {
     if (child && child.exitCode === null && child.signalCode === null) child.kill();
     if (closed) await closed;
     await rm(directory, { recursive: true, force: true });
   });
-  const raw = async (name, content) => {
+  const raw = async (name: string, content: string) => {
     const temporary = join(directory, `.${name}.next`);
     await writeFile(temporary, content);
     await rename(temporary, join(directory, name));
   };
-  const write = (name, data) => raw(name, JSON.stringify(data));
+  const write = (name: string, data: unknown) => raw(name, JSON.stringify(data));
   await write("example-handoff.json", example);
   child = spawn(process.execPath, [
-    join(__dirname, "serve.mjs"), "--directory", directory, "--port", "0",
+    join(import.meta.dirname, "serve.mjs"), "--directory", directory, "--port", "0",
   ], { stdio: ["ignore", "pipe", "pipe"] });
   closed = new Promise((resolve) => child.once("close", resolve));
-  const url = await new Promise((resolve, reject) => {
+  const url = await new Promise<string>((resolve, reject) => {
     let stdout = "";
     let stderr = "";
-    child.stdout.on("data", (chunk) => {
+    child!.stdout.on("data", (chunk) => {
       stdout += chunk;
       const match = stdout.match(/http:\/\/127\.0\.0\.1:\d+\//);
       if (match) resolve(match[0]);
     });
-    child.stderr.on("data", (chunk) => { stderr += chunk; });
-    child.once("error", reject);
-    child.once("close", (code) => reject(new Error(`Board server exited ${code}: ${stderr}`)));
+    child!.stderr.on("data", (chunk) => { stderr += chunk; });
+    child!.once("error", reject);
+    child!.once("close", (code) => reject(new Error(`Board server exited ${code}: ${stderr}`)));
   });
   return { directory, url, write, raw };
 }
 
 class Element {
-  constructor(tag) {
+  declare tag: string;
+  declare children: Element[];
+  declare dataset: Record<string, string>;
+  declare hidden: boolean;
+  declare value: string;
+  declare content: string;
+  declare listeners: Record<string, () => unknown>;
+  declare clicks: number;
+  declare open: boolean;
+  declare className: string;
+  declare href: string;
+  declare title: string;
+  constructor(tag: string) {
     this.tag = tag;
     this.children = [];
     this.dataset = {};
@@ -58,31 +77,31 @@ class Element {
     this.listeners = {};
     this.clicks = 0;
   }
-  set textContent(value) {
+  set textContent(value: unknown) {
     this.content = String(value);
     this.children = [];
   }
-  get textContent() {
+  get textContent(): string {
     return this.content + this.children.map((child) => child.textContent).join("");
   }
-  set innerHTML(value) {
+  set innerHTML(value: string) {
     throw new Error(`Board must not render task data as HTML: ${value}`);
   }
-  append(...children) {
+  append(...children: Element[]) {
     this.children.push(...children);
   }
-  replaceChildren(...children) {
+  replaceChildren(...children: Element[]) {
     this.content = "";
     this.children = children;
   }
-  querySelectorAll(selector) {
+  querySelectorAll(selector: string): Element[] {
     assert.equal(selector, "details[open]");
     return this.children.flatMap((child) => [
       ...(child.tag === "details" && child.open ? [child] : []),
       ...child.querySelectorAll(selector),
     ]);
   }
-  addEventListener(event, callback) {
+  addEventListener(event: string, callback: () => unknown) {
     this.listeners[event] = callback;
   }
   click() {
@@ -91,30 +110,30 @@ class Element {
   }
 }
 
-async function board(t, data = structuredClone(example), options = {}) {
+async function board(t: TestContext, data: any = structuredClone(example), options: { server?: Server; search?: string } = {}) {
   const server = options.server ?? await serverFixture(t);
   await server.write("example-handoff.json", data);
   const nodes = Object.fromEntries(
     [...html.matchAll(/id="([^"]+)"/g)].map((match) => [match[1], new Element("div")]),
   );
   nodes.error.hidden = true;
-  const timers = [];
-  const events = {};
-  const requests = [];
-  let intercept = null;
+  const timers: Timer[] = [];
+  const events: Record<string, () => unknown> = {};
+  const requests: { url: URL; options: RequestInit }[] = [];
+  let intercept: Intercept | null = null;
   const location = new URL(options.search ?? "?file=example-handoff.json", server.url);
   const context = vm.createContext({
     ...await import("./board-data.mjs"),
     document: {
-      createElement: (tag) => new Element(tag),
-      getElementById: (id) => nodes[id],
+      createElement: (tag: string) => new Element(tag),
+      getElementById: (id: string) => nodes[id],
     },
-    window: { addEventListener: (event, callback) => { events[event] = callback; } },
+    window: { addEventListener: (event: string, callback: () => unknown) => { events[event] = callback; } },
     location,
-    history: { replaceState: (_, __, url) => { location.href = url.href; } },
+    history: { replaceState: (_: unknown, __: unknown, url: URL) => { location.href = url.href; } },
     URL,
     URLSearchParams,
-    fetch: async (path, fetchOptions) => {
+    fetch: async (path: string, fetchOptions: RequestInit) => {
       const url = new URL(path, server.url);
       requests.push({ url, options: fetchOptions });
       if (intercept) {
@@ -123,12 +142,12 @@ async function board(t, data = structuredClone(example), options = {}) {
       }
       return fetch(url, fetchOptions);
     },
-    setTimeout: (callback, delay) => {
+    setTimeout: (callback: () => unknown, delay: number) => {
       const timer = { callback, delay };
       timers.push(timer);
       return timer;
     },
-    clearTimeout: (timer) => {
+    clearTimeout: (timer: Timer) => {
       const index = timers.indexOf(timer);
       if (index >= 0) timers.splice(index, 1);
     },
@@ -140,19 +159,19 @@ async function board(t, data = structuredClone(example), options = {}) {
     timers,
     requests,
     location,
-    intercept(callback) { intercept = callback; },
-    async choose(file) {
+    intercept(callback: Intercept | null) { intercept = callback; },
+    async choose(file: string) {
       nodes.coordinator.value = file;
       await nodes.coordinator.listeners.change();
     },
-    async refresh(next) {
+    async refresh(next?: unknown) {
       if (next !== undefined) await server.write("example-handoff.json", next);
-      const timer = timers.shift();
+      const timer = timers.shift()!;
       assert.equal(timer.delay, 60000);
       await timer.callback();
       assert.equal(timers.length, 1, "schedule the next refresh only after this one finishes");
     },
-    async navigate(search) {
+    async navigate(search: string) {
       location.search = search;
       await events.popstate();
     },
@@ -188,7 +207,7 @@ test("renders JSON tasks fetched over HTTP in all five columns as text", async (
     assert.equal(card.children[0].textContent, `${data.project} / ${data.tasks[index].id}`);
     assert.match(card.textContent, /Worker: Unknown/);
     assert.match(card.textContent, /Evidence and task details/);
-    const links = card.children.find((node) => node.className === "links");
+    const links = card.children.find((node) => node.className === "links")!;
     const artifact = new URL(links.children[0].href, view.server.url);
     assert.equal(artifact.pathname, "/api/artifact");
     assert.equal(artifact.searchParams.get("file"), "example-handoff.json");
@@ -210,7 +229,7 @@ test("shows every issue and PR context link as its number without repeating the 
   const view = await board(t, data);
   assert.equal(view.nodes.error.hidden, true, view.nodes.error.textContent);
   const card = view.nodes.board.children[0].children[1];
-  const links = card.children.find((node) => node.className === "links");
+  const links = card.children.find((node) => node.className === "links")!;
   assert.deepEqual(links.children.map((node) => [node.textContent, node.href]), [
     ["#43", pr], ["#42", issue], ["#42", otherIssue], ["#44", otherPR],
   ]);
@@ -220,13 +239,13 @@ test("shows every issue and PR context link as its number without repeating the 
   data.tasks[0].links = [issue];
   await view.refresh(data);
   const issueCard = view.nodes.board.children[0].children[1];
-  const issueLinks = issueCard.children.find((node) => node.className === "links");
+  const issueLinks = issueCard.children.find((node) => node.className === "links")!;
   assert.deepEqual(issueLinks.children.map((node) => [node.textContent, node.href]), [["#42", issue]]);
 });
 
 test("atomic JSON replacements refresh the board; failed reads retain evidence and recover", async (t) => {
   const view = await board(t);
-  const details = view.nodes.board.children[0].children[1].children.find((node) => node.tag === "details");
+  const details = view.nodes.board.children[0].children[1].children.find((node) => node.tag === "details")!;
   assert.equal(details.open, false);
   details.open = true;
   const done = structuredClone(example);
@@ -251,7 +270,7 @@ test("atomic JSON replacements refresh the board; failed reads retain evidence a
 test("rejects malformed or invalid snapshots without partially replacing the board", async (t) => {
   const view = await board(t);
   const rendered = view.nodes.board.textContent;
-  const invalidCases = [
+  const invalidCases: [string, (data: any) => void][] = [
     ["Unknown status", (data) => { data.tasks[0].status = "idle"; }],
     ["Duplicate task ID", (data) => { data.tasks.push(data.tasks[0]); }],
     ["timezone", (data) => { data.updated_at = "2026-11-05T05:00:00"; }],
@@ -340,10 +359,10 @@ test("listing and selected-board failures remain independent", async (t) => {
 test("switching coordinators discards an older in-flight response and keeps one timer", async (t) => {
   const view = await board(t);
   await view.server.write("new-handoff.json", { ...example, id: "new", goal: "New selection" });
-  let finishOldRead;
-  let oldReadStarted;
-  const started = new Promise((resolve) => { oldReadStarted = resolve; });
-  const gate = new Promise((resolve) => { finishOldRead = resolve; });
+  let finishOldRead!: () => void;
+  let oldReadStarted!: () => void;
+  const started = new Promise<void>((resolve) => { oldReadStarted = resolve; });
+  const gate = new Promise<void>((resolve) => { finishOldRead = resolve; });
   view.intercept(async (url) => {
     if (url.pathname === "/api/board" && url.searchParams.get("file") === "example-handoff.json") {
       oldReadStarted();
@@ -378,12 +397,12 @@ test("HTTP discovery lists valid handoffs rather than unrelated reports", { time
   const module = await fetch(new URL("board-data.mjs", server.url));
   assert.equal(module.status, 200);
   assert.equal(module.headers.get("content-type"), "text/javascript; charset=utf-8");
-  assert.equal(await module.text(), readFileSync(join(__dirname, "board-data.mjs"), "utf8"));
+  assert.equal(await module.text(), readFileSync(join(import.meta.dirname, "board-data.mjs"), "utf8"));
   await server.write("report.json", { outcome: "complete", checks: [] });
   const response = await fetch(new URL("api/boards", server.url));
   assert.equal(response.status, 200);
   const data = await response.json();
-  assert.deepEqual(data.boards.map((board) => board.file), ["example-handoff.json"]);
+  assert.deepEqual(data.boards.map((board: { file: string }) => board.file), ["example-handoff.json"]);
   assert.equal(data.boards[0].goal, example.goal);
   assert.deepEqual(data.errors, []);
 });
@@ -397,7 +416,7 @@ test("HTTP discovery lists role handoffs but excludes board copies and worker JS
   await server.write("worker-result.json", example);
   await server.write("pass-snapshot.json", example);
   const data = await (await fetch(new URL("api/boards", server.url))).json();
-  assert.deepEqual(data.boards.map((board) => board.file), [
+  assert.deepEqual(data.boards.map((board: { file: string }) => board.file), [
     "example-handoff.json", "project-coordinator.json",
     "project-implementer.json", "project-reviewer.json",
   ]);
@@ -410,8 +429,8 @@ test("HTTP discovery reports invalid handoffs but excludes temporary JSON", asyn
   await server.raw("unrelated-report.json", "incomplete report");
   await server.write("example-handoff.next.json", example);
   const data = await (await fetch(new URL("api/boards", server.url))).json();
-  assert.deepEqual(data.boards.map((board) => board.file), ["example-handoff.json"]);
-  assert.deepEqual(data.errors.map((error) => error.file), ["broken-handoff.json"]);
+  assert.deepEqual(data.boards.map((board: { file: string }) => board.file), ["example-handoff.json"]);
+  assert.deepEqual(data.errors.map((error: { file: string }) => error.file), ["broken-handoff.json"]);
 });
 
 test("HTTP reads are uncached and expose only scoped handoffs and their referenced artifacts", async (t) => {
@@ -432,7 +451,7 @@ test("HTTP reads are uncached and expose only scoped handoffs and their referenc
     ["api/board?file=../outside.json", 403],
     ["private.txt", 404],
     ["api/board?file=missing.json", 404],
-  ]) {
+  ] as [string, number][]) {
     assert.equal((await fetch(new URL(route, server.url))).status, status, route);
   }
   const outside = await mkdtemp(join(tmpdir(), "coordinator-board-outside-"));
@@ -443,7 +462,7 @@ test("HTTP reads are uncached and expose only scoped handoffs and their referenc
 });
 
 test("CLI help has no state dependency and invalid arguments have a nonzero exit", () => {
-  const script = join(__dirname, "serve.mjs");
+  const script = join(import.meta.dirname, "serve.mjs");
   const help = spawnSync(process.execPath, [script, "--help", "--directory", "/no-such-state-directory"], { encoding: "utf8" });
   assert.equal(help.status, 0, help.stderr);
   assert.match(help.stdout, /No packages are required/);

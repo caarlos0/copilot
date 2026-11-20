@@ -97,7 +97,10 @@ in a new session. Avoid also loading an installed copy. Check discovery with
 `copilot --plugin-dir /path/to/copilot/plugins/coding skill list --json`.
 Each plugin's `AGENTS.md` lists its own tests.
 
-`.github/workflows/test.yml` runs `node --test` on Ubuntu and macOS for every
-pull request and every push to `main`. Node finds every `*.test.cjs` file, so a
-new test needs no workflow change. Name test files `*.test.cjs`, and pin action
-versions by commit SHA with a version comment.
+`.github/workflows/test.yml` runs the typecheck, then `node --test`, on Ubuntu
+and macOS for every pull request and every push to `main`. Tests are
+TypeScript (`*.test.ts`, `node:test`, ESM). Node 22.18 or later strips the types
+and finds every `*.test.ts` file, so a new test needs no workflow change. A test
+is not a bundle: the build skips `*.test.ts`. Tests import or spawn the `.mjs`
+bundles, because they check shipped behavior. Pin action versions by commit SHA
+with a version comment.

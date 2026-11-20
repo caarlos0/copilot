@@ -1,16 +1,21 @@
-const assert = require("node:assert/strict");
-const { spawn, spawnSync } = require("node:child_process");
-const { createHash } = require("node:crypto");
-const { mkdtemp, readFile, rename, rm, unlink, writeFile } = require("node:fs/promises");
-const { tmpdir } = require("node:os");
-const { join } = require("node:path");
-const { test } = require("node:test");
+import assert from "node:assert/strict";
+import { spawn, spawnSync } from "node:child_process";
+import type { ChildProcessByStdio } from "node:child_process";
+import type { Readable } from "node:stream";
+import { createHash } from "node:crypto";
+import { mkdtemp, readFile, rename, rm, unlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { test } from "node:test";
+import type { TestContext } from "node:test";
 
-const script = join(__dirname, "wait.mjs");
+const script = join(import.meta.dirname, "wait.mjs");
 
-async function fixture(t) {
+type WaitResult = { code: number | null; signal: NodeJS.Signals | null; stdout: string; stderr: string };
+
+async function fixture(t: TestContext) {
   const directory = await mkdtemp(join(tmpdir(), "coordinator-wait-test-"));
-  const children = [];
+  const children: { child: ChildProcessByStdio<null, Readable, Readable>; finished: Promise<WaitResult> }[] = [];
   t.after(async () => {
     for (const { child } of children) {
       if (child.exitCode === null && child.signalCode === null) child.kill();
@@ -21,7 +26,7 @@ async function fixture(t) {
   const cursor = join(directory, "cursor.json");
   const first = join(directory, "first-result.json");
   const second = join(directory, "second-result.json");
-  async function replace(file, content) {
+  async function replace(file: string, content: string) {
     const temporary = `${file}.next`;
     await writeFile(temporary, content);
     await rename(temporary, file);
@@ -32,12 +37,12 @@ async function fixture(t) {
     });
     let stdout = "";
     let stderr = "";
-    const finished = new Promise((resolve, reject) => {
+    const finished = new Promise<WaitResult>((resolve, reject) => {
       child.once("error", reject);
       child.once("close", (code, signal) => resolve({ code, signal, stdout, stderr }));
     });
     children.push({ child, finished });
-    await new Promise((resolve, reject) => {
+    await new Promise<void>((resolve, reject) => {
       child.stdout.on("data", (chunk) => { stdout += chunk; });
       child.stderr.on("data", (chunk) => {
         stderr += chunk;

@@ -27,6 +27,10 @@ jobs:
           for plugin in factory coordination; do
             bun install --cwd "plugins/$plugin" --frozen-lockfile
           done
+      - run: |
+          for plugin in factory coordination; do
+            bun run --cwd "plugins/$plugin" typecheck
+          done
       - run: node --test plugins
       - run: |
           for plugin in factory coordination; do
