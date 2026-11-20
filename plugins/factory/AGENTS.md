@@ -20,8 +20,11 @@ workers" section in sync.
 `blocked` is only for a user decision or an outside action. Its `--blocker` JSON
 carries a `class` (`user-decision`, `outside-action`, `external-wait`,
 `ci-infra`, `approval`) and an `owner` (a GitHub login or `operator`); both are
-optional so old blockers stay valid, and the dashboard shows them and filters by
-class. A worker never waits
+optional so old blockers stay valid. The dashboard shows them, and the Blocked
+box lists one row per class (plus "No class" for old blockers, zero counts
+shown, like the Resolved outcome rows); a click on a row filters the list
+(`#blocked/<class>`, `none` for no class), and a second click or the box clears
+it. A worker never waits
 on another task or an unmerged branch: for a conflict, a missing dependency, or
 a broken default branch it brings in the default branch (`git rebase main`
 for a task without a PR; `git merge` for a task with a PR) and makes the small fix, or the coordinator creates a new task.

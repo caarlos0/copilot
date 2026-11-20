@@ -129,8 +129,8 @@
       .controls { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
       .muted { color: var(--fg-muted); }
       a:focus-visible, button:focus-visible, select:focus-visible, textarea:focus-visible, input:focus-visible, summary:focus-visible,
-      .node:focus-visible, .outcome:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-      .node:focus-visible, .outcome:focus-visible { outline-offset: 4px; }
+      .node:focus-visible, .outcome:focus-visible, .class-row:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      .node:focus-visible, .outcome:focus-visible, .class-row:focus-visible { outline-offset: 4px; }
       #error, #discovery-error, .save-error { padding: 16px; border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
         border-radius: 6px; background: color-mix(in srgb, var(--danger) 10%, var(--bg)); }
 
@@ -151,12 +151,13 @@
       .node .count { fill: var(--fg); font-size: 40px; font-weight: 600; text-anchor: middle; }
       .node .sub { fill: var(--fg-muted); font-size: 12px; text-anchor: middle; }
       .node.source .box { stroke-dasharray: 4 3; }
-      .outcome { cursor: pointer; }
-      .outcome rect { fill: transparent; stroke: color-mix(in srgb, var(--resolved) 45%, var(--border)); stroke-width: 1; }
-      .outcome:hover rect, .outcome.selected rect { fill: color-mix(in srgb, var(--resolved) 14%, var(--bg)); }
-      .outcome text { fill: var(--fg-muted); font-size: 12px; }
-      .outcome.selected text { fill: var(--resolved); }
-      .outcome .outcome-count { fill: var(--fg); font-weight: 600; text-anchor: end; font-variant-numeric: tabular-nums; }
+      .outcome, .class-row { --row: var(--resolved); cursor: pointer; }
+      .class-row { --row: var(--blocked); }
+      .outcome rect, .class-row rect { fill: transparent; stroke: color-mix(in srgb, var(--row) 45%, var(--border)); stroke-width: 1; }
+      .outcome:hover rect, .outcome.selected rect, .class-row:hover rect, .class-row.selected rect { fill: color-mix(in srgb, var(--row) 14%, var(--bg)); }
+      .outcome text, .class-row text { fill: var(--fg-muted); font-size: 12px; }
+      .outcome.selected text, .class-row.selected text { fill: var(--row); }
+      .outcome .outcome-count, .class-row .outcome-count { fill: var(--fg); font-weight: 600; text-anchor: end; font-variant-numeric: tabular-nums; }
 
       dialog { width: min(960px, calc(100% - 32px)); max-height: 85vh; padding: 0;
         color: var(--fg); background: var(--bg); border: 1px solid var(--border); border-radius: 12px; }
@@ -217,7 +218,6 @@
       .counter { display: inline-block; min-width: 20px; margin-left: 8px; padding: 0 6px; border-radius: 2em;
         background: color-mix(in srgb, var(--neutral) 20%, transparent); font-size: 12px; font-weight: 500;
         line-height: 18px; text-align: center; vertical-align: middle; }
-      #blocker-filter { margin: 12px 24px 0; }
       #task-list { list-style: none; margin: 0; padding: 0; }
       .task-row { padding: 16px 24px; overflow-wrap: anywhere; }
       .task-row + .task-row { border-top: 1px solid var(--border); }
@@ -333,7 +333,7 @@
         #flow.vertical .node .name { font-size: 17px; text-anchor: start; }
         #flow.vertical .node .count { text-anchor: end; }
         #flow.vertical .node .sub { font-size: 14px; text-anchor: start; }
-        #flow.vertical .outcome text { font-size: 14px; }
+        #flow.vertical .outcome text, #flow.vertical .class-row text { font-size: 14px; }
         .row-head, .detail-head { gap: 8px; }
         .row-head { flex-wrap: wrap; align-items: center; }
         dialog, #move-dialog, #settings-dialog { width: 100%; max-width: 100%; max-height: 90dvh; margin: auto 0 0;
@@ -423,7 +423,7 @@
       </details>
       <p id="error" role="alert" hidden></p>
       <div id="flow-wrap">
-        <svg id="flow" viewBox="0 0 1160 560" role="group" aria-label="Factory flow: tasks per state"></svg>
+        <svg id="flow" viewBox="0 0 1160 720" role="group" aria-label="Factory flow: tasks per state"></svg>
       </div>
       <dialog id="move-dialog" aria-labelledby="move-title">
         <div class="detail-head">
@@ -459,7 +459,6 @@
           aria-label="Close task list" title="Close task list">&times;</button>
       </div>
       <div id="task-view">
-        <select id="blocker-filter" aria-label="Filter blocked tasks by class" hidden></select>
         <ul id="task-list"></ul>
         <p id="detail-empty" class="muted" hidden>No tasks in this state.</p>
       </div>
@@ -486,8 +485,12 @@
       const SVG = "http://www.w3.org/2000/svg";
       const NODE = { w: 160, h: 110 };
       const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
-      const outcomeTitles = Object.fromEntries(outcomes.map((outcome) =>
-        [outcome, outcome[0].toUpperCase() + outcome.slice(1).replaceAll("-", " ")]));
+      const sentence = (key) => key[0].toUpperCase() + key.slice(1).replaceAll("-", " ");
+      const outcomeTitles = Object.fromEntries(outcomes.map((outcome) => [outcome, sentence(outcome)]));
+      // "none" matches old blockers without a class.
+      const blockerKeys = [...blockerClasses, "none"];
+      const classTitles = { ...Object.fromEntries(blockerClasses.map((key) => [key, sentence(key)])), "ci-infra": "CI infra", none: "No class" };
+      const sublists = { resolved: outcomes, blocked: blockerKeys };
       // Nodes sit on a grid: columns 240 apart, an 80 gap between boxes.
       const places = {
         initial: { x: 20, y: 210, title: "Initial" },
@@ -544,13 +547,14 @@
       }
       const horizontalLayout = {
         width: 1160,
-        height: 560,
+        height: 720,
         source: SOURCE,
         sourceRoute: SOURCE_ROUTE,
         routes: flowRoutes,
         box: (state) => ({ ...places[state], w: NODE.w, h: NODE.h }),
         labels: ({ x, y, w }) => ({ name: [x + w / 2, y + 28], count: [x + w / 2, y + 76], sub: [x + w / 2, y + 98] }),
         outcome: (index) => ({ x: places.resolved.x, y: places.resolved.y + NODE.h + index * 28, w: NODE.w, h: 28 }),
+        blockerClass: (index) => ({ x: places.blocked.x, y: places.blocked.y + NODE.h + index * 28, w: NODE.w, h: 28 }),
       };
 
       // Phones: the states stack in flow order, full width, at scale 1 so the text keeps its real size. The edge
@@ -586,13 +590,14 @@
         });
         return {
           width,
-          height: boxes.blocked.y + H + TOP,
+          height: boxes.blocked.y + H + blockerKeys.length * ROW + TOP,
           source: boxes.source,
           sourceRoute: join("source", "initial"),
           routes,
           box: (state) => boxes[state],
           labels: ({ x, y, w: boxWidth }) => ({ name: [x + 16, y + 26], count: [x + boxWidth - 16, y + 46], sub: [x + 16, y + 46] }),
           outcome: (index) => ({ x: GUTTER, y: boxes.resolved.y + H + index * ROW, w, h: ROW }),
+          blockerClass: (index) => ({ x: GUTTER, y: boxes.blocked.y + H + index * ROW, w, h: ROW }),
         };
       }
 
@@ -613,7 +618,6 @@
       let listed = [];
       const seen = {};
       let mutation = 0;
-      let blockerFilter = "";
 
       const flow = document.getElementById("flow");
       const panel = document.getElementById("detail");
@@ -719,8 +723,8 @@
       }
 
       function openState() {
-        const [state, outcome] = location.hash.slice(1).split("/");
-        if (outcome && (state !== "resolved" || !outcomes.includes(outcome))) return null;
+        const [state, sub] = location.hash.slice(1).split("/");
+        if (sub && !sublists[state]?.includes(sub)) return null;
         return states.includes(state) ? state : null;
       }
 
@@ -729,14 +733,19 @@
         return openState() === "resolved" && outcomes.includes(outcome) ? outcome : null;
       }
 
+      function openClass() {
+        const key = location.hash.split("/")[1];
+        return openState() === "blocked" && blockerKeys.includes(key) ? key : null;
+      }
+
       function setHash(hash) {
         history.replaceState(null, "", `${location.pathname}${location.search}${hash}`);
         draw();
       }
 
-      function choose(state, outcome = null) {
-        const same = openState() === state && openOutcome() === outcome;
-        setHash(!state || same ? "" : `#${state}${outcome ? `/${outcome}` : ""}`);
+      function choose(state, sub = null) {
+        const same = openState() === state && (openOutcome() ?? openClass()) === sub;
+        setHash(!state || same ? "" : `#${state}${sub ? `/${sub}` : ""}`);
       }
 
       const producersOpen = () => location.hash === "#producers";
@@ -818,7 +827,21 @@
           resolutions.append(group);
         });
 
-        flow.replaceChildren(edges, nodes, ports, resolutions);
+        const blockers = svg("g", { role: "group", "aria-label": "Blocked tasks by class" });
+        blockerKeys.forEach((key, index) => {
+          const { x, y, w, h } = layout.blockerClass(index);
+          const group = svg("g", { class: "class-row", tabindex: 0, role: "button" });
+          group.dataset.class = key;
+          group.append(
+            svg("rect", { x, y, width: w, height: h }),
+            svg("text", { x: x + 12, y: y + h / 2 + 5 }, classTitles[key]),
+            svg("text", { class: "outcome-count", x: x + w - 12, y: y + h / 2 + 5 }, "0"),
+          );
+          activateOnKey(group, () => choose("blocked", key));
+          blockers.append(group);
+        });
+
+        flow.replaceChildren(edges, nodes, ports, resolutions, blockers);
       }
 
       function relayoutFlow() {
@@ -880,6 +903,16 @@
           group.setAttribute("aria-pressed", String(selected));
           group.setAttribute("aria-label",
             `Resolved: ${outcomeTitles[outcome]}, ${count} ${count === 1 ? "task" : "tasks"}`);
+        }
+        for (const group of flow.querySelectorAll(".class-row")) {
+          const key = group.dataset.class;
+          const count = tasks.filter((task) => task.state === "blocked" && (task.blocker?.class ?? "none") === key).length;
+          const selected = openClass() === key;
+          group.querySelector(".outcome-count").textContent = String(count);
+          group.classList.toggle("selected", selected);
+          group.setAttribute("aria-pressed", String(selected));
+          group.setAttribute("aria-label",
+            `Blocked: ${classTitles[key]}, ${count} ${count === 1 ? "task" : "tasks"}`);
         }
         const enabled = snapshot.rules.filter((rule) => rule.enabled && isFinder(rule));
         drawSource(enabled);
@@ -1081,9 +1114,10 @@
         const task = snapshot.tasks.find((item) => item.id === id);
         paletteDialog.close();
         if (!task) return;
-        const outcome = task.state === "resolved" ? task.resolution.outcome : null;
-        const docked = openState() === task.state && (!openOutcome() || openOutcome() === outcome);
-        setHash(docked ? location.hash : `#${task.state}${outcome ? `/${outcome}` : ""}`);
+        const sub = task.state === "resolved" ? task.resolution.outcome
+          : task.state === "blocked" ? (task.blocker?.class ?? "none") : null;
+        const docked = openState() === task.state && (!(openOutcome() ?? openClass()) || (openOutcome() ?? openClass()) === sub);
+        setHash(docked ? location.hash : `#${task.state}${task.state === "resolved" && sub ? `/${sub}` : ""}`);
         const row = [...document.getElementById("task-list").children].find((item) => item.dataset.taskId === id);
         if (!row) return;
         row.setAttribute("tabindex", "-1");
@@ -1693,24 +1727,6 @@
         return node;
       }
 
-      // Blocked tasks can be filtered by blocker class; "none" matches old blockers without one.
-      function renderBlockerFilter(state) {
-        const filter = document.getElementById("blocker-filter");
-        const blocked = state === "blocked" ? snapshot.tasks.filter((task) => task.state === "blocked") : [];
-        filter.hidden = blocked.length === 0;
-        if (filter.hidden) return;
-        const count = (value) => blocked.filter((task) => (task.blocker?.class ?? "none") === value).length;
-        const choices = [["", `All classes (${blocked.length})`],
-          ...[...blockerClasses, "none"].filter(count).map((value) => [value, `${value === "none" ? "No class" : value} (${count(value)})`])];
-        if (!choices.some(([value]) => value === blockerFilter)) blockerFilter = "";
-        filter.replaceChildren(...choices.map(([value, label]) => {
-          const option = element("option", label);
-          option.value = value;
-          return option;
-        }));
-        filter.value = blockerFilter;
-      }
-
       function renderDetail(state) {
         const list = document.getElementById("task-list");
         const finder = !state && producersOpen();
@@ -1737,15 +1753,15 @@
         }
         setCloseLabel("Close task list");
         const outcome = openOutcome();
-        const sameList = panel.dataset.state === state && panel.dataset.outcome === (outcome ?? "");
+        const sameList = panel.dataset.state === state && panel.dataset.outcome === (outcome ?? openClass() ?? "");
         const expanded = new Set([...list.querySelectorAll("details[open]")].map((node) => node.dataset.taskId));
-        renderBlockerFilter(state);
-        const byClass = state === "blocked" ? blockerFilter : "";
+        const byClass = openClass();
         const inList = (task) => task.state === state && (!outcome || task.resolution.outcome === outcome)
           && (!byClass || (task.blocker?.class ?? "none") === byClass);
         const tasks = byRecency(snapshot.tasks.filter(inList));
         const title = document.getElementById("detail-title");
-        title.textContent = outcome ? `Resolved: ${outcomeTitles[outcome]}` : places[state].title;
+        title.textContent = outcome ? `Resolved: ${outcomeTitles[outcome]}`
+          : byClass ? `Blocked: ${classTitles[byClass]}` : places[state].title;
         title.append(element("span", String(tasks.length), "counter"));
         const signature = JSON.stringify([selection, state, outcome, byClass,
           tasks.map((task) => [task.id, task.revision, task.updated_at, task.history.length])]);
@@ -1772,9 +1788,10 @@
         document.getElementById("detail-empty").hidden = list.children.length > 0;
         let emptyMessage = "No tasks in this state.";
         if (outcome) emptyMessage = "No tasks with this outcome.";
+        if (byClass) emptyMessage = "No tasks with this class.";
         document.getElementById("detail-empty").textContent = emptyMessage;
         panel.dataset.state = state;
-        panel.dataset.outcome = outcome ?? "";
+        panel.dataset.outcome = outcome ?? byClass ?? "";
         showPanel();
       }
 
@@ -2214,10 +2231,6 @@
       window.addEventListener("hashchange", draw);
       const closeChoice = () => choose(null);
       document.getElementById("close-detail").addEventListener("click", closeChoice);
-      document.getElementById("blocker-filter").addEventListener("change", (event) => {
-        blockerFilter = event.target.value;
-        renderDetail(openState());
-      });
       document.addEventListener("keydown", onGlobalKey);
       paletteInput.addEventListener("keydown", onPaletteKey);
       paletteInput.addEventListener("input", renderPalette);

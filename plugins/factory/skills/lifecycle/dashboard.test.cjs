@@ -886,7 +886,7 @@ test("both charts draw the same lines, and they are the allowed moves", async (t
 });
 
 test("on a phone the flow is one column at the screen width, drawn at scale 1", async (t) => {
-  const { states, outcomes } = await import("./factory-data.mjs");
+  const { states, outcomes, blockerClasses } = await import("./factory-data.mjs");
   const ui = await dashboard(t, { phoneWidth: 390 });
   ui.run(`load(${JSON.stringify(example)}, ${JSON.stringify(factoryFile)})`);
   const flow = ui.get("flow");
@@ -902,8 +902,9 @@ test("on a phone the flow is one column at the screen width, drawn at scale 1", 
     assert.ok(box.w >= width - 80, "Boxes are full width, less the lanes.");
     assert.ok(box.y >= 0 && box.y + box.h <= height);
   }
-  const rows = flow.querySelectorAll(".outcome").map((group) => group.children[0]).map((rect) => ({ y: +rect.y, h: +rect.height }));
-  assert.equal(rows.length, outcomes.length);
+  const rows = [...flow.querySelectorAll(".outcome"), ...flow.querySelectorAll(".class-row")]
+    .map((group) => group.children[0]).map((rect) => ({ y: +rect.y, h: +rect.height }));
+  assert.equal(rows.length, outcomes.length + blockerClasses.length + 1);
   const stacked = [...boxes, ...rows.map((row) => ({ ...row, x: 0, w: width }))].sort((a, b) => a.y - b.y);
   stacked.slice(1).forEach((box, index) => assert.ok(box.y >= stacked[index].y + stacked[index].h, "Nothing overlaps."));
 
@@ -938,7 +939,7 @@ test("on a phone the flow is one column at the screen width, drawn at scale 1", 
 
   const desktop = await dashboard(t);
   assert.ok(!desktop.get("flow").className.split(" ").includes("vertical"));
-  assert.equal(desktop.get("flow").viewBox, "0 0 1160 560");
+  assert.equal(desktop.get("flow").viewBox, "0 0 1160 720");
 });
 
 test("no hover or reach rule gives a state square a blue border", () => {
@@ -1427,7 +1428,7 @@ test("Unblock lists options, fills the comment verbatim and saves through the mo
   assert.equal(saved.feedback.acknowledged_id, null);
 });
 
-test("the blocker class and owner show in the Unblock popup, and blocked tasks filter by class", async (t) => {
+test("the blocker class and owner show in the Unblock popup, and the class rows filter blocked tasks", async (t) => {
   const ui = await dashboard(t);
   const data = structuredClone(example);
   const base = data.tasks.find((item) => item.id === "issue-5");
@@ -1438,29 +1439,35 @@ test("the blocker class and owner show in the Unblock popup, and blocked tasks f
   data.tasks.push(extra("infra", { class: "ci-infra", owner: "alice" }), plain);
   await writeFile(join(ui.directory, factoryFile), JSON.stringify(data));
   await ui.run("refresh()");
-  ui.run("choose('blocked')");
-  const filter = ui.get("blocker-filter");
-  assert.equal(filter.hidden, false);
-  assert.deepEqual(filter.options.map((option) => [option.value, option.textContent]), [
-    ["", "All classes (3)"], ["outside-action", "outside-action (1)"], ["ci-infra", "ci-infra (1)"], ["none", "No class (1)"],
+  const rows = ui.get("flow").querySelectorAll(".class-row");
+  assert.deepEqual(rows.map((row) => [row.dataset.class, row.children[1].textContent, row.querySelector(".outcome-count").textContent]), [
+    ["user-decision", "User decision", "0"], ["outside-action", "Outside action", "1"], ["external-wait", "External wait", "0"],
+    ["ci-infra", "CI infra", "1"], ["approval", "Approval", "0"], ["none", "No class", "1"],
   ]);
-  const ids = () => ui.get("task-list").children.map((row) => row.dataset.taskId).sort();
+  assert.equal(ui.get("blocker-filter"), undefined);
+  const row = (key) => rows.find((item) => item.dataset.class === key);
+  assert.equal(row("ci-infra")["aria-label"], "Blocked: CI infra, 1 task");
+  await ui.run("choose('blocked')");
+  const ids = () => ui.get("task-list").children.map((item) => item.dataset.taskId).sort();
   assert.deepEqual(ids(), ["infra", "issue-5", "plain"]);
   assert.match(ui.get("task-list").textContent, /Class: ci-infra\. Owner: alice\./);
-  filter.value = "ci-infra";
-  await filter.fire("change");
+  await row("ci-infra").fire("click");
+  assert.equal(ui.run("location.hash"), "#blocked/ci-infra");
+  assert.match(ui.get("detail-title").textContent, /^Blocked: CI infra/);
   assert.deepEqual(ids(), ["infra"]);
-  filter.value = "none";
-  await filter.fire("change");
+  await row("none").fire("keydown", { key: "Enter" });
   assert.deepEqual(ids(), ["plain"]);
   assert.doesNotMatch(ui.get("task-list").textContent, /Class:|Owner:/);
-  filter.value = "";
-  await filter.fire("change");
-  await ui.get("task-list").children.find((row) => row.dataset.taskId === "issue-5").querySelector(".move").fire("click");
+  await row("approval").fire("click");
+  assert.deepEqual(ids(), []);
+  assert.equal(ui.get("detail-empty").hidden, false);
+  await row("approval").fire("click");
+  assert.equal(ui.run("location.hash"), "", "A second click on the selected row closes the list.");
+  await ui.run("nodeOf('blocked')").fire("click");
+  assert.deepEqual(ids(), ["infra", "issue-5", "plain"], "The box lists every class.");
+  await ui.get("task-list").children.find((item) => item.dataset.taskId === "issue-5").querySelector(".move").fire("click");
   const context = ui.get("move-body").querySelector(".unblock-context");
   assert.equal(context.children[1].textContent, "Class: outside-action. Owner: operator.");
-  ui.run("choose('initial')");
-  assert.equal(filter.hidden, true);
 });
 
 test("Unblock without options shows only the state and the comment; other rows keep Move", async (t) => {
@@ -2271,10 +2278,10 @@ test("the page works on a phone: viewport, safe areas, touch sizes and contained
   assert.match(narrow, /#flow \{ min-width: 0; max-height: none; \}/, "The vertical chart is as tall as it needs to be.");
   assert.doesNotMatch(narrow, /#flow-wrap/, "The flowchart has no scroller on a phone.");
   assert.doesNotMatch(narrow, /overflow-x: auto/);
-  assert.match(html, /<svg id="flow" viewBox="0 0 1160 560"/);
+  assert.match(html, /<svg id="flow" viewBox="0 0 1160 720"/);
   assert.match(narrow, /#flow\.vertical \.node \.name \{ font-size: 17px;/, "Names are at least 14px, at scale 1.");
   assert.match(narrow, /#flow\.vertical \.node \.sub \{ font-size: 14px;/);
-  assert.match(narrow, /#flow\.vertical \.outcome text \{ font-size: 14px; \}/);
+  assert.match(narrow, /#flow\.vertical \.outcome text, #flow\.vertical \.class-row text \{ font-size: 14px; \}/);
   assert.match(narrow, /dialog, #move-dialog, #settings-dialog \{ width: 100%;/);
 
   const widths = [...(narrow + touch).matchAll(/(?<![-\w])(?:width|min-width): (\d+)px/g)].map((match) => Number(match[1]));

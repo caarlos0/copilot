@@ -713,7 +713,7 @@ its `class` and `owner` in the `--blocker` JSON (old blockers without them stay 
 | `ci-infra` | CI or infrastructure is broken for a reason no worker can fix | a login or `operator` |
 | `approval` | A review or approval gate needs a named person | a login |
 
-The dashboard shows both in the Unblock popup and filters blocked tasks by class;
+The dashboard shows both in the Unblock popup, and the Blocked box has one row per class that filters the list;
 `reconcile.mjs` reports `stale-blocked` after 24 hours. These causes are
 worker-fixable, so they never justify `blocked`, a wait, or a schedule:
 
