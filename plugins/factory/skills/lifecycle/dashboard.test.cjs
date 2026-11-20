@@ -3,7 +3,7 @@ const { readFileSync } = require("node:fs");
 const { appendFile, chmod, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } = require("node:fs/promises");
 const { spawn, spawnSync } = require("node:child_process");
 const http = require("node:http");
-const { delimiter, join } = require("node:path");
+const { delimiter, dirname, join } = require("node:path");
 const { tmpdir } = require("node:os");
 const { gunzipSync } = require("node:zlib");
 const { test } = require("node:test");
@@ -191,6 +191,41 @@ test("the listing answers 304 until any file changes, and a broken file never po
   const served = await get(url, "/api/factory?file=broken.repo-factory.json");
   assert.equal(served.status, 200);
   assert.equal((await served.json()).project, "fixed/repo");
+});
+
+test("the state directory listing is reread only after the directory changes", async (t) => {
+  const log = join(await mkdtemp(join(tmpdir(), "factory-dashboard-readdir-")), "readdir.log");
+  const preload = `${log}.cjs`;
+  t.after(() => rm(dirname(log), { recursive: true, force: true }));
+  await writeFile(preload, `const fs = require("node:fs/promises");
+const real = fs.readdir;
+fs.readdir = (path, options) => {
+  if (options?.withFileTypes) require("node:fs").appendFileSync(${JSON.stringify(log)}, "x");
+  return real(path, options);
+};
+require("node:module").syncBuiltinESMExports();
+`);
+  const { url, directory } = await server(t, { NODE_OPTIONS: `--require=${preload}` });
+  const reads = async () => (await readFile(log, "utf8").catch(() => "")).length;
+  const listed = async () => (await (await get(url, "/api/factories")).json()).factories.map((item) => item.file).sort();
+
+  assert.deepEqual(await listed(), [factoryFile]);
+  const first = await reads();
+  assert.ok(first > 0, "The preload must see the listing read.");
+  await listed();
+  await get(url, "/api/factories");
+  assert.equal(await reads(), first, "An unchanged directory is not reread.");
+
+  await writeFile(join(directory, "other.repo-factory.json"), JSON.stringify(example));
+  assert.deepEqual(await listed(), ["other.repo-factory.json", factoryFile]);
+  assert.ok(await reads() > first, "A new file changes the directory mtime and the listing is reread.");
+  const second = await reads();
+  await listed();
+  assert.equal(await reads(), second);
+
+  await rm(join(directory, "other.repo-factory.json"));
+  assert.deepEqual(await listed(), [factoryFile]);
+  assert.ok(await reads() > second, "A removed file is seen too.");
 });
 
 test("serves only artifacts that the selected factory references, inside the state directory", async (t) => {

@@ -224,15 +224,29 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
     return readFactory(await factoryTag(file));
   }
 
+  // A state directory can hold tens of thousands of scratch files, so its listing is reread only
+  // when the directory mtime changes. The mtime is read before the listing, so a change in between
+  // leaves an older stamp and the next call rereads.
+  const listings = new Map();
+  async function factoryNamesIn(directory) {
+    const { mtimeMs } = await stat(directory);
+    const cached = listings.get(directory);
+    if (cached?.mtimeMs === mtimeMs) return cached.names;
+    const names = [];
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      if ((!entry.isFile() && !entry.isSymbolicLink()) || !factoryFile.test(entry.name) ||
+          entry.name.startsWith(".")) continue;
+      names.push(entry.name);
+    }
+    listings.set(directory, { mtimeMs, names });
+    return names;
+  }
+
   async function factoryNames() {
     await resolveDirectories();
     const names = new Set();
     for (const { directory } of directories) {
-      for (const entry of await readdir(directory, { withFileTypes: true })) {
-        if ((!entry.isFile() && !entry.isSymbolicLink()) || !factoryFile.test(entry.name) ||
-            entry.name.startsWith(".")) continue;
-        names.add(entry.name);
-      }
+      for (const name of await factoryNamesIn(directory)) names.add(name);
     }
     return [...names].sort();
   }

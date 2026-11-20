@@ -239,7 +239,9 @@ the history. Do not store counters.
 
 Task artifacts pile up in the state directory (briefs, results, instructions
 directories, archived copies, staging files). Once in a while, and when a
-listing of the directory gets slow, run `archive.mjs clean` beside this skill:
+listing of the directory gets slow, run `archive.mjs clean` beside this skill.
+On a `reconcile.due`, once per day and at startup, run
+`archive.mjs clean "$FILE" --older-than 1d --run`.
 
 ```sh
 node archive.mjs clean "$FILE"                     # dry run: prints what it would delete
