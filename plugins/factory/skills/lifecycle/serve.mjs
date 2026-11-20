@@ -195,7 +195,8 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
   // clear without waiting for a reconcile run.
   async function factoryView(entry) {
     const attention = (await pendingAttention(entry.target))
-      .map(({ id, session, kind, text, options, role, pane, task, at }) => ({ id, session, kind, text, options, role, pane, task, at }))
+      .map(({ id, session, kind, text, options, role, pane, rex_session, task, at }) =>
+        ({ id, session, kind, text, options, role, pane, rex_session: rex_session ?? null, task, at }))
       .sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
     const digest = createHash("sha1").update(JSON.stringify(attention)).digest("base64url");
     return {
@@ -375,6 +376,10 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
     answering.add(item.id);
     try {
       await sendAnswer(item, body.index);
+    } catch (error) {
+      // The pane may be gone: rescan on the next poll instead of reusing the cached list.
+      scanned.delete(target);
+      throw error;
     } finally {
       answering.delete(item.id);
     }

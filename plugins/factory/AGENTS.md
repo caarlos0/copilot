@@ -461,8 +461,10 @@ resolves by signal: the session log
 shows `permission.completed` or the end of an `ask_user` call after the request
 (logs reach 500 MB, so it reads the last 256 KiB by byte offset and reads
 further back, up to 64 MiB, until it reaches an event from before the request), the
-item's pane is not in `rex block ls -A -q --short=false` (`--json` needs one
-session; skipped when Rex fails or lists nothing), or the item is
+item's pane is in no Rex session (`rex ls -q --short=false`, then `rex block ls -s SESSION -q
+--short=false` for each; skipped when Rex fails or lists nothing; Rex resolves a block ID only
+inside one session, `$REX_SESSION` else the default, so `block ls -A` and a bare `-b BLOCK` cannot
+reach a pane of another session; an open item carries the `rex_session` that holds its pane), or the item is
 over 24 hours old. `resolveAttention(file, { source })` also records the
 `attention.resolved` event for each session closed by a signal: reconcile
 (source `reconcile`) and the dashboard server (source `attention`, on every
@@ -478,9 +480,9 @@ from `openAttention`, and the ETag covers it, so an item that appears or closes
 refreshes the browser even when the factory file is unchanged. The header has a
 badge with the count (hidden at 0) and the page title gets a `(N) ` prefix; the badge
 opens the "Waiting for you" panel (`#attention`) in the right dock. It lists the oldest 20
-rows: age, kind, text, options, task, role, and the pane's `rex focus BLOCK` command
+rows: age, kind, text, options, task, role, and the pane's `rex focus -s SESSION BLOCK` command
 with a copy glyph button (no text; `aria-label` and tooltip "Copy rex focus command"; only
-for a plain block ID, since the command goes to a shell). Rex registers a `rex` URL
+for a plain block and session ID, since the command goes to a shell; no `-s` when the session is unknown). Rex registers a `rex` URL
 scheme, but the app documents no pane-focus URL, so there is no `rex://` link.
 All text is data, set with `textContent`. The dashboard makes no sound or notification.
 
@@ -490,9 +492,9 @@ only for an `ask_user` form with one enum field, so the index of a button is the
 of the form. A click sends `POST /api/attention/answer?file=` with `{id, index}`
 (same-origin JSON like the other writes). The server looks the item up among the
 pending ones by `id`, so a prompt that closed or was replaced is refused (409); it
-also refuses an item without options or without a plain block `pane`, a pane that
-`rex block ls` no longer lists, and an index outside the options. It then runs
-`rex --autostart=false send-key -b PANE down... enter` (`index` times Down, then
+also refuses an item without options or without a plain block `pane`,
+a pane that no Rex session lists, and an index outside the options. It then runs
+`rex --autostart=false send-key -s SESSION -b PANE down... enter` (`index` times Down, then
 Enter) with an argument array, never a shell. An `ask_user` form has no number keys: Down
 moves the highlight from the first row and Enter submits it. Permission and sandbox-bypass
 prompts get no buttons: their rows (for example "approve for the rest of the session")

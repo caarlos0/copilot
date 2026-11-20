@@ -91,13 +91,21 @@ export async function scanStamp(file, sessions = []) {
   }))).join(",");
 }
 
-// Block IDs in the live Rex server, or null when Rex cannot tell. `--json` needs one session,
-// so ask for the IDs of every session. An empty answer is a Rex glitch, never "no panes".
+const rexLines = async (prefix, args) => {
+  const { stdout } = await run("rex", ["--autostart=false", ...args], { timeout: 10_000 });
+  return stdout.split("\n").map((line) => line.trim()).filter((line) => line.startsWith(prefix));
+};
+
+// Live blocks as `{ id, session }`, or null when Rex cannot tell. Rex resolves a block ID only in
+// one session (`$REX_SESSION`, else the default one), so `block ls -A` lists panes that `send-key -b`
+// and `focus` then call "not found". Ask each session for its own blocks to learn where a pane
+// lives. An empty answer is a Rex glitch, never "no panes".
 async function liveBlocks() {
   try {
-    const { stdout } = await run("rex", ["--autostart=false", "block", "ls", "-A", "-q", "--short=false"], { timeout: 10_000 });
-    const ids = stdout.split("\n").map((line) => line.trim()).filter((line) => line.startsWith("block:"));
-    return ids.length > 0 ? ids : null;
+    const sessions = await rexLines("session:", ["ls", "-q", "--short=false"]);
+    const blocks = (await Promise.all(sessions.map(async (session) =>
+      (await rexLines("block:", ["block", "ls", "-s", session, "-q", "--short=false"])).map((id) => ({ id, session }))))).flat();
+    return blocks.length > 0 ? blocks : null;
   } catch {
     return null;
   }
@@ -107,7 +115,8 @@ async function liveBlocks() {
 // followed into open and resolved. An open item is one whose session shows no answer, whose pane
 // is still live, and that is under 24 hours old. `resolved` lists the items closed by those
 // signals, with the reason, so the caller can record the missing attention.resolved event.
-// `panes` replaces the Rex query: an array of live block IDs, or null to skip the check.
+// `panes` replaces the Rex query: an array of live block IDs, or null to skip the check. An open
+// item carries `rex_session`, the Rex session that holds its pane, when Rex told.
 export async function scanAttention(file, { now = Date.now(), panes } = {}) {
   let text;
   try {
@@ -144,7 +153,7 @@ export async function scanAttention(file, { now = Date.now(), panes } = {}) {
     firstAsked.set(data.session, Math.min(firstAsked.get(data.session) ?? Infinity, Date.parse(at)));
   }
   const answers = new Map();
-  let live = panes;
+  let live = panes?.map((id) => ({ id, session: null })) ?? panes;
   const open = [];
   const resolved = [];
   for (const event of requests.values()) {
@@ -159,7 +168,9 @@ export async function scanAttention(file, { now = Date.now(), panes } = {}) {
     else if (now - at > expireMs) reason = "expired";
     else if (pane) {
       if (live === undefined) live = await liveBlocks();
-      if (live && !live.some((id) => sameId(id, pane))) reason = "pane-gone";
+      const block = live?.find(({ id }) => sameId(id, pane));
+      if (live && !block) reason = "pane-gone";
+      else if (block?.session) item.rex_session = block.session;
     }
     if (reason) resolved.push({ item, reason });
     else open.push(item);
@@ -207,9 +218,10 @@ export async function sendAnswer(item, index) {
   }
   const live = await liveBlocks();
   if (!live) throw fail(502, "Rex did not list the panes, so the answer was not sent.");
-  if (!live.some((id) => sameId(id, item.pane))) throw fail(409, "The pane of this prompt no longer exists.");
+  const block = live.find(({ id }) => sameId(id, item.pane));
+  if (!block) throw fail(409, "The pane of this prompt no longer exists, so it was not answered.");
   try {
-    await run("rex", ["--autostart=false", "send-key", "-b", item.pane, ...answerKeys(index)], { timeout: 10_000 });
+    await run("rex", ["--autostart=false", "send-key", "-s", block.session, "-b", block.id, ...answerKeys(index)], { timeout: 10_000 });
   } catch (error) {
     const reason = String(error.stderr ?? error.message).trim().split("\n")[0];
     throw fail(502, `Rex could not send the answer: ${reason}`);

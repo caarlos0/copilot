@@ -1882,9 +1882,11 @@
         }
         const meta = [item.task && `Task ${item.task}`, item.role].filter(Boolean).join(", ");
         if (meta) node.append(element("p", meta, "muted"));
-        // The pane goes into a shell command, so only a plain ID gets a copy button.
-        if (item.pane && /^[\w:.-]+$/.test(item.pane)) {
-          const command = `rex focus ${item.pane}`;
+        // The pane and session go into a shell command, so only plain IDs get a copy button. Rex
+        // resolves a block ID in one session only, so the command names the session when it is known.
+        const plain = (value) => typeof value === "string" && /^[\w:.-]+$/.test(value);
+        if (plain(item.pane)) {
+          const command = `rex focus ${plain(item.rex_session) ? `-s ${item.rex_session} ` : ""}${item.pane}`;
           const focus = element("p", null, "attention-focus");
           const copy = element("button", null, "icon-button");
           copy.type = "button";

@@ -326,10 +326,9 @@ test("reports an attention item open longer than --attention-after, and records 
   const rex = `#!/bin/sh
 [ "$1" = "--autostart=false" ] && shift
 case "$1" in
-  ls) echo '{"sessions":[{"session_id":"session:work"}]}' ;;
-  block)
-    case "$*" in *--json*) echo "Error: rex block ls --json requires one session. Pass -s SESSION" >&2; exit 1 ;; esac
-    echo block:live ;;
+  ls)
+    case "$*" in *-q*) echo session:work ;; *) echo '{"sessions":[{"session_id":"session:work"}]}' ;; esac ;;
+  block) echo block:live ;;
   *) echo '{"windows":[]}' ;;
 esac
 `;

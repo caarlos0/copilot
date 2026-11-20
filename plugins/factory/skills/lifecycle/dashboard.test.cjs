@@ -2361,7 +2361,7 @@ test("the factory payload lists pending attention oldest first, and its tag foll
   assert.deepEqual(attention.map((item) => item.session), ["s-old", "s-new"]);
   assert.deepEqual(attention[1], {
     id: "e1", session: "s-new", kind: "ask-user", text: "Pick one", options: ["a", "b"], role: "implementation",
-    pane: null, task: "issue-5", at: attention[1].at,
+    pane: null, rex_session: null, task: "issue-5", at: attention[1].at,
   });
   assert.equal((await read(tag)).status, 304);
 
@@ -2375,11 +2375,12 @@ test("the factory payload lists pending attention oldest first, and its tag foll
 test("the factory payload drops an item whose pane is gone, and records its resolution", async (t) => {
   const bin = await mkdtemp(join(tmpdir(), "factory-dashboard-rex-"));
   t.after(() => rm(bin, { recursive: true, force: true }));
-  // Like the real rex: `block ls -A --json` is an error; `-q --short=false` lists full IDs.
+  // Like the real rex: a block lists only per session; `-q --short=false` lists full IDs.
   await writeFile(join(bin, "rex"), `#!/bin/sh
 [ "$1" = "--autostart=false" ] && shift
 case "$*" in
-  "block ls -A -q --short=false") echo block:01a1f4e8-4bb0-72d2-bff2-25420482aad9 ;;
+  "ls -q --short=false") echo session:two ;;
+  "block ls -s session:two -q --short=false") echo block:01a1f4e8-4bb0-72d2-bff2-25420482aad9 ;;
   *) echo "Error: rex block ls --json requires one session. Pass -s SESSION" >&2; exit 1 ;;
 esac
 `);
@@ -2446,7 +2447,8 @@ test("answering types the picked option into the pane of a pending ask_user prom
   await writeFile(join(bin, "rex"), `#!/bin/sh
 [ "$1" = "--autostart=false" ] && shift
 case "$1" in
-  block) echo block:01a1f4e8-4bb0-72d2-bff2-25420482aad9 ;;
+  ls) echo session:two ;;
+  block) [ "$4" = "session:two" ] && echo block:01a1f4e8-4bb0-72d2-bff2-25420482aad9 ;;
   send-key)
     if [ -e "${bin}/fail" ]; then echo "no such block" >&2; exit 1; fi
     printf '%s\\n' "$*" >> "${sent}" ;;
@@ -2474,7 +2476,7 @@ esac
 
   const ok = await answer({ id: "ask", index: 2 });
   assert.equal(ok.status, 200, await ok.clone().text());
-  assert.equal(await keys(), `send-key -b ${live} down down enter\n`);
+  assert.equal(await keys(), `send-key -s session:two -b ${live} down down enter\n`);
 
   const refusals = [
     [{ id: "ask", index: -1 }, 400, /option index/],
@@ -2504,7 +2506,7 @@ esac
   assert.equal(foreign.status, 403);
   const wrongType = await answer({ id: "ask", index: 0 }, { "Content-Type": "text/plain" });
   assert.ok(wrongType.status >= 400 && wrongType.status < 500);
-  assert.equal(await keys(), `send-key -b ${live} down down enter\n`, "A refused request sends no key.");
+  assert.equal(await keys(), `send-key -s session:two -b ${live} down down enter\n`, "A refused request sends no key.");
 });
 
 test("an ask_user prompt shows its options as buttons that post the pick, and the others stay copy-only", async (t) => {
@@ -2555,7 +2557,7 @@ test("the badge, the page title and the waiting list show pending attention as d
 
   const item = (n, extra = {}) => ({
     session: `s${n}`, kind: "sandbox-bypass", text: `Run command: <b>rm</b> ${n}`, options: [], role: "implementation",
-    pane: `block:p${n}`, task: "issue-5", at: `2026-05-01T12:0${n % 10}:00Z`, ...extra,
+    pane: `block:p${n}`, rex_session: n === 0 ? "session:s0" : null, task: "issue-5", at: `2026-05-01T12:0${n % 10}:00Z`, ...extra,
   });
   const show = (items) => ui.run(`load({ ...snapshot, attention: ${JSON.stringify(items)} }, lastSource)`);
   show([item(0, { options: ["yes", "no"] }), item(1, { pane: "block:x; rm -rf ~" })]);
@@ -2569,8 +2571,8 @@ test("the badge, the page title and the waiting list show pending attention as d
   assert.equal(ui.get("task-view").hidden, true);
   assert.equal(ui.get("detail-title").textContent, "Waiting for you2");
   const [first, second] = ui.get("attention-list").children;
-  assert.match(first.textContent, /Sandbox bypass.*10m.*Run command: <b>rm<\/b> 0.*yes.*no.*issue-5, implementation.*rex focus block:p0/);
-  assert.equal(first.querySelector("code").textContent, "rex focus block:p0");
+  assert.match(first.textContent, /Sandbox bypass.*10m.*Run command: <b>rm<\/b> 0.*yes.*no.*issue-5, implementation.*rex focus -s session:s0 block:p0/);
+  assert.equal(first.querySelector("code").textContent, "rex focus -s session:s0 block:p0");
 
   ui.run("navigator = { clipboard: { writeText: async (value) => { globalThis.copied = value; } } }");
   const copy = first.querySelector("button");
@@ -2579,7 +2581,7 @@ test("the badge, the page title and the waiting list show pending attention as d
   assert.equal(copy.title, "Copy rex focus command");
   assert.ok(copy.querySelector("svg"));
   await copy.fire("click");
-  assert.equal(ui.run("copied"), "rex focus block:p0");
+  assert.equal(ui.run("copied"), "rex focus -s session:s0 block:p0");
   assert.equal(copy["aria-label"], "Copied");
   assert.equal(copy.textContent, "");
   assert.equal(second.querySelector("button"), null, "A pane that is not a plain ID gets no shell command.");

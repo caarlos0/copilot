@@ -207,18 +207,38 @@ test("an answer is found even when the session wrote more than one tail after it
   assert.deepEqual(resolved.map(({ item, reason }) => [item.session, reason]), [["busy", "answered"]]);
 });
 
-test("asks Rex for the live panes, and a pane Rex no longer lists is resolved", async (t) => {
+test("asks every Rex session for its panes; a pane none lists is resolved, and a live one names its session", async (t) => {
   const f = await setup(t);
   await f.request("gone", { pane: "block:01a1f4d3-c03e-7f0b-bc24-060b0352db5f" });
   await f.request("live", { pane: "block:01a1f4e8-4bb0-72d2-bff2-25420482aad9" });
   await f.fakeRex(`case "$*" in
-  "block ls -A -q --short=false") printf 'block:01a1f4e8-4bb0-72d2-bff2-25420482aad9\\nblock:01a1f4e9-0000-7000-8000-000000000000\\n' ;;
+  "ls -q --short=false") printf 'session:one\\nsession:two\\n' ;;
+  "block ls -s session:one -q --short=false") printf 'block:01a1f4e9-0000-7000-8000-000000000000\\n' ;;
+  "block ls -s session:two -q --short=false") printf 'block:01a1f4e8-4bb0-72d2-bff2-25420482aad9\\n' ;;
   *) echo "Error: unexpected arguments: $*" >&2; exit 1 ;;
 esac`);
 
   const { open, resolved } = await f.scanAttention(f.file, { now });
-  assert.deepEqual(open.map((item) => item.session), ["live"]);
+  assert.deepEqual(open.map((item) => [item.session, item.rex_session]), [["live", "session:two"]]);
   assert.deepEqual(resolved.map(({ item, reason }) => [item.session, reason]), [["gone", "pane-gone"]]);
+});
+
+test("an answer is sent with the session that holds the pane", async (t) => {
+  const f = await setup(t);
+  const { sendAnswer } = await import("./attention.mjs");
+  const log = join(f.directory, "args");
+  await f.fakeRex(`case "$*" in
+  "ls -q --short=false") printf 'session:one\\nsession:two\\n' ;;
+  "block ls -s session:one -q --short=false") ;;
+  "block ls -s session:two -q --short=false") printf 'block:01a1f4e8-4bb0-72d2-bff2-25420482aad9\\n' ;;
+  send-key*) echo "$*" >> "${log}" ;;
+  *) echo "Error: unexpected arguments: $*" >&2; exit 1 ;;
+esac`);
+  const item = { kind: "ask-user", options: ["a", "b", "c"], pane: "block:01a1f4e8-4bb0-72d2-bff2-25420482aad9" };
+  await sendAnswer(item, 1);
+  assert.equal(await readFile(log, "utf8"), "send-key -s session:two -b block:01a1f4e8-4bb0-72d2-bff2-25420482aad9 down enter\n");
+  await assert.rejects(sendAnswer({ ...item, pane: "block:01a1f4d3-c03e-7f0b-bc24-060b0352db5f" }, 0),
+    { status: 409, message: /no longer exists/ });
 });
 
 test("the pane check is skipped when Rex fails or lists nothing", async (t) => {
