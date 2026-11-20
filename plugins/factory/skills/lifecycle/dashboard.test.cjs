@@ -264,8 +264,9 @@ test("moving back persists the comment, keeps worker context, and rejects a stal
   });
   assert.equal(task.feedback.acknowledged_id, null);
   assert.deepEqual(JSON.parse(await readFile(join(directory, factoryFile), "utf8")), data);
-  const { usage, ...served } = await (await get(url, `/api/factory?file=${factoryFile}`)).json();
+  const { usage, briefs, ...served } = await (await get(url, `/api/factory?file=${factoryFile}`)).json();
   assert.deepEqual(served, { ...data, attention: [], proposals: [] });
+  assert.deepEqual(briefs, { "issue-9": { implementation: "owner.repo-issue-9-implementation-brief.md" } });
   assert.deepEqual(Object.keys(usage).sort(), data.tasks.map((item) => item.id).sort());
   const stale = await move(url, unblocked);
   assert.equal(stale.status, 409);
@@ -738,7 +739,7 @@ async function dashboard(t, { reducedMotion = true, confirm = () => true, now = 
     document.listeners.get("keydown")(pressed);
     return pressed;
   };
-  return { run, document, directory, press, sanitized, timers, resize: (width) => { elements.get("flow-wrap").clientWidth = width; resizeListeners.forEach((callback) => callback()); }, get: (id) => elements.get(id), setNow: (value) => { now = value; } };
+  return { run, document, directory, url, press, sanitized, timers, resize: (width) => { elements.get("flow-wrap").clientWidth = width; resizeListeners.forEach((callback) => callback()); }, get: (id) => elements.get(id), setNow: (value) => { now = value; } };
 }
 
 test("unchanged refresh updates elapsed labels without replacing expanded rows or move drafts", async (t) => {
@@ -2846,7 +2847,7 @@ test("history steps carry the worker and the worktree link only while live, and 
   assert.equal(node.querySelector("details"), null, "There is no Task details section.");
   assert.equal(node.textContent.includes("Worktree"), false, "No Worktree label.");
   assert.deepEqual(labels(investigation), []);
-  assert.deepEqual(investigation.querySelectorAll("a").map((a) => a.textContent), ["brief", "result"]);
+  assert.deepEqual(investigation.querySelectorAll("a").map((a) => a.textContent), ["result"], "A brief the server refuses has no link.");
   assert.deepEqual(labels(implementation), ["Copy worktree path"]);
   assert.deepEqual(implementation.querySelectorAll("a").map((a) => a.textContent), ["brief", "result"]);
   assert.equal(implementation.querySelectorAll("svg").length, 0, "The links have no glyph.");
@@ -2860,7 +2861,7 @@ test("history steps carry the worker and the worktree link only while live, and 
   task.resolution = { outcome: "merged", note: null };
   node = row(task);
   assert.deepEqual(labels(node), [], "A resolved task has no worktree link.");
-  assert.equal(node.querySelectorAll("a").filter((a) => a.textContent === "brief").length, 2, "Workers and their links stay.");
+  assert.equal(node.querySelectorAll("a").filter((a) => a.textContent === "brief").length, 1, "Workers and their links stay.");
 });
 
 test("history steps copy the worktree path with brief feedback", async (t) => {
@@ -2882,6 +2883,35 @@ test("history steps copy the worktree path with brief feedback", async (t) => {
   assert.equal(timer.delay, 1500);
   timer.callback();
   assert.equal(path[0].textContent, "Copy worktree path");
+});
+
+test("a resolved task shows the brief link by naming convention, and none once the file is gone", async (t) => {
+  const ui = await dashboard(t);
+  const data = structuredClone(example);
+  const task = data.tasks.find((item) => item.id === "issue-3");
+  task.workers = {
+    investigation: { status: "closed", mode: "one-shot", result: "owner.repo-issue-3-investigation-result.json" },
+    implementation: { status: "closed", result: "owner.repo-issue-3-implementation-result.json" },
+  };
+  const name = "owner.repo-issue-3-implementation-brief.md";
+  await writeFile(join(ui.directory, name), "# Fix the typo\n");
+  await writeFile(join(ui.directory, factoryFile), JSON.stringify(data));
+  await ui.run("refresh()");
+  const card = () => ui.run(`taskRow(${JSON.stringify(ui.run("snapshot.tasks.find((item) => item.id === 'issue-3')"))}, new Set())`);
+
+  const href = `/api/artifact?file=${encodeURIComponent(factoryFile)}&name=${encodeURIComponent(name)}`;
+  const briefs = card().querySelectorAll("a").filter((node) => node.textContent === "brief");
+  assert.deepEqual(briefs.map((node) => node.href), [href], "Only the worker whose brief file exists has the link.");
+  const response = await get(ui.url, href);
+  assert.equal(response.status, 200);
+  assert.equal(await response.text(), "# Fix the typo\n");
+  const missing = await get(ui.url, `/api/artifact?file=${encodeURIComponent(factoryFile)}&name=owner.repo-issue-3-review-brief.md`);
+  assert.equal(missing.status, 403, "A brief that no worker names is refused.");
+
+  await rm(join(ui.directory, name));
+  await ui.run("refresh()");
+  assert.equal(card().querySelectorAll("a").filter((node) => node.textContent === "brief").length, 0);
+  assert.equal(card().querySelectorAll("a").filter((node) => node.textContent === "result").length, 2);
 });
 
 test("the brief link opens the popup with the brief rendered as sanitized Markdown", async (t) => {

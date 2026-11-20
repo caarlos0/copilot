@@ -1832,6 +1832,9 @@
         return chips;
       }
 
+      // The server lists the briefs whose file exists (recorded or by naming convention); without that list, use the record.
+      const briefName = (task, role, worker) => snapshot.briefs ? snapshot.briefs[task.id]?.[role] : worker.brief;
+
       // The worker, merge decision and worktree link of a task, as lines for its history steps: a
       // worker goes on the latest step of its role's state (else the last step), the merge decision on
       // the latest review step, the worktree on the latest implementation step.
@@ -1850,7 +1853,7 @@
           line.append(element("span", worker.status, "muted"));
           if (worker.name) line.append(...codeParts(worker.name));
           if (usage?.workers[role]) line.append(...stepChips(usage.workers[role]));
-          appendArtifacts(line, worker, { task: task.id, role });
+          appendArtifacts(line, { ...worker, brief: briefName(task, role, worker) }, { task: task.id, role });
           extras[stepOf(role)]?.push(line);
         }
         if (task.pr && open) {
@@ -1977,7 +1980,7 @@
           : byClass ? `Blocked: ${classTitles[byClass]}` : places[state].title;
         title.append(element("span", String(tasks.length), "counter"));
         const signature = JSON.stringify([selection, state, outcome, byClass,
-          tasks.map((task) => [task.id, task.revision, task.updated_at, task.history.length, snapshot.usage?.[task.id]])]);
+          tasks.map((task) => [task.id, task.revision, task.updated_at, task.history.length, snapshot.usage?.[task.id], snapshot.briefs?.[task.id]])]);
         if (list.dataset.signature !== signature) {
           const rows = tasks.map((task) => taskRow(task, expanded));
           if (!reduced && sameList) {
@@ -2374,6 +2377,7 @@
           attention: data.attention ?? snapshot?.attention ?? [],
           proposals: data.proposals ?? snapshot?.proposals ?? [],
           usage: data.usage ?? snapshot?.usage ?? {},
+          briefs: data.briefs ?? snapshot?.briefs,
         };
         lastSource = file;
         document.getElementById("error").hidden = true;

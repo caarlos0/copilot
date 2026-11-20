@@ -203,21 +203,48 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
     return proposalScans.get(target).open;
   }
 
+  // The coordinator records only `result` in a worker record, so the brief is found by the
+  // convention <project>-<task>-<role>-brief.md (a recorded `brief` wins). The map has the
+  // briefs whose file still exists, so the dashboard shows no link for one that
+  // `archive.mjs clean` deleted.
+  const briefName = (file, task, role, worker) =>
+    worker.brief ?? `${file.replace(factoryFile, "")}-${task.id}-${role}-brief.md`;
+
+  async function taskBriefs(file, data) {
+    const briefs = {};
+    for (const task of data.tasks) {
+      for (const [role, worker] of Object.entries(task.workers)) {
+        if (!worker) continue;
+        const name = briefName(file, task, role, worker);
+        if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(name)) continue;
+        try {
+          await localFile(name);
+        } catch {
+          continue;
+        }
+        (briefs[task.id] ??= {})[role] = name;
+      }
+    }
+    return briefs;
+  }
+
   // Pending attention items, oldest first. They live in the events log and the session logs, so the
   // tag covers them too: a change there refreshes the browser even when the factory file is the same.
   // The scan also records the items it finds closed (answered, pane gone, expired), so they
-  // clear without waiting for a reconcile run. Open improve proposals ride along as `proposals`, and per task usage from the session logs as `usage`.
+  // clear without waiting for a reconcile run. Open improve proposals ride along as `proposals`, and per task usage from the session logs as `usage`, and the existing worker briefs as `briefs`.
   async function factoryView(entry) {
     const attention = (await pendingAttention(entry.target))
       .map(({ id, session, kind, text, options, role, pane, rex_session, task, at }) =>
         ({ id, session, kind, text, options, role, pane, rex_session: rex_session ?? null, task, at }))
       .sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
     const proposals = await openProposals(entry.target);
-    const usage = await factoryUsage(await readFactory(entry), sessionStateDirectory());
-    const digest = createHash("sha1").update(JSON.stringify([attention, proposals, usage])).digest("base64url");
+    const data = await readFactory(entry);
+    const usage = await factoryUsage(data, sessionStateDirectory());
+    const briefs = await taskBriefs(entry.file, data);
+    const digest = createHash("sha1").update(JSON.stringify([attention, proposals, usage, briefs])).digest("base64url");
     return {
       tag: `${entry.tag.slice(0, -1)}-${digest}"`,
-      body: async () => ({ ...(await readFactory(entry)), attention, proposals, usage }),
+      body: async () => ({ ...(await readFactory(entry)), attention, proposals, usage, briefs }),
     };
   }
 
@@ -615,11 +642,12 @@ p{margin:0;color:#f87171}
         const view = await factoryView(entry);
         await sendTagged(request, response, `factory:${entry.target}`, view.tag, view.body);
       } else if (url.pathname === "/api/artifact") {
-        const data = await loadFactory(url.searchParams.get("file"));
+        const file = url.searchParams.get("file");
+        const data = await loadFactory(file);
         const name = url.searchParams.get("name");
-        const referenced = [...data.tasks.map((task) => Object.values(task.workers)),
-          data.rules.map((rule) => rule.worker)].some((workers) => workers
-          .some((worker) => worker && (worker.brief === name || worker.result === name)));
+        const referenced = data.tasks.some((task) => Object.entries(task.workers)
+          .some(([role, worker]) => worker && (briefName(file, task, role, worker) === name || worker.result === name))) ||
+          data.rules.some((rule) => rule.worker && (rule.worker.brief === name || rule.worker.result === name));
         if (!name || !referenced) {
           throw new HttpError(403, "Artifact is not referenced by the selected factory.");
         }

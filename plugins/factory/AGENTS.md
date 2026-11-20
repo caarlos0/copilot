@@ -269,8 +269,7 @@ dashboard reads only the factory file. A `--workers` write that sets a worker
 `running` with a different `pane` or `window` (a relaunch) first drops its stored
 `session`, `summary` and `summary_at`; `result` stays, as it is the planned filename.
 A worker's `result` link (history step, Find work) opens a popup with the result file,
-pretty-printed and highlighted
-(`highlightText`, built with `textContent`). A worker's `brief` link opens the same popup
+pretty-printed and highlighted (`highlightText`, built with `textContent`); the card summary has no result link. A worker's `brief` link opens the same popup
 with the brief rendered as GitHub-style Markdown (`renderMarkdown`): `marked` (GFM) parses it
 and DOMPurify always sanitizes the output (http(s) links only; raw HTML shows as text). Then
 `linkify()` runs on the text nodes, never inside code or existing links, and every link gets
@@ -278,7 +277,12 @@ and DOMPurify always sanitizes the output (http(s) links only; raw HTML shows as
 `skills/lifecycle/vendor/` with their licenses (`*.LICENSE`). `serve.mjs` serves only the two
 `/vendor/*.min.js` files, from the same origin; there is no CDN and no runtime install. To
 update them, replace the files and keep the licenses. The test DOM stubs DOMPurify. Both load the
-file through `/api/artifact`, so the server's access checks apply. The popup shows only the
+file through `/api/artifact`, so the server's access checks apply. The coordinator records only
+`result` in a worker record, so `serve.mjs` finds each task worker's brief by the name
+`<project>-<task>-<role>-brief.md` (a recorded `brief` wins) and sends the ones whose file exists as
+`briefs` (`{task: {role: name}}`, in the ETag); `/api/artifact` serves the same names, and the
+dashboard shows the `brief` link, on every task state, only for a name in that map. A brief that
+`archive.mjs clean` deleted has no link. The popup shows only the
 title, a close button and the document. The links keep their `href`, so a modified click still
 opens the raw file in a new tab. A task card has no "Task details" section. The history steps
 carry the worker lines (`stepExtras`): each worker sits on the latest step of its role's state
