@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { open, readFile, realpath, rename, rm, stat } from "node:fs/promises";
+import { open, readFile, realpath, rm, stat } from "node:fs/promises";
 import { basename, extname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
+import writeFileAtomic from "write-file-atomic";
 import { archiveDirectory, findArchived, readArchive, removeArchived, saveArchive } from "./archive.mjs";
 import { emit, resolveFactory } from "./broker.mjs";
 import {
@@ -529,24 +530,13 @@ async function writeFactory(file: string, values: Values, operator: boolean, sou
     current.tasks = current.tasks.filter((task) => !stale.includes(task));
   }
 
-  const temporary = `${file}.${randomUUID()}.tmp`;
-  const handle = await open(temporary, "wx", 0o600);
-  try {
-    try {
-      await handle.writeFile(`${JSON.stringify(current, null, 2)}\n`);
-    } finally {
-      await handle.close();
-    }
-    if (await readOptional(file) !== original) {
-      throw new ConflictError("Factory changed during update. Reread it and reconcile before retrying.");
-    }
-    // Archive first: a retry upserts by ID, so a failure never loses a task.
-    if (stale.length) await saveArchive(directory, current.project, stale);
-    await recordSessions(registryFile(file), sessions);
-    await rename(temporary, file);
-  } finally {
-    await rm(temporary, { force: true });
+  if (await readOptional(file) !== original) {
+    throw new ConflictError("Factory changed during update. Reread it and reconcile before retrying.");
   }
+  // Archive first: a retry upserts by ID, so a failure never loses a task.
+  if (stale.length) await saveArchive(directory, current.project, stale);
+  await recordSessions(registryFile(file), sessions);
+  await writeFileAtomic(file, `${JSON.stringify(current, null, 2)}\n`, { mode: 0o600 });
   await announce(file, source, events);
   if (archived) {
     try {
