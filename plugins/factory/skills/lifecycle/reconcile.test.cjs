@@ -31,11 +31,11 @@ function task(id, state, extra = {}) {
   };
 }
 
-async function fixture(t, rex) {
+async function fixture(t, rex, branch = "main") {
   const directory = await mkdtemp(join(tmpdir(), "reconcile-test-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const repo = join(directory, "repo");
-  git(directory, "init", "-q", "-b", "main", repo);
+  git(directory, "init", "-q", "-b", branch, repo);
   git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "base");
   git(repo, "switch", "-q", "-c", "work");
   git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "work");
@@ -104,6 +104,17 @@ test("flags a branch ahead only for tasks that land by local merge", async (t) =
   const { findings, errors } = await f.run([
     task("with-pr", "review", { issue: { number: 1 }, pr: { number: 2 }, worktree }),
     task("local", "review", { worktree }),
+  ]);
+  assert.deepEqual(errors, []);
+  assert.deepEqual(findings, [
+    { kind: "branch-ahead", task: "local", state: "review", branch: "work", ahead: 1 },
+  ]);
+});
+
+test("finds the default branch when it is master", async (t) => {
+  const f = await fixture(t, fakeRex, "master");
+  const { findings, errors } = await f.run([
+    task("local", "review", { worktree: { path: f.repo, created_by_run: true } }),
   ]);
   assert.deepEqual(errors, []);
   assert.deepEqual(findings, [

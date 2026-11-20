@@ -3,6 +3,7 @@ import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { constants, homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
+import { defaultBranch } from "./default-branch.mjs";
 
 const usage = `Usage:
   node worktree.mjs create NAME [--pr N] [--base REF] [-- CMD...]
@@ -157,15 +158,6 @@ function create(ctx, name, { pr, base }) {
   }
   git(ctx.cwd, "worktree", "add", "-b", name, path, base);
   return { path: real(path), branch: name, created_by_run: true, base };
-}
-
-function defaultBranch(cwd, override) {
-  if (override) return override;
-  let head = "";
-  try {
-    head = git(cwd, "symbolic-ref", "--short", "refs/remotes/origin/HEAD").replace(/^origin\//, "");
-  } catch {}
-  return [head, "main", "master"].find((b) => b && gitOk(cwd, "show-ref", "--verify", "--quiet", `refs/heads/${b}`)) ?? null;
 }
 
 function mergedPR(ctx, path, tip, ref) {

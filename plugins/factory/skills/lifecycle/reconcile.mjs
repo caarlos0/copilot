@@ -7,6 +7,7 @@ import { parseArgs } from "node:util";
 import { resolveAttention, sameId } from "./attention.mjs";
 import { resolveFactory, waiterPid } from "./broker.mjs";
 import { intervalMs } from "./factory-data.mjs";
+import { defaultBranch } from "./default-branch.mjs";
 import { hooksInactive } from "./gate.mjs";
 import { scanProposals } from "./proposals.mjs";
 import { readJSON } from "./state-dir.mjs";
@@ -44,7 +45,7 @@ function liveState(session) {
   return { sessionGone: false, windows: rexJSON("window", "ls", "-s", session).windows.map((w) => w.window_id) };
 }
 
-async function reconcile(file, defaultBranch = "main", blockedAfter = intervalMs("24h"), attentionAfter = intervalMs("30m")) {
+async function reconcile(file, branchOverride, blockedAfter = intervalMs("24h"), attentionAfter = intervalMs("30m")) {
   const factory = JSON.parse(await readFile(file, "utf8"));
   const directory = dirname(file);
   const findings = [];
@@ -119,7 +120,7 @@ async function reconcile(file, defaultBranch = "main", blockedAfter = intervalMs
     // Tasks with an issue or PR land on GitHub; only local-merge tasks can be left behind.
     if (!task.worktree?.path || task.issue || task.pr) continue;
     try {
-      const ahead = Number(git(task.worktree.path, "rev-list", "--count", `${defaultBranch}..HEAD`));
+      const ahead = Number(git(task.worktree.path, "rev-list", "--count", `${defaultBranch(task.worktree.path, branchOverride) ?? "main"}..HEAD`));
       if (ahead > 0) {
         findings.push({
           kind: "branch-ahead",
@@ -140,7 +141,7 @@ async function reconcile(file, defaultBranch = "main", blockedAfter = intervalMs
     if (task.resolution?.outcome !== "merged" || !worktree?.path || !existsSync(worktree.path)) continue;
     try {
       // A squash-merged PR branch is never in the default branch; `worktree.mjs` verifies the PR with gh.
-      if (git(worktree.path, "status", "--porcelain") !== "" || !(task.pr || isAncestor(worktree.path, defaultBranch))) continue;
+      if (git(worktree.path, "status", "--porcelain") !== "" || !(task.pr || isAncestor(worktree.path, defaultBranch(worktree.path, branchOverride) ?? "main"))) continue;
       const finding = {
         kind: "merged-worktree",
         task: task.id,
@@ -255,7 +256,7 @@ try {
   const { values, positionals } = parseArgs({
     allowPositionals: true,
     options: {
-      "default-branch": { type: "string", default: "main" },
+      "default-branch": { type: "string" },
       "blocked-after": { type: "string", default: "24h" },
       "attention-after": { type: "string", default: "30m" },
     },

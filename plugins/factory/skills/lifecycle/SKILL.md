@@ -323,8 +323,11 @@ except one thing: it appends the missing `attention.resolved` event (source
 gone, or that is over 24 hours old.
 
 ```sh
-node reconcile.mjs /abs/state/owner.repo-factory.json [--default-branch main] [--blocked-after 24h] [--attention-after 30m]
+node reconcile.mjs /abs/state/owner.repo-factory.json [--default-branch NAME] [--blocked-after 24h] [--attention-after 30m]
 ```
+
+Without `--default-branch`, it uses the default branch (`origin/HEAD`, else a
+local `main` or `master`), the same as `worktree.mjs` and `broker.mjs`.
 
 It prints `{findings, errors}` as JSON. Run it at startup, on every wake, on
 every user message, and before every report. A missed waiter wake must never

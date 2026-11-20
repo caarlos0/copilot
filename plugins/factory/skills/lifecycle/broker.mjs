@@ -5,6 +5,7 @@ import { link, open, readFile, realpath, rm, stat, writeFile } from "node:fs/pro
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
+import { defaultBranch } from "./default-branch.mjs";
 import { dueRules, isObject, nextDue } from "./factory-data.mjs";
 import { alive } from "./state-dir.mjs";
 
@@ -181,23 +182,6 @@ async function checkResult(factory, { type, task, data }) {
   }
 }
 
-// Same order as worktree.mjs: origin/HEAD, then a local main or master; main when none exists.
-function defaultBranch(cwd) {
-  let head = "";
-  try {
-    head = git(cwd, "symbolic-ref", "--short", "refs/remotes/origin/HEAD").replace(/^origin\//, "");
-  } catch {}
-  const exists = (branch) => {
-    try {
-      git(cwd, "show-ref", "--verify", "--quiet", `refs/heads/${branch}`);
-      return true;
-    } catch {
-      return false;
-    }
-  };
-  return [head, "main", "master"].find((branch) => branch && exists(branch)) ?? "main";
-}
-
 // A task without a worktree record has no branch to check. A task with a PR merges the default
 // branch in (never rebases), so only a local-landing task must descend from it.
 async function checkHead(factory, task, head) {
@@ -208,7 +192,7 @@ async function checkHead(factory, task, head) {
   if (at !== head) throw new Error(`The worktree ${worktree.path} is at ${at}, not at head ${head}. Commit, then report the real head.`);
   if (git(worktree.path, "status", "--porcelain")) throw new Error(`The worktree ${worktree.path} has uncommitted changes; commit, then emit again.`);
   if (record.pr) return;
-  const base = defaultBranch(worktree.path);
+  const base = defaultBranch(worktree.path) ?? "main";
   try {
     git(worktree.path, "merge-base", "--is-ancestor", base, head);
   } catch (error) {
