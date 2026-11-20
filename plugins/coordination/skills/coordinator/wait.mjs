@@ -553,11 +553,12 @@ async function waitForResults(cursor, files) {
       watcher.close();
   }
 }
-async function main() {
+async function wait(argv) {
   let cursor;
   let files;
   try {
     const { values, positionals } = parseArgs({
+      args: argv,
       options: {
         help: { type: "boolean", short: "h" },
         cursor: { type: "string" }
@@ -599,7 +600,14 @@ Run with --help for usage.`);
   }
   console.log(JSON.stringify(await waitForResults(cursor, files)));
 }
-main().catch((error) => {
-  console.error(errorMessage(error));
-  process.exitCode = 1;
-});
+function main(argv) {
+  return wait(argv).catch((error) => {
+    console.error(errorMessage(error));
+    process.exitCode = 1;
+  });
+}
+if (basename(process.argv[1] ?? "") === "wait.mjs")
+  await main(process.argv.slice(2));
+export {
+  main
+};

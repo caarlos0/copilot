@@ -2,7 +2,7 @@ import { createServer, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { readFile, readdir, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { validate } from "./board-data.mjs";
@@ -22,10 +22,11 @@ class HttpError extends Error {
   }
 }
 
-async function main() {
+async function serve(argv: string[]) {
   let options: Options;
   try {
     options = parseArgs({
+      args: argv,
       options: {
         help: { type: "boolean", short: "h" },
         directory: { type: "string", default: join(homedir(), ".local/state/copilot-coordinator") },
@@ -168,7 +169,11 @@ No packages are required. Invalid arguments exit 2; startup failures exit 1.`);
   process.on("SIGTERM", () => server.close());
 }
 
-main().catch((error) => {
-  console.error(errorMessage(error));
-  process.exitCode = 1;
-});
+export function main(argv: string[]) {
+  return serve(argv).catch((error) => {
+    console.error(errorMessage(error));
+    process.exitCode = 1;
+  });
+}
+
+if (basename(process.argv[1] ?? "") === "serve.mjs") await main(process.argv.slice(2));

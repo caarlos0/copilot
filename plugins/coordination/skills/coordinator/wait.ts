@@ -91,11 +91,12 @@ async function waitForResults(cursor: string, files: string[]) {
   }
 }
 
-async function main() {
+async function wait(argv: string[]) {
   let cursor: string;
   let files: string[];
   try {
     const { values, positionals } = parseArgs({
+      args: argv,
       options: {
         help: { type: "boolean", short: "h" },
         cursor: { type: "string" },
@@ -136,7 +137,11 @@ Use one waiter per cursor. Stop the process to cancel.`);
   console.log(JSON.stringify(await waitForResults(cursor, files)));
 }
 
-main().catch((error) => {
-  console.error(errorMessage(error));
-  process.exitCode = 1;
-});
+export function main(argv: string[]) {
+  return wait(argv).catch((error) => {
+    console.error(errorMessage(error));
+    process.exitCode = 1;
+  });
+}
+
+if (basename(process.argv[1] ?? "") === "wait.mjs") await main(process.argv.slice(2));

@@ -584,11 +584,12 @@ async function update(file, values) {
   await import_write_file_atomic.default(file, `${JSON.stringify(current, null, 2)}
 `, { mode: 384 });
 }
-async function main() {
+async function main(argv) {
   let file;
   let values;
   try {
     const { values: parsed, positionals } = parseArgs({
+      args: argv,
       options: {
         help: { type: "boolean", short: "h" },
         project: { type: "string" },
@@ -699,4 +700,8 @@ Run with --help for usage.`);
     process.exitCode = 1;
   }
 }
-await main();
+if (basename(process.argv[1] ?? "") === "handoff.mjs")
+  await main(process.argv.slice(2));
+export {
+  main
+};

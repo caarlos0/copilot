@@ -116,11 +116,12 @@ async function update(file: string, values: Values) {
   await writeFileAtomic(file, `${JSON.stringify(current, null, 2)}\n`, { mode: 0o600 });
 }
 
-async function main() {
+export async function main(argv: string[]) {
   let file: string;
   let values: Values;
   try {
     const { values: parsed, positionals } = parseArgs({
+      args: argv,
       options: {
         help: { type: "boolean", short: "h" },
         project: { type: "string" },
@@ -221,4 +222,4 @@ Keep the coordinator's project/role owner lock while using this command.`);
   }
 }
 
-await main();
+if (basename(process.argv[1] ?? "") === "handoff.mjs") await main(process.argv.slice(2));
