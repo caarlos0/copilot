@@ -6,8 +6,8 @@ import { parseArgs } from "node:util";
 import { archiveDirectory, findArchived, readArchive, removeArchived, saveArchive } from "./archive.mjs";
 import { emit, resolveFactory } from "./broker.mjs";
 import {
-  checkTransition, defaultBudget, defaultLimits, format, isObject, maxRoleLimit, operatorOutcomes, outcomes,
-  parseBlocker, validate,
+  checkTransition, defaultBudget, defaultLimits, format, isObject, keepFirst, maxRoleLimit, mergeRefusal,
+  operatorOutcomes, outcomes, parseBlocker, resourceId, sharesWork, sortReferences, validate,
 } from "./factory-data.mjs";
 import { findSessions, recordSessions, registryFile, sessionID, sessionStateDirectory } from "./sessions.mjs";
 import { alive } from "./state-dir.mjs";
@@ -95,6 +95,71 @@ function newTask(values, now) {
     worktree: null,
     history: [{ state, at: now, note: values.note ?? null }],
     details: {},
+  };
+}
+
+function checkNotLinked(tasks, values) {
+  for (const option of ["issue", "pr"]) {
+    const id = resourceId(values[option]);
+    const owner = id && tasks.find((task) => task.state !== "resolved" && task.links.some((link) => resourceId(link) === id));
+    if (owner) {
+      throw new Error(`Task ${values.task}: ${values[option]} is already linked from open task ${owner.id} "${owner.title}". Work on ${owner.id} instead of adding a duplicate. If two tasks already hold the same work, merge them with --merge-task KEEP --from OTHER.`);
+    }
+  }
+}
+
+const running = (task) => Object.values(task.workers ?? {}).some((worker) => worker?.status === "running");
+
+// Fold OTHER into KEEP. KEEP gets every issue, PR and link of OTHER and keeps its own workers and state.
+function mergeTasks(tasks, values, at) {
+  const { "merge-task": keepId, from: otherId } = values;
+  if (otherId === undefined) throw new Error("--merge-task KEEP needs --from OTHER.");
+  if (keepId === otherId) throw new Error("--merge-task and --from must name two different tasks.");
+  const [keep, other] = [keepId, otherId].map((id) => {
+    const found = tasks.find((task) => task.id === id);
+    if (!found) throw new Error(`Unknown task: ${id}`);
+    return found;
+  });
+  for (const task of [keep, other]) {
+    const refusal = mergeRefusal(task);
+    if (refusal) throw new Error(`${refusal} Nothing was merged.`);
+    if (task.feedback && task.feedback.acknowledged_id !== task.feedback.id) {
+      throw new ConflictError(`Task ${task.id} has pending dashboard feedback. Reconcile workers and acknowledge it before merging.`);
+    }
+  }
+  if (running(keep) && running(other)) {
+    throw new Error(`Tasks ${keepId} and ${otherId} both have a running worker. Park one (--workers with status idle or closed) before merging.`);
+  }
+  if (keepFirst(other, keep) < 0) {
+    throw new Error(`Keep ${otherId}, not ${keepId}: it is further along (review, implementation, investigation, initial; then the one with a PR; then the older). Run --merge-task ${otherId} --from ${keepId}.`);
+  }
+
+  const note = `merged ${otherId} into ${keepId}`;
+  const kept = structuredClone(keep);
+  const merged = structuredClone(other);
+  const extra = [];
+  for (const field of ["issue", "pr"]) {
+    if (merged[field] == null) continue;
+    if (kept[field] == null) kept[field] = merged[field];
+    else extra.push(merged[field]);
+  }
+  kept.links = sortReferences([...kept.links, ...merged.links, ...extra]);
+  kept.history = [...kept.history, { state: kept.state, at, note }];
+
+  // The issue and PR move to KEEP: a URL may belong to one task only.
+  merged.details = { ...merged.details, merged_into: keepId, merged_issue: merged.issue, merged_pr: merged.pr };
+  merged.issue = null;
+  merged.pr = null;
+  merged.state = "resolved";
+  merged.blocker = null;
+  merged.resolution = { outcome: "duplicate", note, at };
+  merged.history = [...merged.history, { state: "resolved", at, note }];
+  for (const worker of Object.values(merged.workers)) if (worker) worker.status = "closed";
+
+  const result = [kept, merged].map((task) => ({ ...task, updated_at: at, revision: (task.revision ?? 0) + 1 }));
+  return {
+    tasks: tasks.map((task) => result.find((item) => item.id === task.id) ?? task),
+    events: result.map((task) => ({ type: "task.updated", task: task.id, data: { revision: task.revision } })),
   };
 }
 
@@ -318,6 +383,16 @@ async function writeFactory(file, values, operator, source) {
   const addingTask = values.task !== undefined && !live && !restoring;
   const inserting = addingTask || restoring;
   let archived = null;
+  if (values["merge-task"] !== undefined) {
+    if (Object.keys(values).some((key) => !["merge-task", "from", "updated-at"].includes(key))) {
+      throw new Error("--merge-task takes only --from OTHER.");
+    }
+    const merging = mergeTasks(tasks, values, rootPatch.updated_at);
+    tasks = merging.tasks;
+    events.push(...merging.events);
+  } else if (values.from !== undefined) {
+    throw new Error("--from needs --merge-task KEEP.");
+  }
   if (values.task !== undefined) {
     if (inserting) {
       const matches = findArchived(await readArchive(directory, current.project), restoring
@@ -328,6 +403,8 @@ async function writeFactory(file, values, operator, source) {
         if (!archived) throw new Error(`Task ${values.task} is not in the archive.`);
       } else if (matches.length) {
         throw new Error(archivedMessage(values.task, matches));
+      } else {
+        checkNotLinked(tasks, values);
       }
     }
     const at = values["task-updated-at"] ?? now;
@@ -584,6 +661,8 @@ async function main() {
         "updated-at": { type: "string" },
         task: { type: "string" },
         restore: { type: "boolean" },
+        "merge-task": { type: "string" },
+        from: { type: "string" },
         ignored: { type: "string" },
         rule: { type: "string" },
         ran: { type: "boolean" },
@@ -619,6 +698,13 @@ Bring back archived work (ask the user first; the add command prints this when a
 matches an archived id, issue, or PR):
   node factory.mjs FILE --task issue-42 --restore --state initial --note "User wants it again" \\
     --expected-revision N
+
+Merge two tasks that hold the same work (the printed command of a duplicate-task finding):
+  node factory.mjs FILE --merge-task issue-42 --from pr-57
+  KEEP is the task furthest along (review, implementation, investigation, initial; then the one
+  with a PR; then the older). OTHER becomes resolved as duplicate with details.merged_into KEEP;
+  KEEP gains its issue, PR and links. Refused when both tasks have a running worker, or when
+  either was merged or has pending dashboard feedback. Emits task.updated for both.
 
 Run options:
   --project VALUE       Project (owner/repo); stored once

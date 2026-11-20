@@ -1081,3 +1081,52 @@ test("resolving a task closes its workers unless the write sets a status", async
   assert.equal(workers.implementation.pane, "block:p2");
   assert.equal(workers.review.status, "unknown");
 });
+
+async function twoTasks(t) {
+  const f = await started(t);
+  f.ok("--task", "pr-5", "--title", "Fix it", "--issue", "null", "--pr", pull(5), "--state", "review",
+    "--next-action", "Review", "--links", JSON.stringify([issue(1), issue(2)]));
+  return f;
+}
+
+test("--merge-task keeps the furthest-along task, unions the links, and resolves the other as a duplicate", async (t) => {
+  const f = await twoTasks(t);
+  f.fails(/Keep pr-5, not issue-1.*--merge-task pr-5 --from issue-1/, "--merge-task", "issue-1", "--from", "pr-5");
+  f.ok("--task", "issue-1", "--links", JSON.stringify([issue(3)]));
+  f.ok("--merge-task", "pr-5", "--from", "issue-1");
+  const [other, keep] = (await f.read()).tasks;
+  assert.equal(keep.state, "review");
+  assert.equal(keep.issue, issue(1));
+  assert.equal(keep.pr, pull(5));
+  assert.deepEqual(keep.links, [issue(1), issue(2), issue(3)]);
+  assert.equal(keep.history.at(-1).note, "merged issue-1 into pr-5");
+  assert.equal(other.state, "resolved");
+  assert.equal(other.resolution.outcome, "duplicate");
+  assert.equal(other.issue, null);
+  assert.deepEqual(other.details, { merged_into: "pr-5", merged_issue: issue(1), merged_pr: null });
+  const events = readFileSync(join(f.directory, "owner.repo-factory-events.jsonl"), "utf8");
+  assert.equal(events.match(/"type":"task.updated"/g).length, 3);
+});
+
+test("--merge-task refuses two running workers and a merged task", async (t) => {
+  const f = await twoTasks(t);
+  const running = JSON.stringify({ implementation: { status: "running", pane: "block:p" } });
+  f.ok("--task", "issue-1", "--workers", running);
+  f.ok("--task", "pr-5", "--workers", running);
+  f.fails(/both have a running worker/, "--merge-task", "pr-5", "--from", "issue-1");
+  f.ok("--task", "issue-1", "--workers", JSON.stringify({ implementation: { status: "idle" } }));
+  f.ok("--merge-task", "pr-5", "--from", "issue-1");
+  f.ok("--task", "issue-2", "--title", "Other", "--issue", issue(7), "--next-action", "Start");
+  f.fails(/already merged into pr-5/, "--merge-task", "pr-5", "--from", "issue-1");
+  f.fails(/already merged into pr-5/, "--merge-task", "issue-2", "--from", "issue-1");
+  f.ok("--task", "pr-5", "--state", "resolved", "--resolution", "merged");
+  f.fails(/was merged and is final/, "--merge-task", "issue-2", "--from", "pr-5");
+  f.fails(/was merged and is final/, "--merge-task", "pr-5", "--from", "issue-2");
+});
+
+test("a new task is refused when its issue or PR is in another open task's links", async (t) => {
+  const f = await twoTasks(t);
+  f.fails(/already linked from open task pr-5.*--merge-task/s, "--task", "issue-2", "--title", "Dup",
+    "--issue", issue(2), "--next-action", "Start");
+  f.ok("--task", "issue-4", "--title", "Fine", "--issue", issue(4), "--next-action", "Start");
+});
