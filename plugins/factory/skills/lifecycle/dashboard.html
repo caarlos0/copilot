@@ -1808,24 +1808,40 @@
       }
 
       // Credits when the log has them, else tokens; all values come from the server as numbers and model names.
-      function usageText(item) {
-        if (!item) return "n/a";
-        const cost = item.credits === null
-          ? `${tokenLabel(item.input_tokens)} in / ${tokenLabel(item.output_tokens)} out tokens`
-          : `${item.credits} credits`;
-        return `${item.models.length ? item.models.join(", ") : "no model"}; ${cost}; active ${span(Math.round(item.active_minutes * 60))}`;
-      }
+      const usageCost = (item) => item.credits === null
+        ? `${tokenLabel(item.input_tokens)} in / ${tokenLabel(item.output_tokens)} out tokens`
+        : `${item.credits} AIC`;
 
-      // Elapsed time and the all-roles total; the per-role usage sits on the matching history step.
-      function usageSummary(task) {
+      const usageDetail = (item) =>
+        `${item.models.join(", ") || "no model"}; ${usageCost(item)}; active ${span(Math.round(item.active_minutes * 60))}`;
+
+      // The model and cost chips of one worker, on its history step.
+      const stepChips = (item) => [...item.models, item.credits === null
+        ? `${tokenLabel(item.input_tokens)} in / ${tokenLabel(item.output_tokens)} out`
+        : `${item.credits} AIC`].map((text) => element("span", text, "chip"));
+
+      // Usage chips for the card header row; values that are unknown give no chip.
+      // The cost chip's tooltip holds the per-role breakdown.
+      function usageChips(task) {
         const usage = snapshot.usage?.[task.id];
-        if (!usage) return null;
-        const block = element("p", "Elapsed: ", "muted");
-        block.append(usage.ended_at
+        if (!usage) return [];
+        const elapsed = element("span", "Elapsed: ", "chip");
+        elapsed.append(usage.ended_at
           ? span(Math.max(0, Math.floor((Date.parse(usage.ended_at) - Date.parse(usage.started_at)) / 1000)))
           : elapsedLabel(usage.started_at));
-        if (Object.keys(usage.workers).length > 1) block.append(`. Total: ${usageText(usage.total)}`);
-        return block;
+        const chips = [elapsed];
+        const total = usage.total;
+        if (!total) return chips;
+        const cost = element("span", total.credits === null
+          ? `Tokens: ${tokenLabel(total.input_tokens)} in / ${tokenLabel(total.output_tokens)} out`
+          : `Cost: ${total.credits} AIC`, "chip");
+        cost.title = Object.entries(usage.workers)
+          .filter(([, item]) => item)
+          .map(([role, item]) => `${role}: ${usageDetail(item)}`)
+          .join("\n");
+        chips.push(cost, ...total.models.map((model) => element("span", model, "chip")));
+        chips.push(element("span", `Active: ${span(Math.round(total.active_minutes * 60))}`, "chip"));
+        return chips;
       }
 
       // The worker, merge decision and worktree link of a task, as lines for its history steps: a
@@ -1845,7 +1861,7 @@
           if (task.history[stepOf(role)]?.state !== role) line.append(element("strong", role));
           line.append(element("span", worker.status, "muted"));
           if (worker.name) line.append(...codeParts(worker.name));
-          if (usage && role in usage.workers) line.append(element("span", usageText(usage.workers[role]), "muted"));
+          if (usage?.workers[role]) line.append(...stepChips(usage.workers[role]));
           const live = open && ["running", "unknown"].includes(worker.status) && Boolean(worker.pane || worker.window);
           if (live && plainID(worker.pane)) line.append(copyLink("Copy Rex command", focusCommand(snapshot.rex_session, worker.pane)));
           appendArtifacts(line, worker, { task: task.id, role });
@@ -1901,6 +1917,7 @@
           chip.append(element("code", sha.slice(0, 7)));
           chips.append(chip);
         }
+        chips.append(...usageChips(task));
         node.append(chips);
         const summary = summaryBlock(task);
         if (summary) node.append(summary);
@@ -1926,8 +1943,6 @@
               ? "Factory acknowledged this direction." : "Awaiting factory acknowledgement.", "muted"));
         }
         node.append(element("h4", `History (${task.history.length})`), ...historyFlow(task, expanded, stepExtras(task)));
-        const usageSection = usageSummary(task);
-        if (usageSection) node.append(usageSection);
         if (task.details && Object.keys(task.details).length) {
           const evidence = element("button", "Evidence and task details", "details-link");
           evidence.type = "button";

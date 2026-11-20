@@ -2874,7 +2874,7 @@ test("copy links fall back to the selection when the clipboard API is missing", 
   assert.equal(button.textContent, "Copy failed");
 });
 
-test("history steps show elapsed time and per role usage from the session logs, n/a when missing", async (t) => {
+test("cards show usage chips in the header and per worker on history steps, and nothing for unknown values", async (t) => {
   const state = await mkdtemp(join(tmpdir(), "factory-dashboard-sessions-"));
   t.after(() => rm(state, { recursive: true, force: true }));
   const line = (minute, type, data) => JSON.stringify({ type, timestamp: new Date(Date.UTC(2026, 4, 1, 10, minute)).toISOString(), data });
@@ -2897,9 +2897,15 @@ test("history steps show elapsed time and per role usage from the session logs, 
 
   ui.run("choose('implementation')");
   const row = ui.get("task-list").children[0];
-  const [, investigation, implementation] = row.querySelector("ol").children;
-  assert.match(investigation.textContent, /m1 <b>; 2\.5 credits; active 5m/);
-  assert.match(implementation.textContent, /n\/a/);
+  const chips = row.querySelector(".chips").textContent;
+  assert.match(chips, /Elapsed: 2h 5m/);
+  assert.match(chips, /Cost: 2\.5 AIC/);
+  assert.match(chips, /m1 <b>/);
+  assert.match(chips, /Active: 5m/);
   assert.equal(row.querySelector("details"), null);
-  assert.match(row.textContent, /Elapsed: 2h 5m\. Total: m1 <b>; 2\.5 credits; active 5m/);
+
+  const [, investigation, implementation] = row.querySelector("ol").children;
+  assert.match(investigation.textContent, /m1 <b>2\.5 AIC/);
+  assert.doesNotMatch(implementation.textContent, /AIC|n\/a/, "A session with no log shows nothing.");
 });
+
