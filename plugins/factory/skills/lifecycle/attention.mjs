@@ -50,6 +50,13 @@ async function tailEvents(file, since) {
     await handle.close();
   }
 }
+async function lastEvent(session) {
+  if (!/^[\w-]+$/.test(session))
+    return null;
+  const events = await tailEvents(join(sessionState(), session, "events.jsonl"), Date.now());
+  const event = events.at(-1);
+  return event ? { type: event.type, at: Date.parse(event.timestamp) } : null;
+}
 async function answerTimes(session, since) {
   if (!/^[\w-]+$/.test(session))
     return [];
@@ -199,6 +206,7 @@ async function sendAnswer(item, index) {
   }
 }
 export {
+  lastEvent,
   openAttention,
   resolveAttention,
   sameId,

@@ -501,7 +501,10 @@ refuses two running workers and merged tasks; `factory.mjs` also refuses a new t
 issue or PR is in another open task's `links`), a task blocked longer than
 `--blocked-after` (default 24h; `stale-blocked`, naming its blocker class and owner),
 an attention item open longer than `--attention-after` (default 30m;
-`attention-stale`, naming task, kind, text and pane), a decided `improve` proposal whose result file
+`attention-stale`, naming task, kind, text and pane), a `running` worker whose session log
+ends with an `assistant.turn_end` over 10 minutes old and that has no result file newer than
+its start (`worker-quiet`, naming task, role and idle minutes; the last 256 KiB of the log, read
+with `attention.ts`'s `lastEvent`), a decided `improve` proposal whose result file
 still has a `change` and no `decision` (`improve-decided-unapplied`; an undecided proposal never
 produces a finding), a missing waiter (`no-waiter`), and an owner lock whose
 session the coordinator hooks would not match (`hooks-inactive`). The

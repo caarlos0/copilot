@@ -388,6 +388,12 @@ leave work behind. Treat each finding as unfinished work:
   and never let it wake you (the waiter excludes source `attention`). Only the
   user can answer, in the pane or with a click on an option button in the dashboard. The finding clears by itself when the prompt is answered,
   the pane closes, or 24 hours pass.
+- `worker-quiet`: a `running` worker of an open task has no result file newer
+  than its start, and the last event in its session log is an `assistant.turn_end`
+  more than 10 minutes old. It names `task`, `role` and `idle_minutes`. Send the
+  worker one follow-up: "save your result, or a blocked result with the cause".
+  If the log has no new event 10 minutes later, relaunch the worker in its
+  worktree.
 - `improve-decided-unapplied`: the user decided an `improve` proposal in the
   dashboard (an `improve.decided` event exists) but the result file has a
   `change` and no `decision`, so the wake was lost or the change was never

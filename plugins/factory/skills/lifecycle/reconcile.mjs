@@ -7,7 +7,7 @@ import { readFile, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs, promisify } from "node:util";
-import { resolveAttention, sameId } from "./attention.mjs";
+import { lastEvent, resolveAttention, sameId } from "./attention.mjs";
 import { resolveFactory, waiterPid } from "./broker.mjs";
 import { intervalMs, keepFirst, mergeRefusal, resourceId, sharesWork } from "./factory-data.mjs";
 import { defaultBranch } from "./default-branch.mjs";
@@ -83,6 +83,17 @@ function liveState(session) {
     return { sessionGone: true, windows: [] };
   return { sessionGone: false, windows: rexJSON("window", "ls", "-s", session).windows.map((w) => w.window_id) };
 }
+var quietAfter = intervalMs("10m");
+async function quietMinutes(worker, resultTime) {
+  if (worker?.status !== "running" || !worker.session)
+    return null;
+  if (resultTime !== null && resultTime > (Date.parse(worker.launched_at ?? "") || 0))
+    return null;
+  const event = await lastEvent(worker.session);
+  if (event?.type !== "assistant.turn_end" || !(Date.now() - event.at > quietAfter))
+    return null;
+  return Math.floor((Date.now() - event.at) / 60000);
+}
 async function reconcile(file, branchOverride, blockedAfter = intervalMs("24h"), attentionAfter = intervalMs("30m")) {
   const factory = JSON.parse(await readFile(file, "utf8"));
   const directory = dirname(file);
@@ -139,6 +150,11 @@ async function reconcile(file, branchOverride, blockedAfter = intervalMs("24h"),
       } else {
         checkMissing(worker, { kind: "worker-missing", task: task.id, role, worktree: task.worktree?.path ?? null });
       }
+      const resultFile = worker?.result ? join(directory, worker.result) : null;
+      const resultTime = resultFile ? await stat(resultFile).then(({ mtimeMs }) => mtimeMs, () => null) : null;
+      const idle = await quietMinutes(worker, resultTime);
+      if (idle !== null)
+        findings.push({ kind: "worker-quiet", task: task.id, role, idle_minutes: idle });
     }
     const blocked = task.state === "blocked" ? task.blocker : null;
     if (blocked && Date.now() - Date.parse(blocked.since) > blockedAfter) {

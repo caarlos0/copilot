@@ -383,6 +383,36 @@ esac
   assert.equal(resolved.length, 2, "recorded once, not on every sweep");
 });
 
+test("reports a running worker that ended its turn over 10 minutes ago and saved no new result", async (t) => {
+  const f = await fixture(t, fakeRex);
+  const state = join(f.directory, "session-state");
+  const minutesAgo = (minutes) => new Date(Date.now() - minutes * 60_000).toISOString();
+  const log = async (name, ...events) => {
+    await mkdir(join(state, name), { recursive: true });
+    await writeFile(join(state, name, "events.jsonl"), events.map(([type, minutes]) => `${JSON.stringify({ type, data: {}, timestamp: minutesAgo(minutes) })}\n`).join(""));
+  };
+  await log("quiet", ["assistant.message", 25], ["assistant.turn_end", 20]);
+  await log("fresh", ["assistant.turn_end", 5]);
+  await log("working", ["assistant.turn_end", 30], ["assistant.turn_start", 20]);
+  await log("saved", ["assistant.turn_end", 20]);
+  await log("parked", ["assistant.turn_end", 20]);
+  await writeFile(join(f.directory, "saved-result.json"), "{}");
+
+  const worker = (name, extra = {}) => ({ status: "running", session: name, window, launched_at: minutesAgo(60), ...extra });
+  const { findings, errors } = await f.run([
+    task("busy", "implementation", { workers: { implementation: worker("quiet") } }),
+    task("fresh", "implementation", { workers: { implementation: worker("fresh") } }),
+    task("working", "implementation", { workers: { implementation: worker("working") } }),
+    task("saved", "implementation", { workers: { implementation: worker("saved", { result: "saved-result.json", launched_at: minutesAgo(120) }) } }),
+    task("parked", "implementation", { workers: { implementation: worker("parked", { status: "idle" }) } }),
+    task("done", "resolved", { workers: { implementation: worker("quiet", { status: "closed" }) } }),
+  ], { env: { FACTORY_SESSION_STATE: state } });
+  assert.deepEqual(errors, []);
+  assert.deepEqual(findings.filter(({ kind }) => kind === "worker-quiet"), [
+    { kind: "worker-quiet", task: "busy", role: "implementation", idle_minutes: 20 },
+  ]);
+});
+
 test("--attention-after must be a duration", async (t) => {
   const f = await fixture(t, fakeRex);
   await writeFile(f.file, JSON.stringify({ status: "active", tasks: [] }));

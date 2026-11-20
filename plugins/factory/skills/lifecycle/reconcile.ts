@@ -4,7 +4,7 @@ import { readFile, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs, promisify } from "node:util";
-import { resolveAttention, sameId } from "./attention.mjs";
+import { lastEvent, resolveAttention, sameId } from "./attention.mjs";
 import { resolveFactory, waiterPid } from "./broker.mjs";
 import { intervalMs, keepFirst, mergeRefusal, resourceId, sharesWork } from "./factory-data.mjs";
 import { defaultBranch } from "./default-branch.mjs";
@@ -14,7 +14,7 @@ import { readJSON } from "./state-dir.mjs";
 
 const usage = "Usage: node reconcile.mjs FACTORY_FILE [--default-branch NAME] [--blocked-after 24h] [--attention-after 30m]";
 
-type Worker = { status?: string; window?: string; pane?: string; brief?: string; result?: string };
+type Worker = { status?: string; session?: string; window?: string; pane?: string; brief?: string; result?: string; launched_at?: string };
 type Task = {
   id: string;
   state: string;
@@ -111,6 +111,17 @@ function liveState(session: string): Live {
   return { sessionGone: false, windows: rexJSON("window", "ls", "-s", session).windows.map((w: { window_id: string }) => w.window_id) };
 }
 
+const quietAfter = intervalMs("10m");
+
+// Idle minutes of a running worker that ended its turn without a new result, else null.
+async function quietMinutes(worker: Worker | null | undefined, resultTime: number | null) {
+  if (worker?.status !== "running" || !worker.session) return null;
+  if (resultTime !== null && resultTime > (Date.parse(worker.launched_at ?? "") || 0)) return null;
+  const event = await lastEvent(worker.session);
+  if (event?.type !== "assistant.turn_end" || !(Date.now() - event.at > quietAfter)) return null;
+  return Math.floor((Date.now() - event.at) / 60_000);
+}
+
 async function reconcile(file: string, branchOverride?: string, blockedAfter = intervalMs("24h"), attentionAfter = intervalMs("30m")) {
   const factory: Factory = JSON.parse(await readFile(file, "utf8"));
   const directory = dirname(file);
@@ -171,6 +182,11 @@ async function reconcile(file: string, branchOverride?: string, blockedAfter = i
       } else {
         checkMissing(worker, { kind: "worker-missing", task: task.id, role, worktree: task.worktree?.path ?? null });
       }
+
+      const resultFile = worker?.result ? join(directory, worker.result) : null;
+      const resultTime = resultFile ? await stat(resultFile).then(({ mtimeMs }) => mtimeMs, () => null) : null;
+      const idle = await quietMinutes(worker, resultTime);
+      if (idle !== null) findings.push({ kind: "worker-quiet", task: task.id, role, idle_minutes: idle });
     }
 
     const blocked = task.state === "blocked" ? task.blocker : null;

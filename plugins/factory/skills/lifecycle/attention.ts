@@ -87,6 +87,14 @@ async function tailEvents(file: string, since: number) {
   }
 }
 
+// The last event of a session log, from its last 256 KiB, or null when there is none.
+export async function lastEvent(session: string) {
+  if (!/^[\w-]+$/.test(session)) return null;
+  const events = await tailEvents(join(sessionState(), session, "events.jsonl"), Date.now());
+  const event = events.at(-1);
+  return event ? { type: event.type, at: Date.parse(event.timestamp) } : null;
+}
+
 // Times of the events that show a prompt was answered: a completed permission, or the end of
 // an ask_user call. The completion has no tool name, so match it to its start by tool call ID.
 async function answerTimes(session: string, since: number) {
