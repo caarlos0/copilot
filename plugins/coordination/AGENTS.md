@@ -52,11 +52,16 @@ worktrees and unfinished work.
 
 ## Generated modules
 
-`board-data`, `handoff`, `wait` and `serve` in `skills/coordinator/` are
+`board-data`, `handoff`, `wait`, `serve` and `coordinator` in `skills/coordinator/` are
 TypeScript, checked with `strict` on. Edit the `.ts`, run `bun run build` in
 `plugins/coordination`, and commit the `.ts` and the generated `.mjs` together. Each
 bundle sits at the path of its source, so `node wait.mjs` and the other commands
-need no Bun and no `node_modules`. `serve` reads `import.meta.url` to find
+need no Bun and no `node_modules`. `coordinator.mjs` is a dispatcher: it loads
+`handoff`, `wait` or `serve` only when you name it (`node coordinator.mjs wait ARGS`).
+Each of these three modules exports `main(argv)`. It runs the module only when
+`process.argv[1]` is its own `.mjs` file, so the dispatcher bundle does not run it twice.
+The old `handoff.mjs`, `wait.mjs` and `serve.mjs` stay until the documents use the
+dispatcher. `serve` reads `import.meta.url` to find
 `board.html` and `board-data.mjs` beside it; both stay valid for that reason.
 `board-data.mjs` is served to the browser, so it must not import `node:` modules.
 The build fails when a coordination module imports a file outside this plugin,

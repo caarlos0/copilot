@@ -86,6 +86,7 @@ const pluginEntries: Record<string, string[]> = {
   ],
   "plugins/coordination": [
     "plugins/coordination/skills/coordinator/board-data.ts",
+    "plugins/coordination/skills/coordinator/coordinator.ts",
     "plugins/coordination/skills/coordinator/handoff.ts",
     "plugins/coordination/skills/coordinator/serve.ts",
     "plugins/coordination/skills/coordinator/wait.ts",
