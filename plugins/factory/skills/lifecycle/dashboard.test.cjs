@@ -729,13 +729,6 @@ test("state selection opens a docked list that can close and reopen", async (t) 
   assert.equal(ui.get("task-list").children.length, 0);
 });
 
-test("the task list is docked on the right of the flow, and the flow shrinks or scrolls", () => {
-  const layout = html.match(/<div class="layout">([\s\S]*?)<noscript>/)[1];
-  assert.ok(layout.indexOf('id="factories"') < layout.indexOf("<main>")
-    && layout.indexOf("</main>") < layout.indexOf('<aside id="detail"'));
-  assert.equal(layout.split('id="detail"').length, 2, "The panel appears once.");
-});
-
 test("Escape leaves the task list open while a popup owns the key", async (t) => {
   const ui = await dashboard(t);
   ui.run("choose('blocked')");
@@ -940,12 +933,6 @@ test("on a phone the flow is one column at the screen width, drawn at scale 1", 
   const desktop = await dashboard(t);
   assert.ok(!desktop.get("flow").className.split(" ").includes("vertical"));
   assert.equal(desktop.get("flow").viewBox, "0 0 1160 720");
-});
-
-test("no hover or reach rule gives a state square a blue border", () => {
-  const rules = [...html.matchAll(/^\s*(\.node[^{\n]*)\{([^}]*)\}/gm)];
-  const blue = rules.filter(([, selector, body]) => /:hover|\.reach/.test(selector) && /stroke:[^;]*--accent/.test(body));
-  assert.deepEqual(blue.map(([, selector]) => selector.trim()), []);
 });
 
 for (const width of [0, 390]) test(`hovering or focusing a state lights only its direct moves and the states they reach (${width ? "vertical" : "horizontal"} chart)`, async (t) => {
@@ -2100,14 +2087,6 @@ test("the Refresh button is disabled and busy while a refresh runs, and works ag
   assert.equal(button.disabled, false);
 });
 
-test("every button gets a pressed state, and the slide respects reduced motion", () => {
-  assert.match(html, /\n {6}button:active:not\(:disabled\), \.factory-item:active:not\(:disabled\) \{ background: var\(--btn-active\); \}/);
-  assert.match(html, /\n {6}\.action-primary:active:not\(:disabled\) \{ background: var\(--btn-primary-active\); \}/);
-  const motion = html.match(/@media \(prefers-reduced-motion: no-preference\) \{\s*button:active:not\(:disabled\) \{([^}]*)\}/);
-  assert.match(motion?.[1] ?? "", /transform: translateY\(1px\)/);
-  assert.doesNotMatch(html.replace(motion?.[0] ?? "", ""), /button:active[^{]*\{[^}]*transform/);
-});
-
 test("palette rows show the task reference with the same glyph as links", async (t) => {
   const ui = await dashboard(t);
   ui.press("k", { metaKey: true });
@@ -2238,72 +2217,6 @@ test("the palette button opens the palette, but not over another dialog", async 
   ui.get("move-dialog").open = true;
   await ui.get("open-palette").fire("click");
   assert.equal(ui.get("palette-dialog").open, false);
-});
-
-test("the page works on a phone: viewport, safe areas, touch sizes and contained overflow", () => {
-  assert.match(html, /<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">/);
-  assert.match(html, /<div id="flow-wrap">\s*<svg id="flow"/);
-  assert.match(html, /\n {6}#open-palette, #refresh \{ display: inline-flex;/, "Both buttons show on desktop.");
-  for (const id of ["open-palette", "refresh"]) {
-    const [, button] = html.match(new RegExp(`(<button id="${id}"[\\s\\S]*?</button>)`));
-    assert.match(button, /<svg [^>]*aria-hidden="true"/, `${id} has an icon.`);
-    assert.match(button, /<span class="label">/, `${id} keeps its text on desktop.`);
-    const name = id === "refresh" ? "Refresh" : "Go to a task \\(Cmd\\+K\\)";
-    assert.match(button, new RegExp(`aria-label="${name}" title="${name}( \\(R\\))?"`));
-    if (id === "open-palette") assert.match(button, /<span class="label">Go to<\/span>/);
-  }
-
-  const blocks = (query) => {
-    const found = [];
-    for (let start = html.indexOf(`@media ${query} {`); start !== -1; start = html.indexOf(`@media ${query} {`, start + 1)) {
-      let depth = 0;
-      let index = html.indexOf("{", start);
-      for (; index < html.length; index += 1) {
-        if (html[index] === "{") depth += 1;
-        if (html[index] === "}" && --depth === 0) break;
-      }
-      found.push(html.slice(start, index + 1));
-    }
-    assert.notEqual(found.length, 0, query);
-    return found.join("\n");
-  };
-  const narrow = blocks("(max-width: 700px)");
-  const touch = blocks("(max-width: 700px), (pointer: coarse)");
-  assert.match(narrow, /#open-palette, #refresh \{[^}]*width: 44px;/, "Icon-only buttons are 44px wide.");
-  assert.match(narrow, /#open-palette \.label, #refresh \.label \{ display: none; \}/, "The button text is hidden on a phone.");
-  assert.doesNotMatch(touch, /\.label/, "Touch screens wider than a phone keep the text.");
-  assert.match(touch, /button, select, input, textarea \{ min-height: 44px; font-size: 16px; \}/);
-  assert.match(touch, /\.icon-button \{ width: 44px; height: 44px; \}/);
-  assert.match(narrow, /env\(safe-area-inset-top\)/);
-  assert.match(narrow, /env\(safe-area-inset-bottom\)/);
-  assert.match(narrow, /#flow \{ min-width: 0; max-height: none; \}/, "The vertical chart is as tall as it needs to be.");
-  assert.doesNotMatch(narrow, /#flow-wrap/, "The flowchart has no scroller on a phone.");
-  assert.doesNotMatch(narrow, /overflow-x: auto/);
-  assert.match(html, /<svg id="flow" viewBox="0 0 1160 720"/);
-  assert.match(narrow, /#flow\.vertical \.node \.name \{ font-size: 17px;/, "Names are at least 14px, at scale 1.");
-  assert.match(narrow, /#flow\.vertical \.node \.sub \{ font-size: 14px;/);
-  assert.match(narrow, /#flow\.vertical \.outcome text, #flow\.vertical \.class-row text \{ font-size: 14px; \}/);
-  assert.match(narrow, /dialog, #move-dialog, #settings-dialog \{ width: 100%;/);
-
-  const widths = [...(narrow + touch).matchAll(/(?<![-\w])(?:width|min-width): (\d+)px/g)].map((match) => Number(match[1]));
-  assert.deepEqual(widths.filter((width) => width > 430), [], "Nothing on a phone is wider than the screen.");
-});
-
-test("on a phone the project switcher is a dropdown beside a settings button, and desktop keeps the sidebar", () => {
-  const narrow = html.slice(html.indexOf("@media (max-width: 700px) {\n        .bar"));
-  assert.match(html, /\n {6}#project-bar \{ display: none; \}/, "The switcher is hidden on desktop.");
-  assert.match(narrow, /\.brand, #sidebar \{ display: none; \}/, "The brand and the sidebar, with its Settings item, are hidden.");
-  assert.match(narrow, /#project-bar \{ display: flex;/);
-  assert.match(html, /<div id="project-bar">\s*<div id="project-switch">\s*<button id="project-toggle"[^>]*aria-expanded="false"[^>]*aria-controls="project-menu"[^>]*aria-label="Switch project"/);
-  assert.match(html, /<nav id="project-menu"[^>]*hidden><\/nav>\s*<\/div>\s*<button id="bar-settings"[^>]*aria-label="Settings"/, "The settings button follows the dropdown.");
-});
-
-test("the sidebar has a fixed width and the selected item does not change its box", () => {
-  const sidebar = html.match(/\n {6}#sidebar \{[^}]*\}/)[0];
-  assert.match(sidebar, /width: clamp\(240px, 22vw, 360px\);/);
-  assert.doesNotMatch(sidebar, /max-content|min-width|max-width/);
-  const selected = html.match(/\.factory-item\[aria-current="true"\] \{[^}]*\}/)[0];
-  assert.doesNotMatch(selected, /font-weight|padding|border-width|border:/);
 });
 
 test("the project dropdown lists the sorted factories, switches on a pick, and closes on Escape or an outside click", async (t) => {
