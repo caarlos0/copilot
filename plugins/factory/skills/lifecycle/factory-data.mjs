@@ -101,6 +101,40 @@ export function githubResourceURL(value, field = "link") {
   return `${url.origin}${url.pathname}`;
 }
 
+// The case-folded `github.com/owner/repo/(issues|pull)/N` identity of a link, or null for anything else.
+export function resourceId(value) {
+  try {
+    return githubResourceURL(value).toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+const ownIds = (task) => [task.issue, task.pr].map(resourceId).filter(Boolean);
+const namedIds = (task) => new Set([...ownIds(task), ...(task.links ?? []).map(resourceId).filter(Boolean)]);
+
+// Two tasks are one piece of work when the issue or PR of one appears in the other's issue, pr or links.
+export function sharesWork(a, b) {
+  const named = [namedIds(a), namedIds(b)];
+  return ownIds(a).some((id) => named[1].has(id)) || ownIds(b).some((id) => named[0].has(id));
+}
+
+// Why a task cannot take part in a merge, or null. A merged PR is final; a merged-away task is done.
+export function mergeRefusal(task) {
+  if (task.resolution?.outcome === "merged") return `Task ${task.id} was merged and is final.`;
+  if (task.details?.merged_into != null) return `Task ${task.id} was already merged into ${task.details.merged_into}.`;
+  return null;
+}
+
+const stageRank = { initial: 0, investigation: 1, implementation: 2, review: 3 };
+const stage = (task) => (task.state === "resolved" ? -1 : stageRank[task.state === "blocked" ? task.blocker.from : task.state]);
+
+// Sort order for the task a merge keeps: furthest along, then with a PR, then older. The first one wins.
+export function keepFirst(a, b) {
+  return stage(b) - stage(a) || Number(b.pr != null) - Number(a.pr != null) ||
+    Date.parse(a.history[0].at) - Date.parse(b.history[0].at) || a.id.localeCompare(b.id);
+}
+
 function githubKind(value, kind, field) {
   const url = githubURL(value, field);
   if (url.pathname.split("/")[3] !== kind) {

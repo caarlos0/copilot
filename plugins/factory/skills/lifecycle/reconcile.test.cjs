@@ -44,10 +44,13 @@ async function fixture(t, rex, branch = "main") {
   await mkdir(bin);
   await writeFile(join(bin, "rex"), rex);
   await chmod(join(bin, "rex"), 0o755);
+  // A sweep never reaches GitHub; a test that needs gh replaces this one.
+  await writeFile(join(bin, "gh"), "#!/bin/sh\nexit 1\n");
+  await chmod(join(bin, "gh"), 0o755);
 
   const file = join(directory, "owner.repo-factory.json");
   return {
-    directory, repo, file,
+    directory, repo, file, bin,
     async run(tasks, { status = "active", waiter = fakeWaiter(t), rules, env, args = [] } = {}) {
       await writeFile(file, JSON.stringify({ rex_session: "session:work", status, tasks, rules }));
       const pidFile = join(directory, "owner.repo-factory-waiter.pid");
@@ -420,4 +423,49 @@ test("an old undecided proposal is not stuck work, but a decision missing from t
     kind: "improve-decided-unapplied", rule: "self-improve", proposal_id: "lost", change: "limit",
     title: "Title lost", decision: "accepted", result: "lost-result.json",
   }]);
+});
+
+const issue = (n) => `https://github.com/owner/repo/issues/${n}`;
+const pull = (n) => `https://github.com/owner/repo/pull/${n}`;
+
+test("reports tasks that share an issue or PR through links, and keeps the furthest-along one", async (t) => {
+  const f = await fixture(t, fakeRex);
+  const { findings } = await f.run([
+    task("issue-1", "initial", { issue: issue(1) }),
+    task("pr-5", "review", { pr: pull(5), links: [issue(1)] }),
+    task("issue-2", "initial", { issue: issue(2) }),
+    task("old-pr", "resolved", { pr: pull(9), resolution: { outcome: "merged", at: "2026-05-01T12:00:00Z", note: null } }),
+    task("issue-9", "initial", { issue: issue(9), links: [pull(9)] }),
+    task("gone", "resolved", { links: [issue(2)], details: { merged_into: "issue-2" }, resolution: { outcome: "duplicate", at: "2026-05-01T12:00:00Z", note: null } }),
+  ], { waiter: null });
+  const duplicates = findings.filter(({ kind }) => kind === "duplicate-task");
+  assert.equal(duplicates.length, 1);
+  assert.deepEqual({ keep: duplicates[0].keep, merge: duplicates[0].merge }, { keep: "pr-5", merge: ["issue-1"] });
+  assert.match(duplicates[0].command, /factory\.mjs .*owner\.repo-factory\.json --merge-task pr-5 --from issue-1$/);
+});
+
+test("asks GitHub which issues an open PR task closes, and skips it when gh fails", async (t) => {
+  const f = await fixture(t, fakeRex);
+  const tasks = [
+    task("issue-2", "implementation", { issue: issue(2) }),
+    task("pr-6", "implementation", { pr: pull(6) }),
+    task("issue-3", "initial", { issue: issue(3) }),
+    task("pr-7", "review", { pr: pull(7) }),
+    task("pr-8", "review", { pr: pull(8) }),
+  ];
+  const found = async () => (await f.run(tasks, { waiter: null })).findings.filter(({ kind }) => kind === "duplicate-task");
+  assert.deepEqual(await found(), []);
+
+  await writeFile(join(f.bin, "gh"), `#!/bin/sh
+case "$3" in
+  ${pull(6)}) echo '{"closingIssuesReferences":[{"url":"${issue(2)}"}],"body":""}' ;;
+  ${pull(7)}) echo '{"closingIssuesReferences":[],"body":"Fixes #3"}' ;;
+  *) echo '{"closingIssuesReferences":[],"body":"Fixes #99"}' ;;
+esac
+`);
+  const duplicates = await found();
+  assert.deepEqual(duplicates.map(({ keep, merge }) => ({ keep, merge })), [
+    { keep: "pr-6", merge: ["issue-2"] },
+    { keep: "pr-7", merge: ["issue-3"] },
+  ]);
 });

@@ -1,12 +1,12 @@
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseArgs } from "node:util";
+import { parseArgs, promisify } from "node:util";
 import { resolveAttention, sameId } from "./attention.mjs";
 import { resolveFactory, waiterPid } from "./broker.mjs";
-import { intervalMs } from "./factory-data.mjs";
+import { intervalMs, keepFirst, mergeRefusal, resourceId, sharesWork } from "./factory-data.mjs";
 import { defaultBranch } from "./default-branch.mjs";
 import { hooksInactive } from "./gate.mjs";
 import { scanProposals } from "./proposals.mjs";
@@ -30,6 +30,55 @@ function isAncestor(cwd, branch) {
 }
 
 const worktreeScript = join(dirname(fileURLToPath(import.meta.url)), "worktree.mjs");
+
+const closes = /\b(?:fix(?:e[sd])?|close[sd]?|resolve[sd]?)\s*:?\s+#(\d+)/gi;
+
+// The issue URLs a PR closes, from GitHub. Without gh, or when it fails, the PR closes none.
+async function closedIssues(pr) {
+  try {
+    const { stdout } = await promisify(execFile)("gh", ["pr", "view", pr, "--json", "closingIssuesReferences,body"], { timeout: 10_000 });
+    const { closingIssuesReferences, body } = JSON.parse(stdout);
+    const repo = pr.replace(/\/pull\/\d+.*$/, "");
+    return [
+      ...closingIssuesReferences.map((issue) => issue.url),
+      ...[...body.matchAll(closes)].map(([, number]) => `${repo}/issues/${number}`),
+    ];
+  } catch {
+    return [];
+  }
+}
+
+// Tasks that hold one piece of work, as groups: the task to keep, the ones to merge into it, and the command.
+async function duplicateTasks(file, tasks) {
+  const candidates = tasks.filter((task) => !mergeRefusal(task));
+  const pairs = candidates.flatMap((a, i) => candidates.slice(i + 1).filter((b) => sharesWork(a, b)).map((b) => [a, b]));
+  // Only a PR task that no link already explains needs GitHub's word on the issues it closes.
+  const open = candidates.filter((task) => task.state !== "resolved" && task.pr && !pairs.some((pair) => pair.includes(task)));
+  const closed = await Promise.all(open.map((task) => closedIssues(task.pr)));
+  open.forEach((task, i) => {
+    for (const url of closed[i].filter(resourceId)) {
+      for (const other of candidates.filter((item) => item !== task && sharesWork({ issue: url, links: [] }, item))) {
+        pairs.push([task, other]);
+      }
+    }
+  });
+
+  const groups = [];
+  for (const pair of pairs) {
+    const touched = groups.filter((group) => pair.some((task) => group.has(task)));
+    const joined = new Set([...pair, ...touched.flatMap((group) => [...group])]);
+    groups.splice(0, groups.length, ...groups.filter((group) => !touched.includes(group)), joined);
+  }
+  return groups.map((group) => {
+    const [keep, ...rest] = [...group].sort(keepFirst);
+    return {
+      kind: "duplicate-task",
+      keep: keep.id,
+      merge: rest.map((task) => task.id),
+      command: rest.map((task) => `node ${join(import.meta.dirname, "factory.mjs")} ${file} --merge-task ${keep.id} --from ${task.id}`).join(" && "),
+    };
+  });
+}
 
 // Reading must never start a Rex server.
 const rexJSON = (...args) => JSON.parse(execFileSync("rex", ["--autostart=false", ...args, "--json"], {
@@ -59,6 +108,8 @@ async function reconcile(file, branchOverride, blockedAfter = intervalMs("24h"),
 
   const inactive = hooksInactive(file);
   if (inactive) findings.push({ kind: "hooks-inactive", reason: inactive });
+
+  findings.push(...await duplicateTasks(file, factory.tasks));
 
   // One Rex read per sweep, and only when a check needs it. After a Rex failure, null.
   let live;
