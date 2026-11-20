@@ -421,7 +421,7 @@ The skill must not depend on files in the coordination plugin.
 server on purpose: the two plugins load independently.
 
 `reconcile.mjs` is a sweep that prints JSON findings and changes only the events
-log: it appends a missing `attention.resolved` event (source `reconcile`, with a
+log (it reads Rex with `--autostart=false` and a 10 second timeout, so a sweep never starts a Rex server): it appends a missing `attention.resolved` event (source `reconcile`, with a
 `reason`) for an attention item that `attention.mjs` finds resolved. Complete results
 newer than their task, open issue-less task branches ahead of the default
 branch, clean worktrees of merged tasks whose HEAD is in the default branch

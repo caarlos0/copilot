@@ -65,6 +65,7 @@ async function fixture(t, rex) {
 
 const session = "session:01a1e7a3-fa38-7cc9-b339-f6c5afbd626c";
 const rexScript = (sessions) => `#!/bin/sh
+[ "$1" = "--autostart=false" ] && shift
 case "$1" in
   ls) echo '{"sessions":[${sessions.map((id) => `{"session_id":"${id}"}`)}]}' ;;
   *) echo '{"windows":[{"window_id":"${window}"}]}' ;;
@@ -194,6 +195,15 @@ test("is quiet when everything is reconciled", async (t) => {
     task("done", "resolved", { workers: { implementation: { status: "closed", window: "window:other-id" } } }),
   ]);
   assert.deepEqual({ findings, errors }, { findings: [], errors: [] });
+});
+
+test("reads Rex with --autostart=false", async (t) => {
+  const log = join(tmpdir(), `reconcile-rex-args-${process.pid}`);
+  t.after(() => rm(log, { force: true }));
+  const f = await fixture(t, `#!/bin/sh\necho "$@" >> "${log}"\ncase "$2" in ls) echo '{"sessions":[{"session_id":"session:work"}]}' ;; *) echo '{"windows":[]}' ;; esac\n`);
+  await f.run([task("done", "resolved", { workers: { implementation: { status: "closed", window } } })]);
+  const calls = (await readFile(log, "utf8")).trim().split("\n");
+  assert.deepEqual(calls, ["--autostart=false ls --json", "--autostart=false window ls -s session:work --json"]);
 });
 
 test("reports a Rex failure without failing the sweep", async (t) => {

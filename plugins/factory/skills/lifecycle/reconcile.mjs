@@ -37,9 +37,11 @@ function isAncestor(cwd, branch) {
 
 const worktreeScript = join(dirname(fileURLToPath(import.meta.url)), "worktree.mjs");
 
-const rexJSON = (...args) => JSON.parse(execFileSync("rex", [...args, "--json"], {
+// Reading must never start a Rex server.
+const rexJSON = (...args) => JSON.parse(execFileSync("rex", ["--autostart=false", ...args, "--json"], {
   encoding: "utf8",
   stdio: ["ignore", "pipe", "pipe"],
+  timeout: 10_000,
 }));
 
 // A gone session makes `rex window ls` fail, so ask for the session list first.
