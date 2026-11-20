@@ -268,8 +268,8 @@ The dashboard task cards show one worker summary (`cardSummary` in
 dashboard reads only the factory file. A `--workers` write that sets a worker
 `running` with a different `pane` or `window` (a relaunch) first drops its stored
 `session`, `summary` and `summary_at`; `result` stays, as it is the planned filename.
-A worker's `result` link (history step, Find work) and the "View result" link under
-a card summary open one popup with the result file, pretty-printed and highlighted
+A worker's `result` link (history step, Find work) opens a popup with the result file,
+pretty-printed and highlighted
 (`highlightText`, built with `textContent`). A worker's `brief` link opens the same popup
 with the brief rendered as GitHub-style Markdown (`renderMarkdown`): `marked` (GFM) parses it
 and DOMPurify always sanitizes the output (http(s) links only; raw HTML shows as text). Then

@@ -2757,7 +2757,24 @@ test("the result highlighter colours each token class and never renders a string
   assert.equal(pre.querySelectorAll("script").length, 0, "Result text is data, never an element.");
 });
 
-test("the result link in a history step and the card summary both open the result popup", async (t) => {
+test("a task card has one result link, on the history step, in every state", async (t) => {
+  const ui = await dashboard(t);
+  const task = structuredClone(example.tasks.find((item) => item.id === "issue-9"));
+  task.workers.implementation.summary = "Shipped.";
+  for (const state of ["implementation", "blocked", "resolved"]) {
+    task.state = state;
+    if (state === "resolved") task.resolution = { outcome: "merged", note: null };
+    const row = ui.run(`taskRow(${JSON.stringify(task)}, new Set())`);
+    assert.ok(row.querySelector(".summary"), `${state} shows the summary.`);
+    assert.equal(row.querySelector(".summary").querySelectorAll("a").length, 0, `${state}: no link under the summary.`);
+    const results = row.querySelectorAll("a").filter((node) => node.textContent === "result");
+    assert.equal(results.length, 2, `${state}: one result link per worker.`);
+    assert.equal(row.querySelector("ol").querySelectorAll("a").filter((node) => node.textContent === "result").length, 2,
+      `${state}: the links are in the history.`);
+  }
+});
+
+test("the result link in a history step opens the result popup", async (t) => {
   const ui = await dashboard(t);
   const name = "owner.repo-issue-9-implementation-result.json";
   const raw = '{"outcome":"complete","note":"<script>alert(1)</script>","count":3}';
@@ -2768,15 +2785,13 @@ test("the result link in a history step and the card summary both open the resul
   const row = ui.run(`taskRow(${JSON.stringify(task)}, new Set())`);
   const href = `/api/artifact?file=${encodeURIComponent(factoryFile)}&name=${encodeURIComponent(name)}`;
   const inDetails = row.querySelectorAll("a").find((node) => node.textContent === "result" && node.href === href);
-  const inSummary = row.querySelector(".summary").querySelector("a");
-  assert.equal(inSummary.href, href, "The summary link keeps a real href.");
   const dialog = ui.get("result-dialog");
 
   const modified = await inDetails.fire("click", { ctrlKey: true });
   assert.equal(modified.defaultPrevented, false, "A modified click keeps the browser's new tab.");
   assert.equal(dialog.open, false);
 
-  for (const trigger of [inDetails, inSummary]) {
+  for (const trigger of [inDetails]) {
     const click = await trigger.fire("click");
     assert.equal(click.defaultPrevented, true);
     assert.equal(dialog.open, true);
