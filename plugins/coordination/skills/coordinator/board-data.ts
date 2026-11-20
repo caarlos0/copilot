@@ -1,3 +1,5 @@
+import * as v from "valibot";
+
 export const statuses = ["pending", "running", "verifying", "blocked", "done"] as const;
 const runStatuses = ["active", "paused", "blocked", "finished"] as const;
 
@@ -30,30 +32,41 @@ export type Handoff = {
   tasks: Task[];
 };
 
-function text(value: unknown, field: string): asserts value is string {
-  if (typeof value !== "string" || !value.trim()) {
-    throw new Error(`${field} must be a non-empty string.`);
-  }
-}
+const text = (field: string) =>
+  v.pipe(
+    v.string(`${field} must be a non-empty string.`),
+    v.check((value) => value.trim() !== "", `${field} must be a non-empty string.`),
+  );
 
-function timestamp(value: unknown, field: string) {
-  text(value, field);
-  if (!/(Z|[+-]\d{2}:\d{2})$/.test(value) || !Number.isFinite(Date.parse(value))) {
-    throw new Error(`${field} must be a timestamp with a timezone.`);
-  }
+const timestamp = (field: string) =>
+  v.pipe(
+    text(field),
+    v.check(
+      (value) => /(Z|[+-]\d{2}:\d{2})$/.test(value) && Number.isFinite(Date.parse(value)),
+      `${field} must be a timestamp with a timezone.`,
+    ),
+  );
+
+const artifact = (field: string) =>
+  v.pipe(
+    text(field),
+    v.regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/, `${field} must be a filename in the state directory.`),
+  );
+
+// First issue only: callers report one error at a time, in field order.
+function parse<T>(schema: v.GenericSchema<unknown, T>, value: unknown) {
+  const result = v.safeParse(schema, value, { abortEarly: true });
+  if (!result.success) throw new Error(result.issues[0].message);
+  return result.output;
 }
 
 export function artifactName(value: unknown, field = "artifact") {
-  text(value, field);
-  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(value)) {
-    throw new Error(`${field} must be a filename in the state directory.`);
-  }
-  return value;
+  return parse(artifact(field), value);
 }
 
 export function githubURL(value: unknown, field = "link") {
-  text(value, field);
-  const url = new URL(value);
+  const link = parse(text(field), value);
+  const url = new URL(link);
   if (url.origin !== "https://github.com" || url.username || url.password ||
       !/^\/[^/]+\/[^/]+\/(issues|pull)\/\d+$/.test(url.pathname)) {
     throw new Error(`${field} must be an HTTPS GitHub issue or pull request URL.`);
@@ -69,49 +82,89 @@ export function prURL(value: unknown) {
   return url.href;
 }
 
-export function validate(data: any): asserts data is Handoff {
-  if (!data || typeof data !== "object" || Array.isArray(data)) {
-    throw new Error("Handoff must be a JSON object.");
-  }
-  text(data.id, "id");
-  if (data.project != null) text(data.project, "project");
-  if (data.role != null) text(data.role, "role");
-  text(data.goal, "goal");
-  timestamp(data.updated_at, "updated_at");
-  if (!runStatuses.includes(data.status) || !Array.isArray(data.tasks)) {
-    throw new Error("Handoff needs a valid run status and a tasks array.");
-  }
+const via = (check: (value: unknown) => unknown) =>
+  v.rawCheck(({ dataset, addIssue }) => {
+    try {
+      check(dataset.value);
+    } catch (error) {
+      addIssue({ message: (error as Error).message });
+    }
+  });
+
+const object = (message: string) =>
+  v.custom<Record<string, any>>((value) => !!value && typeof value === "object" && !Array.isArray(value), message);
+
+// Valibot reports a missing key as its own issue. Setting absent keys to undefined lets each
+// field schema report its own message, as it does for a wrong value.
+const fields = (entries: v.ObjectEntries) =>
+  v.pipe(
+    v.any(),
+    v.transform((input: Record<string, any>) => ({
+      ...Object.fromEntries(Object.keys(entries).map((key) => [key, undefined])),
+      ...input,
+    })),
+    v.looseObject(entries),
+  ) as unknown as v.GenericSchema<Record<string, any>>;
+
+// Task rules depend on the handoff and on earlier tasks, so the schema is built per handoff. Each
+// stage ends where a cross-field rule starts, so the first error follows the field order.
+function handoffSchema(hasProject: boolean) {
   const ids = new Set<string>();
-  for (const task of data.tasks) {
-    if (!task || typeof task !== "object" || Array.isArray(task)) {
-      throw new Error("Each task must be a JSON object.");
-    }
-    for (const field of ["id", "goal", "next_action"]) {
-      text(task[field], `task.${field}`);
-    }
-    if (task.repository != null) text(task.repository, "task.repository");
-    if (data.project == null && task.repository == null) {
-      throw new Error(`Task ${task.id} needs a repository or a handoff project.`);
-    }
-    timestamp(task.updated_at, "task.updated_at");
-    if (!statuses.includes(task.status)) {
-      throw new Error(`Unknown status for task ${task.id}: ${task.status}`);
-    }
-    if (ids.has(task.id)) throw new Error(`Duplicate task ID: ${task.id}`);
-    ids.add(task.id);
-    for (const field of ["worker", "blocker"]) {
-      if (task[field] != null) text(task[field], `task.${field}`);
-    }
-    if (task.blocker != null && task.status !== "blocked") {
-      throw new Error(`Task ${task.id}: blocker is allowed only when status is blocked; clear it with --blocker null.`);
-    }
-    for (const field of ["brief", "result"]) {
-      if (task[field] != null) artifactName(task[field], `task.${field}`);
-    }
-    if (task.pr != null) prURL(task.pr);
-    if (task.links != null) {
-      if (!Array.isArray(task.links)) throw new Error("task.links must be an array.");
-      for (const value of task.links) githubURL(value, "task.links[]");
-    }
-  }
+  const task = v.pipe(
+    object("Each task must be a JSON object."),
+    fields({
+      id: text("task.id"),
+      goal: text("task.goal"),
+      next_action: text("task.next_action"),
+      repository: v.nullish(text("task.repository")),
+    }),
+    v.check(
+      (task) => hasProject || task.repository != null,
+      ({ input }) => `Task ${input.id} needs a repository or a handoff project.`,
+    ),
+    fields({ updated_at: timestamp("task.updated_at") }),
+    v.check(
+      (task) => statuses.includes(task.status as Status),
+      ({ input }) => `Unknown status for task ${input.id}: ${input.status}`,
+    ),
+    v.check((task) => {
+      const seen = ids.has(task.id);
+      ids.add(task.id);
+      return !seen;
+    }, ({ input }) => `Duplicate task ID: ${input.id}`),
+    fields({
+      worker: v.nullish(text("task.worker")),
+      blocker: v.nullish(text("task.blocker")),
+    }),
+    v.check(
+      (task) => task.blocker == null || task.status === "blocked",
+      ({ input }) =>
+        `Task ${input.id}: blocker is allowed only when status is blocked; clear it with --blocker null.`,
+    ),
+    fields({
+      brief: v.nullish(artifact("task.brief")),
+      result: v.nullish(artifact("task.result")),
+      pr: v.nullish(v.pipe(v.unknown(), via(prURL))),
+      links: v.nullish(v.array(
+        v.pipe(v.unknown(), via((link) => githubURL(link, "task.links[]"))),
+        "task.links must be an array.",
+      )),
+    }),
+  );
+  return v.pipe(
+    object("Handoff must be a JSON object."),
+    fields({
+      id: text("id"),
+      project: v.nullish(text("project")),
+      role: v.nullish(text("role")),
+      goal: text("goal"),
+      updated_at: timestamp("updated_at"),
+      status: v.picklist(runStatuses, "Handoff needs a valid run status and a tasks array."),
+      tasks: v.array(task, "Handoff needs a valid run status and a tasks array."),
+    }),
+  );
+}
+
+export function validate(data: any): asserts data is Handoff {
+  parse(handoffSchema(data?.project != null), data);
 }
