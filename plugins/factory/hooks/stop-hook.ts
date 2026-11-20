@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync, statSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { resolveFactory, waiterPid } from "../skills/lifecycle/broker.mjs";
 import { factoryFile, isCoordinator } from "../skills/lifecycle/gate.mjs";
 
@@ -16,7 +16,7 @@ function block(reason: string) {
   process.stdout.write(`${JSON.stringify({ decision: "block", reason: reason.slice(0, maxReason) })}\n`);
 }
 
-async function main() {
+async function run() {
   let input;
   try {
     input = JSON.parse(readFileSync(0, "utf8"));
@@ -43,8 +43,12 @@ async function main() {
   }
 }
 
-try {
-  await main();
-} catch {
-  // fail open
+export async function main(_argv: string[]) {
+  try {
+    await run();
+  } catch {
+    // fail open
+  }
 }
+
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) await main(process.argv.slice(2));

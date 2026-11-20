@@ -4,6 +4,7 @@
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
+import { pathToFileURL } from "node:url";
 import { isCoordinator } from "../skills/lifecycle/gate.mjs";
 var DENIED_TOOLS = ["task", "read_agent", "write_agent", "run_dynamic_workflow"];
 var WRITE_TOOLS = ["edit", "create", "str_replace_editor", "apply_patch"];
@@ -176,13 +177,20 @@ function decide({ toolName = "", toolArgs, cwd = process.cwd() }) {
   }
   return null;
 }
-try {
-  const input = JSON.parse(readFileSync(0, "utf8"));
-  const hit = isCoordinator(input) ? decide(input) : null;
-  if (hit) {
-    console.log(JSON.stringify({
-      permissionDecision: "deny",
-      permissionDecisionReason: `factory guard rule ${hit.name}: ${hit.reason}`
-    }));
-  }
-} catch {}
+function main(_argv) {
+  try {
+    const input = JSON.parse(readFileSync(0, "utf8"));
+    const hit = isCoordinator(input) ? decide(input) : null;
+    if (hit) {
+      console.log(JSON.stringify({
+        permissionDecision: "deny",
+        permissionDecisionReason: `factory guard rule ${hit.name}: ${hit.reason}`
+      }));
+    }
+  } catch {}
+}
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href)
+  main(process.argv.slice(2));
+export {
+  main
+};

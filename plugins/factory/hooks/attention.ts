@@ -10,7 +10,8 @@
 // It always exits 0, prints nothing, and makes no network call.
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { factoryFile, hookSession, isCoordinator } from "../skills/lifecycle/gate.mjs";
 
 const MAX_TEXT = 2000;
@@ -102,7 +103,7 @@ function describe(input: Input, note: Note | null) {
   return { kind: bypass ? "sandbox-bypass" : "permission", text: message + reason, options: [] };
 }
 
-async function main() {
+async function run() {
   const input = JSON.parse(readFileSync(0, "utf8"));
   const who = input && typeof input === "object" ? identify(input) : null;
   if (!who) return;
@@ -122,7 +123,13 @@ async function main() {
   await emit(await resolveFactory(who.file), { type: "attention.requested", source: "attention", data });
 }
 
-try {
-  await main();
-} catch {}
-process.exit(0);
+export async function main(_argv: string[]) {
+  try {
+    await run();
+  } catch {}
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  await main(process.argv.slice(2));
+  process.exit(0);
+}

@@ -3,7 +3,8 @@
 // plugins/factory/hooks/attention.ts
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { factoryFile, hookSession, isCoordinator } from "../skills/lifecycle/gate.mjs";
 var MAX_TEXT = 2000;
 var MAX_OPTIONS = 20;
@@ -79,7 +80,7 @@ function describe(input, note) {
 Sandbox bypass: ${note.reason}` : "";
   return { kind: bypass ? "sandbox-bypass" : "permission", text: message + reason, options: [] };
 }
-async function main() {
+async function run() {
   const input = JSON.parse(readFileSync(0, "utf8"));
   const who = input && typeof input === "object" ? identify(input) : null;
   if (!who)
@@ -104,7 +105,15 @@ async function main() {
   const { emit, resolveFactory } = await import("../skills/lifecycle/broker.mjs");
   await emit(await resolveFactory(who.file), { type: "attention.requested", source: "attention", data });
 }
-try {
-  await main();
-} catch {}
-process.exit(0);
+async function main(_argv) {
+  try {
+    await run();
+  } catch {}
+}
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  await main(process.argv.slice(2));
+  process.exit(0);
+}
+export {
+  main
+};

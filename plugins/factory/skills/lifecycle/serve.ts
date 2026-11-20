@@ -4,7 +4,7 @@ import { readFile, readdir, realpath, stat } from "node:fs/promises";
 import { type AddressInfo } from "node:net";
 import { homedir, networkInterfaces } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { gzipSync } from "node:zlib";
 import writeFileAtomic from "write-file-atomic";
@@ -70,10 +70,11 @@ class HttpError extends Error {
   }
 }
 
-async function main() {
+async function serve(argv: string[]) {
   let options: Options;
   try {
     options = parseArgs({
+      args: argv,
       options: {
         help: { type: "boolean", short: "h" },
         directory: { type: "string" },
@@ -707,7 +708,11 @@ p{margin:0;color:#f87171}
   process.on("SIGTERM", () => server.close());
 }
 
-main().catch((error) => {
-  console.error(errorMessage(error));
-  process.exitCode = 1;
-});
+export function main(argv: string[]) {
+  return serve(argv).catch((error) => {
+    console.error(errorMessage(error));
+    process.exitCode = 1;
+  });
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) await main(process.argv.slice(2));

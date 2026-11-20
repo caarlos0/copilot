@@ -1,8 +1,8 @@
 import { execFile, execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs, promisify } from "node:util";
 import { lastEvent, resolveAttention, sameId } from "./attention.mjs";
 import { resolveFactory, waiterPid } from "./broker.mjs";
@@ -336,25 +336,30 @@ async function reconcile(file: string, branchOverride?: string, blockedAfter = i
   return { findings, errors };
 }
 
-try {
-  const { values, positionals } = parseArgs({
-    allowPositionals: true,
-    options: {
-      "default-branch": { type: "string" },
-      "blocked-after": { type: "string", default: "24h" },
-      "attention-after": { type: "string", default: "30m" },
-    },
-  });
-  if (positionals.length !== 1) throw new Error(usage);
-  const duration = (flag: "blocked-after" | "attention-after") => {
-    try {
-      return intervalMs(values[flag]);
-    } catch {
-      throw new Error(`--${flag} must look like 30m, 24h, or 2d, not ${JSON.stringify(values[flag])}.`);
-    }
-  };
-  console.log(JSON.stringify(await reconcile(positionals[0], values["default-branch"], duration("blocked-after"), duration("attention-after")), null, 2));
-} catch (error) {
-  console.error((error as Error).message);
-  process.exitCode = 1;
+export async function main(argv: string[]) {
+  try {
+    const { values, positionals } = parseArgs({
+      args: argv,
+      allowPositionals: true,
+      options: {
+        "default-branch": { type: "string" },
+        "blocked-after": { type: "string", default: "24h" },
+        "attention-after": { type: "string", default: "30m" },
+      },
+    });
+    if (positionals.length !== 1) throw new Error(usage);
+    const duration = (flag: "blocked-after" | "attention-after") => {
+      try {
+        return intervalMs(values[flag]);
+      } catch {
+        throw new Error(`--${flag} must look like 30m, 24h, or 2d, not ${JSON.stringify(values[flag])}.`);
+      }
+    };
+    console.log(JSON.stringify(await reconcile(positionals[0], values["default-branch"], duration("blocked-after"), duration("attention-after")), null, 2));
+  } catch (error) {
+    console.error((error as Error).message);
+    process.exitCode = 1;
+  }
 }
+
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) await main(process.argv.slice(2));
