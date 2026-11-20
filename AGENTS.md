@@ -52,7 +52,9 @@ that plugin directory, install with `bun install --frozen-lockfile`, then run
 
 A `.mjs` with a same-named `.ts` beside it is a generated bundle. Edit the
 `.ts`, run `bun run build` in the plugin directory (`scripts/build.ts`, shared by
-all plugins), and commit both files. Never
+all plugins), and commit both files. A new bundle also needs a line in the
+entry list of its plugin in `scripts/build.ts`; the build ignores a `.ts` file
+that is not in the list. Never
 edit the `.mjs`. CI runs the build of every plugin, then `git diff --exit-code`. Sibling
 `.mjs` imports stay external, and tests keep running the `.mjs` paths. A
 bundle must not read files beside itself through `import.meta.url` or

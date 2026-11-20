@@ -1,5 +1,5 @@
-// Run from a plugin directory (`bun run build` there). Bundles every **/*.ts entry point of that
-// plugin to the same-named .mjs, so consumers run plain `node X.mjs` with no Bun and no
+// Run from a plugin directory (`bun run build` there). Bundles each entry point of that plugin
+// (the list below) to the same-named .mjs, so consumers run plain `node X.mjs` with no Bun and no
 // node_modules. Packages come from the plugin's own node_modules.
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
@@ -56,9 +56,47 @@ function check(entry: string, path: string, importer: string) {
   }
 }
 
-const entries = [...new Bun.Glob(`${pluginDir}/**/*.ts`).scanSync(".")]
-  .filter((file) => !file.includes("node_modules/") && !file.endsWith(".d.ts") && !file.endsWith(".test.ts"))
-  .sort();
+// Only the files listed here become bundles. A module that an entry imports, a test and a type
+// file are not entries.
+const pluginEntries: Record<string, string[]> = {
+  "plugins/factory": [
+    "plugins/factory/hooks/attention.ts",
+    "plugins/factory/hooks/guard.ts",
+    "plugins/factory/hooks/stop-hook.ts",
+    "plugins/factory/skills/lifecycle/archive.ts",
+    "plugins/factory/skills/lifecycle/attention.ts",
+    "plugins/factory/skills/lifecycle/broker.ts",
+    "plugins/factory/skills/lifecycle/dashboard.ts",
+    "plugins/factory/skills/lifecycle/default-branch.ts",
+    "plugins/factory/skills/lifecycle/factory-data.ts",
+    "plugins/factory/skills/lifecycle/factory.ts",
+    "plugins/factory/skills/lifecycle/gate.ts",
+    "plugins/factory/skills/lifecycle/migrate.ts",
+    "plugins/factory/skills/lifecycle/pr-watch.ts",
+    "plugins/factory/skills/lifecycle/proposals.ts",
+    "plugins/factory/skills/lifecycle/reconcile.ts",
+    "plugins/factory/skills/lifecycle/serve.ts",
+    "plugins/factory/skills/lifecycle/session-metrics.ts",
+    "plugins/factory/skills/lifecycle/sessions.ts",
+    "plugins/factory/skills/lifecycle/shot.ts",
+    "plugins/factory/skills/lifecycle/state-dir.ts",
+    "plugins/factory/skills/lifecycle/usage.ts",
+    "plugins/factory/skills/lifecycle/worker-name.ts",
+    "plugins/factory/skills/lifecycle/worktree.ts",
+  ],
+  "plugins/coordination": [
+    "plugins/coordination/skills/coordinator/board-data.ts",
+    "plugins/coordination/skills/coordinator/handoff.ts",
+    "plugins/coordination/skills/coordinator/serve.ts",
+    "plugins/coordination/skills/coordinator/wait.ts",
+  ],
+};
+
+const entries = pluginEntries[pluginDir];
+if (!entries) throw new Error(`No entry list for ${pluginDir} in scripts/build.ts.`);
+for (const entry of entries) {
+  if (!existsSync(entry)) throw new Error(`Entry ${entry} does not exist.`);
+}
 
 for (const entry of entries) {
   const result = await Bun.build({
