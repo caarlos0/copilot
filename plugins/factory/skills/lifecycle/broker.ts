@@ -69,7 +69,7 @@ function isWaiter(pid: number) {
   try {
     const line = execFileSync("ps", ["-o", "ppid=,command=", "-p", String(pid)], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
     const [, ppid, command] = line.match(/^\s*(\d+)\s+(.*)$/s) ?? [];
-    return command !== undefined && /broker\.mjs\s+wait\b/.test(command) && Number(ppid) > 1;
+    return command !== undefined && /(?:broker\.mjs|factory\.mjs\s+broker)\s+wait\b/.test(command) && Number(ppid) > 1;
   } catch {
     return true;
   }
