@@ -121,7 +121,7 @@ test("reports deletion once and detects recreation with the same contents",
 test("help and invalid usage have distinct stdout, stderr, and exit contracts", () => {
   const help = spawnSync(process.execPath, [script, "wait", "--help"], { encoding: "utf8" });
   assert.equal(help.status, 0, help.stderr);
-  assert.match(help.stdout, /Usage: node wait\.mjs --cursor FILE RESULT/);
+  assert.match(help.stdout, /Usage: node coordinator\.mjs wait --cursor FILE RESULT/);
   assert.equal(help.stderr, "");
   for (const args of [[], ["--unknown"], ["--cursor"], ["--cursor", "same", "same"]]) {
     const result = spawnSync(process.execPath, [script, "wait", ...args], { encoding: "utf8" });

@@ -642,19 +642,19 @@ async function main(argv) {
     if (help) {
       console.log(`Create or update a coordinator handoff with validated flags.
 
-Usage: node handoff.mjs FILE [RUN OPTIONS] [TASK OPTIONS]
-       bun handoff.mjs FILE [RUN OPTIONS] [TASK OPTIONS]
+Usage: node coordinator.mjs handoff FILE [RUN OPTIONS] [TASK OPTIONS]
+       bun coordinator.mjs handoff FILE [RUN OPTIONS] [TASK OPTIONS]
 
 Create a handoff:
-  node handoff.mjs FILE --project owner/repo --role implementer \\
+  node coordinator.mjs handoff FILE --project owner/repo --role implementer \\
     --run-goal "Implement work for owner/repo"
 
 Add a task:
-  node handoff.mjs FILE --task issue-42 --goal "Fix login" \\
+  node coordinator.mjs handoff FILE --task issue-42 --goal "Fix login" \\
     --status pending --next-action "Write the worker brief"
 
 Update a task:
-  node handoff.mjs FILE --task issue-42 --status running \\
+  node coordinator.mjs handoff FILE --task issue-42 --status running \\
     --worker block:worker-id --next-action "Review the result"
 
 Run options:
@@ -767,8 +767,8 @@ Run with --help for usage.`);
   if (options.help) {
     console.log(`Serve the coordinator task board on 127.0.0.1.
 
-Usage: node serve.mjs [--directory PATH] [--port PORT]
-       bun serve.mjs [--directory PATH] [--port PORT]
+Usage: node coordinator.mjs serve [--directory PATH] [--port PORT]
+       bun coordinator.mjs serve [--directory PATH] [--port PORT]
 
   --directory PATH  State directory (default: ~/.local/state/copilot-coordinator)
   --port PORT       Listening port (default: 8765; 0 chooses an available port)
@@ -1014,8 +1014,8 @@ async function wait(argv) {
     if (values.help) {
       console.log(`Wait for coordinator worker result changes without polling.
 
-Usage: node wait.mjs --cursor FILE RESULT [RESULT ...]
-       bun wait.mjs --cursor FILE RESULT [RESULT ...]
+Usage: node coordinator.mjs wait --cursor FILE RESULT [RESULT ...]
+       bun coordinator.mjs wait --cursor FILE RESULT [RESULT ...]
 
   --cursor FILE  Coordinator-owned snapshot; reuse it when rearming
   -h, --help     Show help

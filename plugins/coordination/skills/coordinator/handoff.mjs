@@ -617,19 +617,19 @@ async function main(argv) {
     if (help) {
       console.log(`Create or update a coordinator handoff with validated flags.
 
-Usage: node handoff.mjs FILE [RUN OPTIONS] [TASK OPTIONS]
-       bun handoff.mjs FILE [RUN OPTIONS] [TASK OPTIONS]
+Usage: node coordinator.mjs handoff FILE [RUN OPTIONS] [TASK OPTIONS]
+       bun coordinator.mjs handoff FILE [RUN OPTIONS] [TASK OPTIONS]
 
 Create a handoff:
-  node handoff.mjs FILE --project owner/repo --role implementer \\
+  node coordinator.mjs handoff FILE --project owner/repo --role implementer \\
     --run-goal "Implement work for owner/repo"
 
 Add a task:
-  node handoff.mjs FILE --task issue-42 --goal "Fix login" \\
+  node coordinator.mjs handoff FILE --task issue-42 --goal "Fix login" \\
     --status pending --next-action "Write the worker brief"
 
 Update a task:
-  node handoff.mjs FILE --task issue-42 --status running \\
+  node coordinator.mjs handoff FILE --task issue-42 --status running \\
     --worker block:worker-id --next-action "Review the result"
 
 Run options:

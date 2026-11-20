@@ -45,7 +45,7 @@
   <body>
     <header>
       <h1 id="goal">Coordinator task board</h1>
-      <p id="transport-note" class="muted">Run <code>node serve.mjs</code> from the coordinator skill directory and open its HTTP URL.</p>
+      <p id="transport-note" class="muted">Run <code>node coordinator.mjs serve</code> from the coordinator skill directory and open its HTTP URL.</p>
       <label for="coordinator">Coordinator</label>
       <div class="controls">
         <select id="coordinator"><option value="">Choose a coordinator...</option></select>
@@ -208,7 +208,7 @@
 
       async function refresh() {
         if (location.protocol === "file:") {
-          showError(new Error("Run node serve.mjs from the coordinator skill directory and open its HTTP URL."));
+          showError(new Error("Run node coordinator.mjs serve from the coordinator skill directory and open its HTTP URL."));
           return;
         }
         if (refreshing) {

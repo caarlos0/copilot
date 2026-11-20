@@ -106,8 +106,8 @@ async function wait(argv: string[]) {
     if (values.help) {
       console.log(`Wait for coordinator worker result changes without polling.
 
-Usage: node wait.mjs --cursor FILE RESULT [RESULT ...]
-       bun wait.mjs --cursor FILE RESULT [RESULT ...]
+Usage: node coordinator.mjs wait --cursor FILE RESULT [RESULT ...]
+       bun coordinator.mjs wait --cursor FILE RESULT [RESULT ...]
 
   --cursor FILE  Coordinator-owned snapshot; reuse it when rearming
   -h, --help     Show help

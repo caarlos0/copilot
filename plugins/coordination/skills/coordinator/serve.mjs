@@ -40,8 +40,8 @@ Run with --help for usage.`);
   if (options.help) {
     console.log(`Serve the coordinator task board on 127.0.0.1.
 
-Usage: node serve.mjs [--directory PATH] [--port PORT]
-       bun serve.mjs [--directory PATH] [--port PORT]
+Usage: node coordinator.mjs serve [--directory PATH] [--port PORT]
+       bun coordinator.mjs serve [--directory PATH] [--port PORT]
 
   --directory PATH  State directory (default: ~/.local/state/copilot-coordinator)
   --port PORT       Listening port (default: 8765; 0 chooses an available port)
