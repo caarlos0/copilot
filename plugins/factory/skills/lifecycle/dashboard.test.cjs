@@ -223,7 +223,9 @@ test("moving back persists the comment, keeps worker context, and rejects a stal
   });
   assert.equal(task.feedback.acknowledged_id, null);
   assert.deepEqual(JSON.parse(await readFile(join(directory, factoryFile), "utf8")), data);
-  assert.deepEqual(await (await get(url, `/api/factory?file=${factoryFile}`)).json(), { ...data, attention: [], proposals: [] });
+  const { usage, ...served } = await (await get(url, `/api/factory?file=${factoryFile}`)).json();
+  assert.deepEqual(served, { ...data, attention: [], proposals: [] });
+  assert.deepEqual(Object.keys(usage).sort(), data.tasks.map((item) => item.id).sort());
   const stale = await move(url, unblocked);
   assert.equal(stale.status, 409);
   assert.match((await stale.json()).error, /changed since it was read/);
@@ -532,8 +534,8 @@ test("the page script parses, never renders data as HTML, and finds its elements
 });
 
 // Model only the DOM operations used by the task list; HTTP and the page script are real.
-async function dashboard(t, { reducedMotion = true, confirm = () => true, now = Date.now(), fetchRequest, phoneWidth = 0 } = {}) {
-  const { url, directory } = await server(t);
+async function dashboard(t, { reducedMotion = true, confirm = () => true, now = Date.now(), fetchRequest, phoneWidth = 0, env } = {}) {
+  const { url, directory } = await server(t, env);
   const elements = new Map();
   const document = {
     getElementById: (id) => elements.get(id),
@@ -2819,4 +2821,34 @@ test("copy buttons fall back to the selection when the clipboard API is missing"
   ui.document.execCommand = () => false;
   await button.fire("click");
   assert.equal(button["aria-label"], "Copy failed");
+});
+
+test("task details show elapsed time and per role usage from the session logs, n/a when missing", async (t) => {
+  const state = await mkdtemp(join(tmpdir(), "factory-dashboard-sessions-"));
+  t.after(() => rm(state, { recursive: true, force: true }));
+  const line = (minute, type, data) => JSON.stringify({ type, timestamp: new Date(Date.UTC(2026, 4, 1, 10, minute)).toISOString(), data });
+  const log = async (id, lines) => {
+    await mkdir(join(state, id));
+    await writeFile(join(state, id, "events.jsonl"), `${lines.join("\n")}\n`);
+  };
+  await log("11111111-1111-4111-8111-111111111111", [
+    line(0, "session.start", {}),
+    line(1, "session.usage_record", { usage: { model: "m1 <b>", inputTokens: 1500, outputTokens: 20, copilotUsage: { totalNanoAiu: 2_500_000_000 } } }),
+    line(5, "assistant.turn_end", {}),
+  ]);
+  const ui = await dashboard(t, { now: Date.parse("2026-05-01T12:05:00Z"), env: { FACTORY_SESSION_STATE: state } });
+
+  const payload = await (await get(await ui.run("location.origin + '/'"), `/api/factory?file=${factoryFile}`)).json();
+  assert.deepEqual(payload.usage["issue-9"].workers.investigation, {
+    models: ["m1 <b>"], credits: 2.5, input_tokens: 1500, output_tokens: 20, active_minutes: 5,
+  });
+  assert.equal(payload.usage["issue-9"].workers.implementation, null, "A session with no log is null.");
+
+  ui.run("choose('implementation')");
+  const text = ui.get("task-list").children[0].querySelector("details").textContent;
+  assert.match(text, /Usage/);
+  assert.match(text, /Elapsed: 2h 5m/);
+  assert.match(text, /investigation: m1 <b>; 2\.5 credits; active 5m/);
+  assert.match(text, /implementation: n\/a/);
+  assert.match(text, /Total: m1 <b>; 2\.5 credits; active 5m/);
 });

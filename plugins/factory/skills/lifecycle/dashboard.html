@@ -1725,6 +1725,39 @@
         return block;
       }
 
+      function tokenLabel(count) {
+        if (count < 1000) return String(count);
+        return count < 1e6 ? `${(count / 1e3).toFixed(1)}k` : `${(count / 1e6).toFixed(1)}M`;
+      }
+
+      // Credits when the log has them, else tokens; all values come from the server as numbers and model names.
+      function usageText(item) {
+        if (!item) return "n/a";
+        const cost = item.credits === null
+          ? `${tokenLabel(item.input_tokens)} in / ${tokenLabel(item.output_tokens)} out tokens`
+          : `${item.credits} credits`;
+        return `${item.models.length ? item.models.join(", ") : "no model"}; ${cost}; active ${span(Math.round(item.active_minutes * 60))}`;
+      }
+
+      function usageBlock(task) {
+        const usage = snapshot.usage?.[task.id];
+        if (!usage) return null;
+        const block = element("div", null, "usage");
+        const elapsed = element("p", "Elapsed: ");
+        elapsed.append(usage.ended_at
+          ? span(Math.max(0, Math.floor((Date.parse(usage.ended_at) - Date.parse(usage.started_at)) / 1000)))
+          : elapsedLabel(usage.started_at));
+        block.append(element("h4", "Usage"), elapsed);
+        const roles = Object.entries(usage.workers);
+        if (roles.length) {
+          const list = element("ul", null, "workers");
+          for (const [role, item] of roles) list.append(element("li", `${role}: ${usageText(item)}`));
+          block.append(list);
+        }
+        if (roles.length > 1) block.append(element("p", `Total: ${usageText(usage.total)}`));
+        return block;
+      }
+
       function taskRow(task, expanded) {
         const node = element("li", null, "task-row");
         node.dataset.taskId = task.id;
@@ -1787,6 +1820,8 @@
         const identity = element("p", null, "muted");
         identity.append(element("code", snapshot.project), " / ", element("code", task.id));
         more.append(element("summary", "Task details"), identity);
+        const usageSection = usageBlock(task);
+        if (usageSection) more.append(usageSection);
         if (task.pr && task.state !== "resolved") {
           const merge = element("p");
           if (task.merge) {
@@ -1875,7 +1910,7 @@
           : byClass ? `Blocked: ${classTitles[byClass]}` : places[state].title;
         title.append(element("span", String(tasks.length), "counter"));
         const signature = JSON.stringify([selection, state, outcome, byClass,
-          tasks.map((task) => [task.id, task.revision, task.updated_at, task.history.length])]);
+          tasks.map((task) => [task.id, task.revision, task.updated_at, task.history.length, snapshot.usage?.[task.id]])]);
         if (list.dataset.signature !== signature) {
           const rows = tasks.map((task) => taskRow(task, expanded));
           if (!reduced && sameList) {
@@ -2305,6 +2340,7 @@
           ...data,
           attention: data.attention ?? snapshot?.attention ?? [],
           proposals: data.proposals ?? snapshot?.proposals ?? [],
+          usage: data.usage ?? snapshot?.usage ?? {},
         };
         lastSource = file;
         document.getElementById("error").hidden = true;

@@ -274,6 +274,18 @@ a card summary open one popup with the result file, pretty-printed and highlight
 `/api/artifact`, so the server's access checks apply. The link keeps its `href`, so
 a modified click or "Open raw" still opens the raw file in a new tab.
 
+The "Task details" section of a task card has a "Usage" block: elapsed time (first history
+entry to `resolved`, or live while open) and, per worker role plus a task total, models, credits
+and active time (first to last session event). `usage.mjs` computes it on the server for
+`/api/factory` (`usage`, keyed by task ID, in the ETag). It reads only
+`$FACTORY_SESSION_STATE` (default `~/.copilot/session-state`) logs of the session IDs in the
+factory file, through `session-metrics.mjs` `measureFile` (streamed, no log over 512 MiB), and
+caches by file mtime and size, with no reread of a changing log within 30 seconds. Credits are
+`totalNanoAiu` of the `session.usage_record` events divided by 1e9 (assumed to be AI credits); a
+log without them shows tokens instead, and a task total shows credits only when every session has
+them. A missing or unreadable session is `null`, shown as "n/a". Only numbers and model names
+leave the module.
+
 The dashboard sorts and groups factories in the sidebar with `compareFactories`
 and `factorySection` in `factory-data.mjs`. `paused`, `blocked`, and `finished`
 show in the Find work panel note ("Scheduled rules do not run while the factory

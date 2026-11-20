@@ -27,7 +27,7 @@ const events = [
   ...bash(3, "e", "node /skills/lifecycle/pr-watch.mjs 5 --merge"),
   event(3, "tool.execution_start", { toolCallId: "d", toolName: "ask_user", arguments: { message: "SECRET-QUESTION" } }),
   event(3, "tool.execution_complete", { toolCallId: "d", success: true }),
-  event(4, "session.usage_record", { usage: { model: "m1", cost: 1, inputTokens: 100, outputTokens: 10, cacheReadTokens: 50, duration: 2000 } }),
+  event(4, "session.usage_record", { usage: { model: "m1", cost: 1, inputTokens: 100, outputTokens: 10, cacheReadTokens: 50, duration: 2000, copilotUsage: { totalNanoAiu: 1500000000 } } }),
   event(5, "assistant.turn_end"),
   event(1205, "user.message", { content: "SECRET-PROMPT" }),
   event(1206, "assistant.turn_start"),
@@ -72,13 +72,13 @@ test("measures waits, commands, tools, and usage without exposing content", asyn
     idle: { minutes: 21, over_10_minutes: 1, longest_minutes: 20 },
     tools: { bash: { calls: 4, failures: 1 }, ask_user: { calls: 1, failures: 0 } },
     commands: { sleep: 1, gh_wait: 2, watch: 1, status_reads: 1 },
-    usage: { cost: 3, input_tokens: 300, output_tokens: 30, cache_read_tokens: 50, model_seconds: 5, models: ["m1", "m2"] },
+    usage: { cost: 3, nano_aiu: 1500000000, input_tokens: 300, output_tokens: 30, cache_read_tokens: 50, model_seconds: 5, models: ["m1", "m2"] },
   });
   assert.deepEqual(report.totals, {
     sessions: 1, wall_minutes: 21.25, user_messages: 2, turns: 3,
     idle_minutes: 21, idle_over_10_minutes: 1, ask_user_calls: 1,
     commands: { sleep: 1, gh_wait: 2, watch: 1, status_reads: 1 },
-    usage: { cost: 3, input_tokens: 300, output_tokens: 30, cache_read_tokens: 50, model_seconds: 5 },
+    usage: { cost: 3, nano_aiu: 1500000000, input_tokens: 300, output_tokens: 30, cache_read_tokens: 50, model_seconds: 5 },
   });
 });
 

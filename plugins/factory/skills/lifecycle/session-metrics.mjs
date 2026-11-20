@@ -22,7 +22,7 @@ async function measure(lines, from = null) {
   const tools = {};
   const calls = new Map();
   const commands = { sleep: 0, gh_wait: 0, watch: 0, status_reads: 0 };
-  const usage = { cost: 0, input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, model_seconds: 0 };
+  const usage = { cost: 0, nano_aiu: 0, input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, model_seconds: 0 };
   const models = new Set();
   const idle = { ms: 0, over_10_minutes: 0, longest: 0 };
   let userMessages = 0;
@@ -84,6 +84,7 @@ async function measure(lines, from = null) {
     } else if (event.type === "session.usage_record" && data.usage) {
       const item = data.usage;
       usage.cost += item.cost ?? 0;
+      usage.nano_aiu += item.copilotUsage?.totalNanoAiu ?? 0;
       usage.input_tokens += item.inputTokens ?? 0;
       usage.output_tokens += item.outputTokens ?? 0;
       usage.cache_read_tokens += item.cacheReadTokens ?? 0;
@@ -114,7 +115,7 @@ function sum(sessions) {
     idle_minutes: 0, idle_over_10_minutes: 0,
     ask_user_calls: 0,
     commands: { sleep: 0, gh_wait: 0, watch: 0, status_reads: 0 },
-    usage: { cost: 0, input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, model_seconds: 0 },
+    usage: { cost: 0, nano_aiu: 0, input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, model_seconds: 0 },
   };
   for (const item of sessions) {
     total.wall_minutes += item.wall_minutes;
@@ -130,14 +131,18 @@ function sum(sessions) {
   return total;
 }
 
+export async function measureFile(file, from = null) {
+  const input = createReadStream(file, "utf8");
+  return measure(createInterface({ input, crlfDelay: Infinity }), from);
+}
+
 export async function report(entries, directory, activeSince = null) {
   const from = activeSince === null ? null : Date.parse(activeSince);
   const sessions = [];
   const missing = [];
   for (const entry of entries) {
-    const input = createReadStream(join(directory, entry.id, "events.jsonl"), "utf8");
     try {
-      const metrics = await measure(createInterface({ input, crlfDelay: Infinity }), from);
+      const metrics = await measureFile(join(directory, entry.id, "events.jsonl"), from);
       if (from !== null && metrics.events === 0) continue;
       sessions.push({ id: entry.id, role: entry.role, task: entry.task, rule: entry.rule, ...metrics });
     } catch (error) {
