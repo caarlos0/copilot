@@ -871,7 +871,8 @@ nothing appended) unless that file parses and its `task`, `role` and `outcome` m
 event. For a `complete` implementation result with `data.head`, it also refuses unless the
 task's worktree (`worktree.path`) is at that head with no uncommitted changes (`git status
 --porcelain` is empty; commit, then emit again) and, for a task without a PR, the head
-descends from `main`; run `git rebase main` and emit again. A task with a PR skips that
+descends from the default branch (`origin/HEAD`, else a local `main` or `master`);
+run `git rebase main` (or the default branch) and emit again. A task with a PR skips that
 descent check (GitHub mergeability and the PR checks gate it; merge main in, never rebase).
 A task with no worktree record skips the head check.
 Add `head`, `feedback_id`, and a short `summary` when known. Keep long

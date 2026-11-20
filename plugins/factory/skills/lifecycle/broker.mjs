@@ -11,7 +11,6 @@ const maxTimer = 2 ** 31 - 1;
 const maxLine = 64 * 1024;
 const reconcileEvery = "5m";
 const reconcileMs = 5 * 60_000;
-const defaultBranch = "main";
 const workerOutcomes = ["working", "waiting", "complete", "blocked"];
 const attentionKinds = ["permission", "sandbox-bypass", "ask-user", "other"];
 const maxAttentionText = 2000;
@@ -159,6 +158,23 @@ async function checkResult(factory, { type, task, data }) {
   }
 }
 
+// Same order as worktree.mjs: origin/HEAD, then a local main or master; main when none exists.
+function defaultBranch(cwd) {
+  let head = "";
+  try {
+    head = git(cwd, "symbolic-ref", "--short", "refs/remotes/origin/HEAD").replace(/^origin\//, "");
+  } catch {}
+  const exists = (branch) => {
+    try {
+      git(cwd, "show-ref", "--verify", "--quiet", `refs/heads/${branch}`);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  return [head, "main", "master"].find((branch) => branch && exists(branch)) ?? "main";
+}
+
 // A task without a worktree record has no branch to check. A task with a PR merges the default
 // branch in (never rebases), so only a local-landing task must descend from it.
 async function checkHead(factory, task, head) {
@@ -169,11 +185,12 @@ async function checkHead(factory, task, head) {
   if (at !== head) throw new Error(`The worktree ${worktree.path} is at ${at}, not at head ${head}. Commit, then report the real head.`);
   if (git(worktree.path, "status", "--porcelain")) throw new Error(`The worktree ${worktree.path} has uncommitted changes; commit, then emit again.`);
   if (record.pr) return;
+  const base = defaultBranch(worktree.path);
   try {
-    git(worktree.path, "merge-base", "--is-ancestor", defaultBranch, head);
+    git(worktree.path, "merge-base", "--is-ancestor", base, head);
   } catch (error) {
     if (error.status !== 1) throw error;
-    throw new Error(`Head ${head} does not descend from ${defaultBranch}. Run git rebase ${defaultBranch}, then emit again.`);
+    throw new Error(`Head ${head} does not descend from ${base}. Run git rebase ${base}, then emit again.`);
   }
 }
 

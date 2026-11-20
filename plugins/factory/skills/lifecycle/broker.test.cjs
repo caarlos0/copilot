@@ -242,6 +242,31 @@ test("a complete implementation result must report the worktree head, rebased on
   assert.equal(emit("0".repeat(40)).status, 0);
 });
 
+test("the head check uses the repository default branch when it is master", async (t) => {
+  const f = await fixture(t);
+  const git = (cwd, ...args) => {
+    const out = spawnSync("git", ["-C", cwd, "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", ...args], { encoding: "utf8", env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" } });
+    assert.equal(out.status, 0, out.stderr);
+    return out.stdout.trim();
+  };
+  const repo = join(f.directory, "repo");
+  const tree = join(f.directory, "tree");
+  git(f.directory, "init", "-b", "master", repo);
+  git(repo, "commit", "--allow-empty", "-m", "base");
+  git(repo, "worktree", "add", "-b", "task", tree);
+  git(tree, "commit", "--allow-empty", "-m", "work");
+  const head = git(tree, "rev-parse", "HEAD");
+  writeFileSync(f.factory, JSON.stringify({ tasks: [{ id: "t1", pr: null, worktree: { path: tree, created_by_run: true } }] }));
+  const data = JSON.stringify(withResult(f.directory, "t1", { role: "implementation", outcome: "complete", head }));
+  const emit = () => f.run("emit", f.factory, "worker.result", "--task", "t1", "--data", data);
+  assert.equal(emit().status, 0);
+
+  git(repo, "commit", "--allow-empty", "-m", "master moves");
+  const behind = emit();
+  assert.equal(behind.status, 1);
+  assert.match(behind.stderr, /does not descend from master/);
+});
+
 test("a complete implementation result is refused while the worktree has uncommitted changes", async (t) => {
   const f = await fixture(t);
   const git = (cwd, ...args) => {

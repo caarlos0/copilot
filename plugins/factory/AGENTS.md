@@ -42,7 +42,7 @@ red, it never runs `git reset` (a reset drops other landed commits); it sends
 the worker a follow-up or creates a fix or revert task. A task with a PR follows the root rule: the worker brings
 the default branch in with `git merge`, never rebases, and never force-pushes,
 because a rebase breaks reviewers and stacked PRs. GitHub mergeability and the
-PR checks gate it, so `emit` does not check that its head descends from `main`.
+PR checks gate it, so `emit` does not check that its head descends from the default branch.
 
 Standing worker rules: never use `git stash`, because the stash list is shared
 by all worktrees. To compare against the base, use a scratch worktree or
@@ -384,7 +384,7 @@ appends and exits 1 with a reason when it refuses: a `worker.result` needs
 `data.result`, a JSON file in the state directory whose `task`, `role` and
 `outcome` match the event, and a `complete` implementation result with `data.head`
 needs the task's worktree at that head with no uncommitted changes, and, for a task without a PR, descended
-from `main`. After a PR merge, the
+from the default branch (`origin/HEAD`, else a local `main` or `master`). After a PR merge, the
 implementation worker also emits `pr.merged`, a hint: the factory verifies the
 merge on GitHub, resolves the task, and releases its panes and worktree, and
 `reconcile.mjs` stays the backstop for a missed event, and while the run is
