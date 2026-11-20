@@ -1,0 +1,117 @@
+export const statuses = ["pending", "running", "verifying", "blocked", "done"] as const;
+const runStatuses = ["active", "paused", "blocked", "finished"] as const;
+
+export type Status = (typeof statuses)[number];
+export type RunStatus = (typeof runStatuses)[number];
+
+export type Task = {
+  id: string;
+  goal: string;
+  next_action: string;
+  status: Status;
+  updated_at: string;
+  repository?: string | null;
+  worker?: string | null;
+  blocker?: string | null;
+  brief?: string | null;
+  result?: string | null;
+  pr?: string | null;
+  links?: string[] | null;
+  details?: Record<string, unknown>;
+};
+
+export type Handoff = {
+  id: string;
+  project?: string | null;
+  role?: string | null;
+  goal: string;
+  status: RunStatus;
+  updated_at: string;
+  tasks: Task[];
+};
+
+function text(value: unknown, field: string): asserts value is string {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error(`${field} must be a non-empty string.`);
+  }
+}
+
+function timestamp(value: unknown, field: string) {
+  text(value, field);
+  if (!/(Z|[+-]\d{2}:\d{2})$/.test(value) || !Number.isFinite(Date.parse(value))) {
+    throw new Error(`${field} must be a timestamp with a timezone.`);
+  }
+}
+
+export function artifactName(value: unknown, field = "artifact") {
+  text(value, field);
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(value)) {
+    throw new Error(`${field} must be a filename in the state directory.`);
+  }
+  return value;
+}
+
+export function githubURL(value: unknown, field = "link") {
+  text(value, field);
+  const url = new URL(value);
+  if (url.origin !== "https://github.com" || url.username || url.password ||
+      !/^\/[^/]+\/[^/]+\/(issues|pull)\/\d+$/.test(url.pathname)) {
+    throw new Error(`${field} must be an HTTPS GitHub issue or pull request URL.`);
+  }
+  return url;
+}
+
+export function prURL(value: unknown) {
+  const url = githubURL(value, "pr");
+  if (url.pathname.split("/")[3] !== "pull") {
+    throw new Error("pr must be an HTTPS GitHub pull request URL.");
+  }
+  return url.href;
+}
+
+export function validate(data: any): asserts data is Handoff {
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    throw new Error("Handoff must be a JSON object.");
+  }
+  text(data.id, "id");
+  if (data.project != null) text(data.project, "project");
+  if (data.role != null) text(data.role, "role");
+  text(data.goal, "goal");
+  timestamp(data.updated_at, "updated_at");
+  if (!runStatuses.includes(data.status) || !Array.isArray(data.tasks)) {
+    throw new Error("Handoff needs a valid run status and a tasks array.");
+  }
+  const ids = new Set<string>();
+  for (const task of data.tasks) {
+    if (!task || typeof task !== "object" || Array.isArray(task)) {
+      throw new Error("Each task must be a JSON object.");
+    }
+    for (const field of ["id", "goal", "next_action"]) {
+      text(task[field], `task.${field}`);
+    }
+    if (task.repository != null) text(task.repository, "task.repository");
+    if (data.project == null && task.repository == null) {
+      throw new Error(`Task ${task.id} needs a repository or a handoff project.`);
+    }
+    timestamp(task.updated_at, "task.updated_at");
+    if (!statuses.includes(task.status)) {
+      throw new Error(`Unknown status for task ${task.id}: ${task.status}`);
+    }
+    if (ids.has(task.id)) throw new Error(`Duplicate task ID: ${task.id}`);
+    ids.add(task.id);
+    for (const field of ["worker", "blocker"]) {
+      if (task[field] != null) text(task[field], `task.${field}`);
+    }
+    if (task.blocker != null && task.status !== "blocked") {
+      throw new Error(`Task ${task.id}: blocker is allowed only when status is blocked; clear it with --blocker null.`);
+    }
+    for (const field of ["brief", "result"]) {
+      if (task[field] != null) artifactName(task[field], `task.${field}`);
+    }
+    if (task.pr != null) prURL(task.pr);
+    if (task.links != null) {
+      if (!Array.isArray(task.links)) throw new Error("task.links must be an array.");
+      for (const value of task.links) githubURL(value, "task.links[]");
+    }
+  }
+}

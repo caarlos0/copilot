@@ -48,6 +48,19 @@ after verified results. Blocked retained panes stay open. Waiting does not
 grant merge authority. Worktree removal is separate and preserves reused
 worktrees and unfinished work.
 
+## Generated modules
+
+`board-data`, `handoff`, `wait` and `serve` in `skills/coordinator/` are
+TypeScript, checked with `strict` on. Edit the `.ts`, run `bun run build` at the
+repository root, and commit the `.ts` and the generated `.mjs` together. Each
+bundle sits at the path of its source, so `node wait.mjs` and the other commands
+need no Bun and no `node_modules`. `serve` reads `import.meta.url` to find
+`board.html` and `board-data.mjs` beside it; both stay valid for that reason.
+`board-data.mjs` is served to the browser, so it must not import `node:` modules.
+The build fails when a coordination module imports a file outside this plugin,
+so it stays independent of the factory plugin. Share types between modules with
+`import type` from the `.ts` file, and values with a `.mjs` import.
+
 ## Validation
 
 Run from the repository root:

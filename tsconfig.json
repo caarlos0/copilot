@@ -11,6 +11,6 @@
     "skipLibCheck": true,
     "types": ["node", "bun"]
   },
-  "include": ["plugins/**/*.mjs", "plugins/**/*.ts", "scripts/**/*.ts"],
+  "include": ["plugins/**/*.mjs", "plugins/**/*.ts", "scripts/**/*.ts", "bench/**/*.ts", "bench/**/*.mjs"],
   "exclude": ["node_modules"]
 }

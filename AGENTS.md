@@ -16,9 +16,11 @@ structure or workflows change.
   `<plugin>/v<version>` tag, and pushes both atomically.
 - `plugins/<plugin>/agents/*.agent.md` defines agent roles and model choices.
   Keep roles distinct and put reusable procedures in skills.
-- `bench/model-benchmark/` is a dependency-free Node harness that compares
+- `bench/model-benchmark/` is a dependency-free Node harness (TypeScript,
+  bundled in place to `.mjs` like the plugins) that compares
   models on history-based tasks and reports cost per passing run. It is not
-  shipped in any plugin. Its README has the commands. `node --test` covers it
+  shipped in any plugin, so its build boundary is the repository, not a plugin.
+  Its README has the commands. `node --test` covers it
   with synthetic repositories, so tests never call `copilot`.
 - `plugins/<plugin>/skills/<name>/SKILL.md` contains reusable procedures.
   Keep supporting scripts, references, and assets beside the skill.
@@ -57,7 +59,12 @@ A `.mjs` with a same-named `.ts` beside it is a generated bundle. Edit the
 edit the `.mjs`. CI runs `bun run build && git diff --exit-code`. Sibling
 `.mjs` imports stay external, and tests keep running the `.mjs` paths. A
 bundle must not read files beside itself through `import.meta.url` or
-`__dirname`; check this before you port a module.
+`__dirname`; check this before you port a module. The build fails when a
+plugin module imports a file outside its own plugin directory. A relative
+`import type` from a sibling `.ts` is erased, so the build cannot see it; keep
+those inside the plugin too. Use the same Bun minor as CI: output differs
+between Bun releases (local variable names), so a stale Bun leaves a diff in
+unrelated bundles.
 
 ## Plugin instructions
 
