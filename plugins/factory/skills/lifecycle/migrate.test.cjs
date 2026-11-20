@@ -68,7 +68,15 @@ test("maps, joins, renames, and attaches reviews from the legacy handoffs", asyn
   assert.equal(joined.issue, "https://github.com/owner/repo/issues/1");
   assert.equal(joined.pr, pull(10));
   assert.equal(joined.details.legacy_merged.length, 1);
-  assert.equal(joined.details.legacy_merged[0].task.id, "issue-1");
+  assert.deepEqual(joined.details.legacy_merged[0], {
+    role: "implementer", file: join(f.directory, "owner.repo-implementer.json"), status: "running", task_id: "issue-1",
+  });
+  assert.deepEqual(joined.details.legacy, {
+    role: "coordinator", file: join(f.directory, "owner.repo-coordinator.json"), status: "running", task_id: "fix-login",
+  });
+  assert.deepEqual(joined.details.legacy_reviewer, {
+    role: "reviewer", file: join(f.directory, "owner.repo-reviewer.json"), status: "running", task_id: "pr-10",
+  });
   assert.equal(joined.reviewed_head, sha);
   assert.equal(joined.workers.review.result, "review-10-result.json");
   assert.equal(joined.workers.implementation.pane, "p1");
@@ -86,6 +94,37 @@ test("maps, joins, renames, and attaches reviews from the legacy handoffs", asyn
   assert.equal(byId["task-a"].title, "Goal of task-a");
   assert.equal(byId["coordinator-task-a"].title, "A different job");
   assert.deepEqual(summary.renamed, [{ from: "task-a", to: "coordinator-task-a", role: "coordinator" }]);
+});
+
+test("keeps a reference to the old task, not a copy, and still reads its fields", async (t) => {
+  const f = await fixture(t);
+  const big = "x".repeat(100_000);
+  await writeFile(join(f.directory, "owner.repo-implementer.json"), JSON.stringify(handoff("implementer", [
+    old("issue-7", "running", {
+      pr: pull(7),
+      brief: "b.md",
+      result: "r.json",
+      details: {
+        ref: "owner/repo#7", pane_id: "p7", window_id: "w7", session_id: "s7", session_title: "Title",
+        worktree_path: "/w/7", worktree_created_by_run: true, log: big,
+      },
+    }),
+  ])));
+  await rm(join(f.directory, "owner.repo-coordinator.json"));
+  await rm(join(f.directory, "owner.repo-reviewer.json"));
+
+  const result = f.run();
+  assert.equal(result.status, 0, result.stderr);
+  const raw = await readFile(join(f.directory, "owner.repo-factory.json"), "utf8");
+  assert.ok(raw.length < 10_000, `factory file is ${raw.length} bytes`);
+  const [task] = JSON.parse(raw).tasks;
+  assert.deepEqual(Object.keys(task.details.legacy).sort(), ["file", "role", "status", "task_id"]);
+  assert.equal(task.issue, "https://github.com/owner/repo/issues/7");
+  assert.equal(task.pr, pull(7));
+  assert.deepEqual(task.workers.implementation, {
+    status: "unknown", mode: "continuous", session: "s7", pane: "p7", window: "w7", name: "Title", brief: "b.md", result: "r.json",
+  });
+  assert.deepEqual(task.worktree, { path: "/w/7", created_by_run: true });
 });
 
 test("joins every matching task when a record bridges an issue and a PR", async (t) => {
@@ -111,7 +150,7 @@ test("joins every matching task when a record bridges an issue and a PR", async 
   assert.equal(joined.issue, "https://github.com/owner/repo/issues/42");
   assert.equal(joined.pr, pull(99));
   assert.deepEqual(
-    [joined.details.legacy, ...joined.details.legacy_merged].map((legacy) => legacy.task.id).sort(),
+    [joined.details.legacy, ...joined.details.legacy_merged].map((legacy) => legacy.task_id).sort(),
     ["issue-42", "linked-work", "pr-work"],
   );
 });

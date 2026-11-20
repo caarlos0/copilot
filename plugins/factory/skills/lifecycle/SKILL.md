@@ -1448,7 +1448,12 @@ What `migrate.mjs` does:
   from legacy status names alone.
 - Joins tasks that share a PR or issue, keeps the newest, and saves the others
   under `details.legacy_merged`. It never joins by task ID alone. A colliding
-  ID gets a role prefix. It keeps the original under `details.legacy`.
+  ID gets a role prefix. It keeps a reference to each original under
+  `details.legacy` (`role`, `file`, `status`, `task_id`), not a copy, so the
+  factory file stays small. The full task stays in the handoff file (under
+  `archive/` after `--archive`). An attached review does the same under
+  `details.legacy_reviewer`. Files migrated earlier, with the full `task`
+  embedded, stay valid.
 - Reads the issue from `details.ref`, an `issue-N` ID, or a single issue link.
 - Builds workers from pane, window, session, worktree, brief, and result data
   with status `unknown`. It attaches reviews from the reviewer handoff by

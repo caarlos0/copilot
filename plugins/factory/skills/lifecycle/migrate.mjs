@@ -63,6 +63,9 @@ function issueURLOf(old, details, links, project) {
   return guesses[0] ?? (issues.length === 1 ? issues[0] : null);
 }
 
+// A reference to the old task, not a copy: the handoff file keeps the original.
+const legacyRef = (role, file, old) => ({ role, file, status: old.status, task_id: old.id });
+
 function mapTask(role, file, old, project) {
   const pr = validPR(old.pr);
   const links = [...new Set([...(old.links ?? []), ...(old.pr ? [old.pr] : [])].map(validLink).filter(Boolean))];
@@ -122,7 +125,7 @@ function mapTask(role, file, old, project) {
       ? { path: worktreePath, created_by_run: details.worktree_created_by_run === true }
       : null,
     history: [{ state, at: old.updated_at, note: `Migrated from the legacy ${role} handoff (status ${old.status}).` }],
-    details: { legacy: { role, file, status: old.status, task: old } },
+    details: { legacy: legacyRef(role, file, old) },
   };
 }
 
@@ -202,7 +205,12 @@ function build(project, key, loaded, reviewers) {
       brief: text(match.old.brief),
       result: text(match.old.result),
     };
-    task.details.legacy_reviewer = { file: match.file, status: match.old.status, task: match.old };
+    task.details.legacy_reviewer = {
+      role: "reviewer",
+      file: match.file,
+      status: match.old.status,
+      task_id: match.old.id,
+    };
     report.reviewer_attached += 1;
   }
   report.reviewer_skipped = [...byPR.keys()].filter((pr) => !matched.has(pr)).length;
@@ -255,8 +263,9 @@ PR; its other tasks (other authors' PRs) are not imported and stay with coordina
 Mapping: done becomes resolved (completed); blocked stays blocked; a task with both a PR and
 an issue enters implementation; every other open task enters initial for reconciliation.
 Tasks that share a PR or issue are merged (the newest is kept, the others are saved under
-details.legacy_merged). A repeated ID with different work gets a role prefix. Every original
-task is kept under details.legacy.
+details.legacy_merged). A repeated ID with different work gets a role prefix. Each original
+task is referenced under details.legacy as {role, file, status, task_id}; the handoff file
+keeps the full task, so keep or archive it.
 
 The command never changes a source unless --archive is given, then it moves the implementer and
 coordinator handoffs to archive/<date>-factory-migration/ after checking they did not change.
