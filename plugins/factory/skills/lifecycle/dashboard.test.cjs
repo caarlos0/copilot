@@ -1129,6 +1129,37 @@ test("a row shows one chip when a link repeats the issue with another owner/repo
   assert.deepEqual(row.querySelector(".links").children.map((node) => node.textContent), ["1009", "24065", "508", "44083"]);
 });
 
+test("a GHSA ID and an advisory URL each become one link to the canonical advisory", async (t) => {
+  const ui = await dashboard(t);
+  const anchors = (text) => JSON.parse(ui.run(`JSON.stringify(codeParts(${JSON.stringify(text)}).filter((part) => typeof part !== "string")
+    .map((part) => ({ text: part.textContent, href: part.href, target: part.target })))`));
+  const canonical = "https://github.com/advisories/GHSA-cfgh-2345-vwxc";
+  assert.deepEqual(anchors("Fixes ghsa-CFGH-2345-vwxc."), [{ text: "ghsa-CFGH-2345-vwxc", href: canonical, target: "_blank" }]);
+  const url = "https://github.com/owner/repo/security/advisories/GHSA-CFGH-2345-VWXC";
+  assert.deepEqual(anchors(`See ${url}.`), [{ text: url, href: canonical, target: "_blank" }]);
+  assert.deepEqual(anchors("GHSA-cfgh-2345-vwxcc GHSA-cfgh-2345-vwx GHSA-abcd-2345-vwxc"), []);
+});
+
+test("a row lists one canonical advisory chip for an ID form, a repo URL and an advisories URL", async (t) => {
+  const ui = await dashboard(t);
+  const canonical = "https://github.com/advisories/GHSA-cfgh-2345-vwxc";
+  const task = {
+    ...example.tasks[0],
+    issue: "https://github.com/owner/repo/issues/9",
+    pr: null,
+    links: [
+      "https://github.com/owner/repo/security/advisories/GHSA-CFGH-2345-VWXC",
+      "https://github.com/advisories/ghsa-cfgh-2345-vwxc?x=1",
+      "https://github.com/owner/repo/pull/4",
+    ],
+  };
+  const row = ui.run(`taskRow(${JSON.stringify(task)}, new Set())`);
+  const links = row.querySelector(".links").children;
+  assert.deepEqual(links.map((node) => node.href), ["https://github.com/owner/repo/issues/9", "https://github.com/owner/repo/pull/4", canonical]);
+  assert.equal(links[2].textContent, "GHSA-cfgh-2345-vwxc");
+  assert.equal(links[2].children[0]["aria-label"], "Security advisory");
+});
+
 test("a row without references has no links line", async (t) => {
   const ui = await dashboard(t);
   const task = { ...example.tasks[0], issue: null, pr: null, links: [] };

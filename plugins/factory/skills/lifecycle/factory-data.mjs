@@ -69,22 +69,30 @@ export function githubURL(value, field = "link") {
   return url;
 }
 
-// Issues first, then pull requests, each by ascending number. A resource that
-// appears twice (query, fragment or owner/repo case differ) keeps its first URL.
+// A security advisory URL (`/advisories/GHSA-...` or `/OWNER/REPO/security/advisories/GHSA-...`)
+// as its canonical `https://github.com/advisories/GHSA-xxxx-xxxx-xxxx`, else null.
+export function advisoryURL(value) {
+  const match = /^https:\/\/github\.com\/(?:[^/?#]+\/[^/?#]+\/security\/)?advisories\/GHSA((?:-[23456789cfghjmpqrvwx]{4}){3})(?:[?#].*)?$/i.exec(value);
+  return match && `https://github.com/advisories/GHSA${match[1].toLowerCase()}`;
+}
+
+// Issues first, then pull requests, then advisories, each by ascending number or ID. A resource
+// that appears twice (query, fragment or owner/repo case differ) keeps its first URL.
 export function sortReferences(hrefs) {
   const key = (href) => {
+    if (advisoryURL(href)) return [2, 0];
     const [, , , kind, number] = githubURL(href).pathname.split("/");
     return [kind === "issues" ? 0 : 1, Number(number)];
   };
   const seen = new Set();
-  const unique = [...hrefs].filter((href) => {
-    const identity = githubResourceURL(href).toLowerCase();
+  const unique = [...hrefs].map((href) => advisoryURL(href) ?? href).filter((href) => {
+    const identity = advisoryURL(href) ?? githubResourceURL(href).toLowerCase();
     return !seen.has(identity) && seen.add(identity);
   });
   return unique.sort((a, b) => {
     const [kindA, numberA] = key(a);
     const [kindB, numberB] = key(b);
-    return kindA - kindB || numberA - numberB;
+    return kindA - kindB || (kindA === 2 ? a.localeCompare(b) : numberA - numberB);
   });
 }
 
@@ -302,7 +310,7 @@ function validateTask(task, seen) {
   fullSHA(task.head, `${at} head`);
   fullSHA(task.reviewed_head, `${at} reviewed_head`);
   if (!Array.isArray(task.links)) throw new Error(`${at} links must be an array.`);
-  for (const value of task.links) githubURL(value, `${at} links[]`);
+  for (const value of task.links) if (!advisoryURL(value)) githubURL(value, `${at} links[]`);
 
   if (!Array.isArray(task.history) || !task.history.length) {
     throw new Error(`${at} history must be a non-empty array.`);
