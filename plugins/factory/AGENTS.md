@@ -453,7 +453,8 @@ session; skipped when Rex fails or lists nothing), or the item is
 over 24 hours old. `resolveAttention(file, { source })` also records the
 `attention.resolved` event for each session closed by a signal: reconcile
 (source `reconcile`) and the dashboard server (source `attention`, on every
-`/api/factory` read, one scan per file at a time), so an item clears without
+`/api/factory` read, one scan per file at a time; the server reuses a scan while the events
+log and the logs of the waiting sessions keep their size and mtime, for at most 60 seconds), so an item clears without
 waiting for the coordinator to wake. The coordinator never answers an attention
 item, never types into its pane, never wakes on it, and reports `attention-stale`
 once; only the user answers, in the pane or with a click in the dashboard.

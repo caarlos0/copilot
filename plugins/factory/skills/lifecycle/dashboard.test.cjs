@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const { readFileSync } = require("node:fs");
-const { appendFile, chmod, mkdtemp, readFile, readdir, rm, symlink, writeFile } = require("node:fs/promises");
+const { appendFile, chmod, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } = require("node:fs/promises");
 const { spawn, spawnSync } = require("node:child_process");
 const http = require("node:http");
 const { delimiter, join } = require("node:path");
@@ -2400,6 +2400,43 @@ esac
   const resolved = (await readFile(events, "utf8")).trim().split("\n").map((line) => JSON.parse(line))
     .filter(({ type }) => type === "attention.resolved");
   assert.deepEqual(resolved.map(({ source, data }) => [source, data.session, data.reason]), [["attention", "s-gone", "pane-gone"]]);
+});
+
+test("the attention scan is reused until the events log or a waiting session log changes", async (t) => {
+  const bin = await mkdtemp(join(tmpdir(), "factory-dashboard-rex-"));
+  const sessions = await mkdtemp(join(tmpdir(), "factory-dashboard-sessions-"));
+  t.after(() => Promise.all([rm(bin, { recursive: true, force: true }), rm(sessions, { recursive: true, force: true })]));
+  const calls = join(bin, "calls.txt");
+  await writeFile(join(bin, "rex"), `#!/bin/sh
+[ "$1" = "--autostart=false" ] && shift
+echo "$*" >> "${calls}"
+echo block:01a1f4e8-4bb0-72d2-bff2-25420482aad9
+`);
+  await chmod(join(bin, "rex"), 0o755);
+  const { url, directory } = await server(t, { PATH: `${bin}${delimiter}${process.env.PATH}`, FACTORY_SESSION_STATE: sessions });
+  const events = join(directory, "owner.repo-factory-events.jsonl");
+  const at = new Date(Date.now() - 20 * 60_000).toISOString();
+  const line = (event) => `${JSON.stringify(event)}\n`;
+  const request = (id, session) => line({ id, at, type: "attention.requested", task: null, source: "attention",
+    data: { session, kind: "permission", text: "Run command: ls", role: "backlog", pane: "block:01a1f4e8-4bb0-72d2-bff2-25420482aad9" } });
+  await appendFile(events, request("e1", "s1"));
+  await mkdir(join(sessions, "s1"));
+  const sessionLog = join(sessions, "s1", "events.jsonl");
+  await writeFile(sessionLog, "");
+
+  const path = `/api/factory?file=${factoryFile}`;
+  const waiting = async () => (await (await get(url, path)).json()).attention.map((item) => item.id);
+  const scans = async () => (await readFile(calls, "utf8")).trim().split("\n").length;
+  assert.deepEqual(await waiting(), ["e1"]);
+  assert.deepEqual(await waiting(), ["e1"]);
+  assert.equal(await scans(), 1, "Nothing changed, so the second poll reuses the scan.");
+
+  await appendFile(events, request("e2", "s2"));
+  assert.deepEqual(await waiting(), ["e1", "e2"]);
+  assert.equal(await scans(), 2, "A longer events log is scanned again.");
+
+  await appendFile(sessionLog, line({ type: "permission.completed", timestamp: new Date().toISOString() }));
+  assert.deepEqual(await waiting(), ["e2"], "A longer log of a waiting session is scanned again.");
 });
 
 test("answering types the picked option into the pane of a pending ask_user prompt", async (t) => {

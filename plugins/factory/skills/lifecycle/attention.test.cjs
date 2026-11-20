@@ -63,6 +63,41 @@ test("lists a request with no resolved event after it, with the task title", asy
   });
 });
 
+test("task events, blank lines and broken lines between attention events change nothing", async (t) => {
+  const f = await setup(t);
+  const eventsLog = join(f.directory, "owner.repo-factory-events.jsonl");
+  const noise = async () => appendFile(eventsLog, [
+    JSON.stringify({ id: "t", at: requestedAt, type: "task.moved", task: "fix-it", source: "attention", data: { session: "s1" } }),
+    "",
+    '{"type":"attention.requested", broken',
+    "not json",
+  ].join("\n") + "\n");
+  await f.request("s1");
+  await noise();
+  await f.request("s2");
+  await f.log("attention.resolved", { session: "s2" }, after);
+  await noise();
+  await f.request("s3");
+
+  const open = await f.openAttention(f.file, { now, panes: null });
+  assert.deepEqual(open.map((item) => item.session), ["s1", "s3"]);
+});
+
+test("scanStamp changes when the events log or a listed session log grows", async (t) => {
+  const f = await setup(t);
+  const { scanStamp } = await import("./attention.mjs");
+  assert.equal(await scanStamp(f.file, ["s1"]), "none,none");
+  await f.request("s1");
+  const first = await scanStamp(f.file, ["s1"]);
+  assert.equal(await scanStamp(f.file, ["s1"]), first);
+  await f.sessionLog("s1", { type: "permission.completed", timestamp: after });
+  const second = await scanStamp(f.file, ["s1"]);
+  assert.notEqual(second, first);
+  assert.equal(await scanStamp(f.file, ["s1", "../escape"]), second, "A session name that is not a plain name is never read as a path.");
+  await f.request("s2");
+  assert.notEqual(await scanStamp(f.file, ["s1"]), second);
+});
+
 test("an `other` request from an older log is not listed", async (t) => {
   const f = await setup(t);
   await f.request("s1", { kind: "other", text: "Inbox from Copilot Subconscious" });

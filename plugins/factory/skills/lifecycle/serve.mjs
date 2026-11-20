@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { gzipSync } from "node:zlib";
 import { countByState, isObject, validate } from "./factory-data.mjs";
-import { resolveAttention, sendAnswer } from "./attention.mjs";
+import { resolveAttention, scanStamp, sendAnswer } from "./attention.mjs";
 import { ConflictError, update } from "./factory.mjs";
 import { candidates, stateDirectories } from "./state-dir.mjs";
 
@@ -167,13 +167,24 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
     return data;
   }
 
-  // One scan per file at a time, so two polls never record the same resolution twice.
+  // One scan per file at a time, so two polls never record the same resolution twice. A scan is
+  // reused while the events log and the logs of the waiting sessions keep their size and time,
+  // for at most a minute: the pane check and the 24 hour expiry depend on Rex and the clock.
   const scans = new Map();
+  const scanned = new Map();
+  const scanTtlMs = 60_000;
   function pendingAttention(target) {
     if (!scans.has(target)) {
-      scans.set(target, resolveAttention(target, { source: "attention" })
-        .then(({ open }) => open)
-        .finally(() => scans.delete(target)));
+      scans.set(target, (async () => {
+        const last = scanned.get(target);
+        if (last && Date.now() - last.at < scanTtlMs && last.stamp === await scanStamp(target, last.sessions)) {
+          return last.open;
+        }
+        const { open } = await resolveAttention(target, { source: "attention" });
+        const sessions = [...new Set(open.map((item) => item.session))];
+        scanned.set(target, { at: Date.now(), sessions, stamp: await scanStamp(target, sessions), open });
+        return open;
+      })().finally(() => scans.delete(target)));
     }
     return scans.get(target);
   }

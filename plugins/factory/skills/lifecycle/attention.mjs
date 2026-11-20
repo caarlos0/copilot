@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { open, readFile } from "node:fs/promises";
+import { open, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -75,6 +75,22 @@ async function answerTimes(session, since) {
     .filter(Number.isFinite);
 }
 
+// A string that changes when the events log or the log of one of `sessions` changes size or time,
+// so a caller can reuse a scan while it stays the same.
+export async function scanStamp(file, sessions = []) {
+  const paths = [eventsFile(file), ...sessions.filter((session) => /^[\w-]+$/.test(session))
+    .map((session) => join(sessionState(), session, "events.jsonl"))];
+  return (await Promise.all(paths.map(async (path) => {
+    try {
+      const { size, mtimeMs } = await stat(path);
+      return `${size}:${mtimeMs}`;
+    } catch (error) {
+      if (error.code === "ENOENT") return "none";
+      throw error;
+    }
+  }))).join(",");
+}
+
 // Block IDs in the live Rex server, or null when Rex cannot tell. `--json` needs one session,
 // so ask for the IDs of every session. An empty answer is a Rex glitch, never "no panes".
 async function liveBlocks() {
@@ -102,6 +118,8 @@ export async function scanAttention(file, { now = Date.now(), panes } = {}) {
   }
   const requests = new Map();
   for (const line of text.split("\n")) {
+    // Most lines are task events, so skip the parse for them.
+    if (!line.includes('"attention.')) continue;
     let event;
     try {
       event = JSON.parse(line);
