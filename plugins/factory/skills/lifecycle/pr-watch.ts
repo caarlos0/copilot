@@ -39,25 +39,27 @@ type Event = { event: string; [key: string]: unknown };
 
 const USAGE = `Usage: pr-watch.mjs [PR] [--repo OWNER/REPO] [--merge] [--interval S] [--timeout S]
 
-Watch a pull request and print one JSON line on the first event.
+Watch a pull request. Print one JSON line at the first event.
 
-  PR               number or URL; default: the PR of the current branch
-  --repo, -R REPO  repository, OWNER/REPO (GH_REPO is honored)
-  --merge          only report merged or closed
-  --interval S     seconds between checks, default 30, minimum 15
-                   (PR_WATCH_MIN_INTERVAL overrides the minimum); used only
-                   when "gh event listen" is unavailable
-  --timeout S      print a timeout event and exit 0 after S seconds
+  PR               number or URL. Default: the PR of the current branch
+  --repo, -R REPO  repository, OWNER/REPO (the command also reads GH_REPO)
+  --merge          report only merged or closed
+  --interval S     seconds between checks. Default 30, minimum 15
+                   (PR_WATCH_MIN_INTERVAL changes the minimum). The command
+                   uses it only when "gh event listen" is not available
+  --timeout S      after S seconds, print a timeout event and exit 0
   -h, --help       print this help
 
 Events: merged, closed, checks (a required check failed, was cancelled, or all
 passed), head, review, conflict, draft, base, timeout, rate_limited, error.
 Exit codes: 0 event, 1 error, 2 usage, 3 rate limited (retry_at in the JSON).
-A transient failure (HTTP 502/503/504, connection reset, timeout, EOF) is retried
-on the next check; the 5th one in a row is an error.
-A PR that already merged, closed, or has a failed required check exits at once.
-On github.com, "gh event listen" (preview) wakes each check instead of the
-interval, with a 5 minute safety check. If it fails, polling takes over.`;
+The next check retries a transient failure (HTTP 502/503/504, connection reset,
+timeout, EOF). The fifth failure in a row is an error.
+If the PR is already merged or closed, or a required check failed, the command
+exits at once.
+On github.com, "gh event listen" (preview) starts each check. It replaces the
+interval, with a safety check every 5 minutes. If "gh event listen" fails, the
+command polls on the interval.`;
 
 // Both connections are paged. The first call has no cursors; a PR with 100 items
 // or fewer needs no other call.
@@ -167,7 +169,7 @@ async function gh(args: string[]) {
     const failure = error as NodeJS.ErrnoException & { stderr?: string; stdout?: string };
     const text = [failure.stderr, failure.stdout].filter(Boolean).join("\n").trim() || failure.message;
     if (RATE_LIMIT.test(text)) throw new RateLimited(text.split("\n")[0], retryAt(text));
-    if (failure.code === "ENOENT") throw new Error("gh is not installed or not on PATH");
+    if (failure.code === "ENOENT") throw new Error("gh is not installed or is not on PATH");
     throw new (TRANSIENT.test(text) ? Transient : Error)(text);
   }
 }

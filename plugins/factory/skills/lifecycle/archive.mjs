@@ -19,7 +19,7 @@ var __toESM = (mod, isNodeMode, target) => {
       return cached;
   }
   target = mod != null ? __create(__getProtoOf(mod)) : {};
-  const to = isNodeMode || !mod || !mod.__esModule || !__hasOwnProp.call(mod, "default") ? __defProp(target, "default", { value: mod, enumerable: true }) : target;
+  const to = isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target;
   if (mod && typeof mod === "object" || typeof mod === "function") {
     for (let key of __getOwnPropNames(mod))
       if (!__hasOwnProp.call(to, key))
@@ -58,7 +58,7 @@ var require_cjs = __commonJS(function(exports) {
   Object.defineProperty(exports, "signals", { enumerable: true, get: function() {
     return signals_js_1.signals;
   } });
-  var processOk = (process2) => !!process2 && typeof process2 === "object" && typeof process2.removeListener === "function" && typeof process2.emit === "function" && typeof process2.reallyExit === "function" && typeof process2.listeners === "function" && typeof process2.kill === "function" && typeof process2.pid === "number" && typeof process2.on === "function";
+  var processOk = (process3) => !!process3 && typeof process3 === "object" && typeof process3.removeListener === "function" && typeof process3.emit === "function" && typeof process3.reallyExit === "function" && typeof process3.listeners === "function" && typeof process3.kill === "function" && typeof process3.pid === "number" && typeof process3.on === "function";
   var kExitEmitter = Symbol.for("signal-exit emitter");
   var global = globalThis;
   var ObjectDefineProperty = Object.defineProperty.bind(Object);
@@ -550,7 +550,7 @@ var usage = "Usage: node archive.mjs clean FACTORY_FILE [--older-than 14d] [--ru
 function parseAge(value) {
   const match = /^(\d+)([dh])$/.exec(value);
   if (!match)
-    throw new Error(`--older-than must look like 14d or 36h, got "${value}".`);
+    throw new Error(`--older-than must look like 14d or 36h. The value is "${value}".`);
   return Number(match[1]) * (match[2] === "d" ? day : hour);
 }
 var pendingFeedback = (task) => task.feedback && task.feedback.acknowledged_id !== task.feedback.id;

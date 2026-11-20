@@ -100,21 +100,25 @@ async function main() {
 Usage: node serve.mjs [--directory PATH] [--port PORT] [--host ADDR] [--token TOKEN]
        bun serve.mjs [--directory PATH] [--port PORT] [--host ADDR] [--token TOKEN]
 
-  --directory PATH  Only this state directory (default: both ~/.local/state/copilot-factory
-                    and the legacy ~/.local/state/copilot-coordinator, whichever exist;
-                    the new one wins on a name clash)
-  --port PORT       Listening port (default: 8766; 0 chooses an available port)
-  --host ADDR       Address to bind (default: 127.0.0.1). A non-loopback address, such as
-                    0.0.0.0, makes every request require an access token. The page is plain
-                    HTTP, so the token travels in clear text: use a trusted network only
-  --token TOKEN     Access token for a non-loopback --host (at least 16 characters from
-                    A-Z a-z 0-9 . _ ~ -). Default: a random one, saved (mode 0600) as
-                    dashboard-token in the state directory and reused on later starts.
-                    A --token value is not saved. Ignored on loopback
-  -h, --help        Show help
+  --directory PATH  Use only this state directory. Default: both
+                    ~/.local/state/copilot-factory and the legacy
+                    ~/.local/state/copilot-coordinator, if they exist.
+                    The new directory wins when a name is in both.
+  --port PORT       Port to listen on (default: 8766; 0 chooses a free port)
+  --host ADDR       Address to bind (default: 127.0.0.1). A non-loopback address,
+                    such as 0.0.0.0, makes every request need an access token.
+                    The page uses plain HTTP, so the token travels in clear text.
+                    Use only a trusted network.
+  --token TOKEN     Access token for a non-loopback --host (at least 16 characters
+                    from A-Z a-z 0-9 . _ ~ -). Default: a random token. The server
+                    saves it (mode 0600) as dashboard-token in the state directory
+                    and uses it again at the next start. The server does not save a
+                    --token value. A loopback host ignores the token.
+  -h, --help        Show this help
 
-Open the printed HTTP URL. It lists every <owner.repo>-factory.json in the directories.
-Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup failures exit 1.`);
+Open the printed HTTP URL. The page lists every <owner.repo>-factory.json in the directories.
+To stop the server, press Ctrl+C. The server needs no packages.
+An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
     return;
   }
 
@@ -166,7 +170,7 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
 
   async function factoryTag(file: string | null): Promise<Entry> {
     if (!file || !factoryFile.test(file) || file.includes("/")) {
-      throw new HttpError(400, "Select a <owner.repo>-factory.json file.");
+      throw new HttpError(400, "Choose a <owner.repo>-factory.json file.");
     }
     const target = await localFile(file);
     const { mtimeNs, size, ino } = await stat(target, { bigint: true });
@@ -430,7 +434,7 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
         Object.keys(body).some((key) => !["task", "state", "comment", "revision", "resolution"].includes(key)) ||
         !["task", "state", "comment"].every((key) => typeof body[key] === "string" && body[key].trim()) ||
         !Number.isSafeInteger(body.revision) || body.revision < 0) {
-      throw new HttpError(400, "Provide task, state, a non-empty comment, and a non-negative task revision.");
+      throw new HttpError(400, "The request needs task, state, a comment that is not empty, and a task revision that is not negative.");
     }
     const data = await loadFactory(file);
     if (!data.tasks.some((task) => task.id === body.task)) throw new HttpError(404, "Task not found.");
@@ -448,12 +452,12 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
     const body = await readJSONBody(request);
     if (!isObject(body) || Object.keys(body).some((key) => !["id", "index"].includes(key)) ||
         typeof body.id !== "string" || !Number.isSafeInteger(body.index) || body.index < 0) {
-      throw new HttpError(400, "Provide the id of the waiting item and a non-negative option index.");
+      throw new HttpError(400, "The request needs the id of the waiting item and an option index of 0 or more.");
     }
     const { target } = await factoryTag(file);
     const item = (await pendingAttention(target)).find(({ id }) => id === body.id);
-    if (!item) throw new HttpError(409, "That prompt is no longer waiting.");
-    if (answering.has(item.id)) throw new HttpError(409, "An answer for this prompt is already being sent.");
+    if (!item) throw new HttpError(409, "The prompt is closed.");
+    if (answering.has(item.id)) throw new HttpError(409, "The factory already sends an answer for this prompt.");
     answering.add(item.id);
     try {
       await sendAnswer(item, body.index);
@@ -475,13 +479,13 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
     if (!isObject(body) || Object.keys(body).some((key) => !["proposal_id", "decision", "note"].includes(key)) ||
         typeof body.proposal_id !== "string" || !["accepted", "declined"].includes(body.decision) ||
         !(body.note === undefined || typeof body.note === "string")) {
-      throw new HttpError(400, "Provide proposal_id, decision (accepted or declined), and an optional note.");
+      throw new HttpError(400, "The request needs proposal_id and decision (accepted or declined). The note is optional.");
     }
     const { target } = await factoryTag(file);
     const run = deciding.then(() => decideProposal(target, body.proposal_id, body.decision, body.note));
     deciding = run.catch(() => {});
     const result = await run;
-    if (!result) throw new HttpError(404, "That proposal does not exist.");
+    if (!result) throw new HttpError(404, "The proposal does not exist.");
     return result;
   }
 
@@ -500,7 +504,7 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
           !(known(body.set[section], keys) && known(body.expected[section], keys) &&
             Object.keys(body.set[section]).length && Object.keys(body.set[section]).every((key) =>
               Object.hasOwn(body.expected[section], key))))) {
-      throw new HttpError(400, "Provide set with budget, limits, or lever values, and the values you saw for each in expected.");
+      throw new HttpError(400, "The request needs set (budget, limits, or lever values). It also needs expected, with the value that the browser saw for each field.");
     }
     await loadFactory(file);
     const values: Json = {};
@@ -651,7 +655,7 @@ p{margin:0;color:#f87171}
       } else if (request.method === "POST" && url.pathname === "/api/improve/decide") {
         send(response, 200, await decideImprove(request, url.searchParams.get("file")));
       } else if (request.method !== "GET") {
-        throw new HttpError(405, "Use GET, or POST /api/move, /api/settings, /api/attention/answer or /api/improve/decide for dashboard changes.");
+        throw new HttpError(405, "Use GET. To change the dashboard, use POST /api/move, /api/settings, /api/attention/answer or /api/improve/decide.");
       } else if (url.pathname === "/" || url.pathname === "/dashboard.html") {
         await sendAsset(request, response, "dashboard.html", "text/html; charset=utf-8");
       } else if (url.pathname === "/factory-data.mjs") {
@@ -699,7 +703,7 @@ p{margin:0;color:#f87171}
     for (const addr of addresses.length ? addresses : ["127.0.0.1"]) {
       console.log(`http://${bracket(addr)}:${port}/?token=${token}`);
     }
-    console.log("Plain HTTP: the token travels in clear text on this network. Use a trusted network only.");
+    console.log("The page uses plain HTTP. The token travels in clear text on this network. Use only a trusted network.");
   }
   process.on("SIGINT", () => server.close(() => { process.exitCode = 130; }));
   process.on("SIGTERM", () => server.close());

@@ -7,25 +7,27 @@ import { parseArgs, promisify } from "node:util";
 var run = promisify(execFile);
 var USAGE = `Usage: pr-watch.mjs [PR] [--repo OWNER/REPO] [--merge] [--interval S] [--timeout S]
 
-Watch a pull request and print one JSON line on the first event.
+Watch a pull request. Print one JSON line at the first event.
 
-  PR               number or URL; default: the PR of the current branch
-  --repo, -R REPO  repository, OWNER/REPO (GH_REPO is honored)
-  --merge          only report merged or closed
-  --interval S     seconds between checks, default 30, minimum 15
-                   (PR_WATCH_MIN_INTERVAL overrides the minimum); used only
-                   when "gh event listen" is unavailable
-  --timeout S      print a timeout event and exit 0 after S seconds
+  PR               number or URL. Default: the PR of the current branch
+  --repo, -R REPO  repository, OWNER/REPO (the command also reads GH_REPO)
+  --merge          report only merged or closed
+  --interval S     seconds between checks. Default 30, minimum 15
+                   (PR_WATCH_MIN_INTERVAL changes the minimum). The command
+                   uses it only when "gh event listen" is not available
+  --timeout S      after S seconds, print a timeout event and exit 0
   -h, --help       print this help
 
 Events: merged, closed, checks (a required check failed, was cancelled, or all
 passed), head, review, conflict, draft, base, timeout, rate_limited, error.
 Exit codes: 0 event, 1 error, 2 usage, 3 rate limited (retry_at in the JSON).
-A transient failure (HTTP 502/503/504, connection reset, timeout, EOF) is retried
-on the next check; the 5th one in a row is an error.
-A PR that already merged, closed, or has a failed required check exits at once.
-On github.com, "gh event listen" (preview) wakes each check instead of the
-interval, with a 5 minute safety check. If it fails, polling takes over.`;
+The next check retries a transient failure (HTTP 502/503/504, connection reset,
+timeout, EOF). The fifth failure in a row is an error.
+If the PR is already merged or closed, or a required check failed, the command
+exits at once.
+On github.com, "gh event listen" (preview) starts each check. It replaces the
+interval, with a safety check every 5 minutes. If "gh event listen" fails, the
+command polls on the interval.`;
 var QUERY = `query($owner: String!, $repo: String!, $number: Int!, $threadsAfter: String, $contextsAfter: String) {
   rateLimit { cost remaining resetAt }
   repository(owner: $owner, name: $repo) {
@@ -142,7 +144,7 @@ async function gh(args) {
       throw new RateLimited(text.split(`
 `)[0], retryAt(text));
     if (failure.code === "ENOENT")
-      throw new Error("gh is not installed or not on PATH");
+      throw new Error("gh is not installed or is not on PATH");
     throw new ((TRANSIENT.test(text)) ? Transient : Error)(text);
   }
 }
@@ -175,7 +177,7 @@ function checkState(node) {
 }
 function summarizeChecks(contexts) {
   const required = contexts.filter((node) => node.isRequired).map((node) => ({ name: node.name ?? node.context, state: checkState(node) }));
-  const names = (state) => required.filter((check) => check.state === state).map((check) => check.name);
+  const names = (state2) => required.filter((check) => check.state === state2).map((check) => check.name);
   const failed = names("failed");
   const cancelled = names("cancelled");
   let state = "passed";
@@ -307,7 +309,7 @@ function report(target, snapshot, extra) {
 `);
 }
 function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise((resolve2) => setTimeout(resolve2, ms));
 }
 
 class Listener {
@@ -343,9 +345,9 @@ class Listener {
     if (ready() || !this.alive)
       return;
     let timer;
-    await new Promise((resolve) => {
-      this.#wake = resolve;
-      timer = setTimeout(resolve, ms);
+    await new Promise((resolve2) => {
+      this.#wake = resolve2;
+      timer = setTimeout(resolve2, ms);
     });
     clearTimeout(timer);
     this.#wake = null;

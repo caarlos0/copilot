@@ -106,7 +106,7 @@ const usage = "Usage: node archive.mjs clean FACTORY_FILE [--older-than 14d] [--
 
 function parseAge(value: string) {
   const match = /^(\d+)([dh])$/.exec(value);
-  if (!match) throw new Error(`--older-than must look like 14d or 36h, got "${value}".`);
+  if (!match) throw new Error(`--older-than must look like 14d or 36h. The value is "${value}".`);
   return Number(match[1]) * (match[2] === "d" ? day : hour);
 }
 

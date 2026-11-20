@@ -12,21 +12,22 @@ var usage = `Usage:
   node worktree.mjs delete NAME [--force] [--default-branch NAME] [--merged-pr URL_OR_NUMBER]
   node worktree.mjs path NAME
 
-Run it inside the project checkout. NAME is the branch name. Output is JSON on
-stdout; with "-- CMD", create prints its JSON to stderr, runs CMD in the
-worktree, and exits with the code of CMD.
+Run the command in the project checkout. NAME is the branch name. The output is
+JSON on stdout. With "-- CMD", create prints its JSON to stderr, runs CMD in the
+worktree, and exits with the exit code of CMD.
 
 The path comes from "worktreePathTemplate" in $COPILOT_HOME/settings.json
-(default ~/.copilot). Fields: {repoPath}, {repo}, {branch}, {branchSlug}; a
-leading "~" is the home directory. When it is unset the path is
-~/Developer/worktrees/{repo}/{branch}.
+(default ~/.copilot). The fields are {repoPath}, {repo}, {branch}, and
+{branchSlug}. A leading "~" is the home directory. If the template is not set,
+the path is ~/Developer/worktrees/{repo}/{branch}.
 
-create branches from local HEAD (or --base REF), or reuses the worktree that
-already has the branch. delete removes a clean worktree whose tip is in the
-default branch or in a remote branch; --force skips both checks. With
---merged-pr (a squash-merged branch is in neither), it asks gh whether the PR is
-merged and its head is the worktree tip or an ancestor of it, then removes the
-clean worktree and deletes the branch. It never asks.
+create makes a branch from local HEAD (or from --base REF). If a worktree
+already has the branch, create uses that worktree. delete removes a clean
+worktree whose tip is in the default branch or in a remote branch. --force
+skips both checks. A squash-merged branch is in neither. For that case, use
+--merged-pr. Then delete asks gh if the PR is merged and if its head is the
+worktree tip or an ancestor of it. If both are true, delete removes the clean
+worktree and deletes the branch. It never asks the user.
 Exit codes: 1 usage, 2 refused, 3 not found, 4 git or gh failed.`;
 var DEFAULT_TEMPLATE = "~/Developer/worktrees/{repo}/{branch}";
 var CODES = { usage: 1, refused: 2, "not-found": 3, "git-failed": 4 };
@@ -174,9 +175,9 @@ function remove(ctx, name, { force, defaultBranch: override, mergedPr }) {
   const { path, branch } = wt;
   const info = { path, branch };
   if (real(path) === real(ctx.repoPath))
-    throw new Fail("refused", "Refusing to remove the main checkout.", info);
+    throw new Fail("refused", "Cannot remove the main checkout.", info);
   if (real(path) === real(git(ctx.cwd, "rev-parse", "--show-toplevel"))) {
-    throw new Fail("refused", "Refusing to remove the current worktree.", info);
+    throw new Fail("refused", "Cannot remove the current worktree.", info);
   }
   const tip = git(path, "rev-parse", "HEAD");
   const target = defaultBranch(ctx.cwd, override);
@@ -193,7 +194,7 @@ function remove(ctx, name, { force, defaultBranch: override, mergedPr }) {
       }
     }
     if (!merged && !prMerged) {
-      throw new Fail("refused", `${branch ?? tip} is not in ${target ?? "the default branch"} or a remote branch.`, { ...info, removed: false, reason: "unmerged" });
+      throw new Fail("refused", `${branch ?? tip} is not in ${target ?? "the default branch"} and not in a remote branch.`, { ...info, removed: false, reason: "unmerged" });
     }
   }
   git(ctx.cwd, "worktree", "remove", ...force ? ["--force"] : [], path);

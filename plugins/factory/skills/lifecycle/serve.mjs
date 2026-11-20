@@ -19,7 +19,7 @@ var __toESM = (mod, isNodeMode, target) => {
       return cached;
   }
   target = mod != null ? __create(__getProtoOf(mod)) : {};
-  const to = isNodeMode || !mod || !mod.__esModule || !__hasOwnProp.call(mod, "default") ? __defProp(target, "default", { value: mod, enumerable: true }) : target;
+  const to = isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target;
   if (mod && typeof mod === "object" || typeof mod === "function") {
     for (let key of __getOwnPropNames(mod))
       if (!__hasOwnProp.call(to, key))
@@ -58,7 +58,7 @@ var require_cjs = __commonJS(function(exports) {
   Object.defineProperty(exports, "signals", { enumerable: true, get: function() {
     return signals_js_1.signals;
   } });
-  var processOk = (process2) => !!process2 && typeof process2 === "object" && typeof process2.removeListener === "function" && typeof process2.emit === "function" && typeof process2.reallyExit === "function" && typeof process2.listeners === "function" && typeof process2.kill === "function" && typeof process2.pid === "number" && typeof process2.on === "function";
+  var processOk = (process3) => !!process3 && typeof process3 === "object" && typeof process3.removeListener === "function" && typeof process3.emit === "function" && typeof process3.reallyExit === "function" && typeof process3.listeners === "function" && typeof process3.kill === "function" && typeof process3.pid === "number" && typeof process3.on === "function";
   var kExitEmitter = Symbol.for("signal-exit emitter");
   var global = globalThis;
   var ObjectDefineProperty = Object.defineProperty.bind(Object);
@@ -547,21 +547,25 @@ Run with --help for usage.`);
 Usage: node serve.mjs [--directory PATH] [--port PORT] [--host ADDR] [--token TOKEN]
        bun serve.mjs [--directory PATH] [--port PORT] [--host ADDR] [--token TOKEN]
 
-  --directory PATH  Only this state directory (default: both ~/.local/state/copilot-factory
-                    and the legacy ~/.local/state/copilot-coordinator, whichever exist;
-                    the new one wins on a name clash)
-  --port PORT       Listening port (default: 8766; 0 chooses an available port)
-  --host ADDR       Address to bind (default: 127.0.0.1). A non-loopback address, such as
-                    0.0.0.0, makes every request require an access token. The page is plain
-                    HTTP, so the token travels in clear text: use a trusted network only
-  --token TOKEN     Access token for a non-loopback --host (at least 16 characters from
-                    A-Z a-z 0-9 . _ ~ -). Default: a random one, saved (mode 0600) as
-                    dashboard-token in the state directory and reused on later starts.
-                    A --token value is not saved. Ignored on loopback
-  -h, --help        Show help
+  --directory PATH  Use only this state directory. Default: both
+                    ~/.local/state/copilot-factory and the legacy
+                    ~/.local/state/copilot-coordinator, if they exist.
+                    The new directory wins when a name is in both.
+  --port PORT       Port to listen on (default: 8766; 0 chooses a free port)
+  --host ADDR       Address to bind (default: 127.0.0.1). A non-loopback address,
+                    such as 0.0.0.0, makes every request need an access token.
+                    The page uses plain HTTP, so the token travels in clear text.
+                    Use only a trusted network.
+  --token TOKEN     Access token for a non-loopback --host (at least 16 characters
+                    from A-Z a-z 0-9 . _ ~ -). Default: a random token. The server
+                    saves it (mode 0600) as dashboard-token in the state directory
+                    and uses it again at the next start. The server does not save a
+                    --token value. A loopback host ignores the token.
+  -h, --help        Show this help
 
-Open the printed HTTP URL. It lists every <owner.repo>-factory.json in the directories.
-Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup failures exit 1.`);
+Open the printed HTTP URL. The page lists every <owner.repo>-factory.json in the directories.
+To stop the server, press Ctrl+C. The server needs no packages.
+An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
     return;
   }
   const checked = options.directory ? [resolve(options.directory)] : candidates(homedir());
@@ -608,7 +612,7 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
   const parsed = new Map;
   async function factoryTag(file) {
     if (!file || !factoryFile.test(file) || file.includes("/")) {
-      throw new HttpError(400, "Select a <owner.repo>-factory.json file.");
+      throw new HttpError(400, "Choose a <owner.repo>-factory.json file.");
     }
     const target = await localFile(file);
     const { mtimeNs, size, ino } = await stat(target, { bigint: true });
@@ -674,14 +678,14 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
     return briefs;
   }
   async function factoryView(entry) {
-    const attention = (await pendingAttention(entry.target)).map(({ id, session, kind, text, options, role, pane, rex_session, task, at }) => ({ id, session, kind, text, options, role, pane, rex_session: rex_session ?? null, task, at })).sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+    const attention = (await pendingAttention(entry.target)).map(({ id, session, kind, text, options: options2, role, pane, rex_session, task, at }) => ({ id, session, kind, text, options: options2, role, pane, rex_session: rex_session ?? null, task, at })).sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
     const proposals = await openProposals(entry.target);
     const data = await readFactory(entry);
     const usage = await factoryUsage(data, sessionStateDirectory());
     const briefs = await taskBriefs(entry.file, data);
-    const digest = createHash("sha1").update(JSON.stringify([attention, proposals, usage, briefs])).digest("base64url");
+    const digest2 = createHash("sha1").update(JSON.stringify([attention, proposals, usage, briefs])).digest("base64url");
     return {
-      tag: `${entry.tag.slice(0, -1)}-${digest}"`,
+      tag: `${entry.tag.slice(0, -1)}-${digest2}"`,
       body: async () => ({ ...await readFactory(entry), attention, proposals, usage, briefs })
     };
   }
@@ -823,7 +827,7 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
   async function moveTask(request, file) {
     const body = await readJSONBody(request);
     if (!isObject(body) || Object.keys(body).some((key) => !["task", "state", "comment", "revision", "resolution"].includes(key)) || !["task", "state", "comment"].every((key) => typeof body[key] === "string" && body[key].trim()) || !Number.isSafeInteger(body.revision) || body.revision < 0) {
-      throw new HttpError(400, "Provide task, state, a non-empty comment, and a non-negative task revision.");
+      throw new HttpError(400, "The request needs task, state, a comment that is not empty, and a task revision that is not negative.");
     }
     const data = await loadFactory(file);
     if (!data.tasks.some((task) => task.id === body.task))
@@ -840,14 +844,14 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
   async function answerAttention(request, file) {
     const body = await readJSONBody(request);
     if (!isObject(body) || Object.keys(body).some((key) => !["id", "index"].includes(key)) || typeof body.id !== "string" || !Number.isSafeInteger(body.index) || body.index < 0) {
-      throw new HttpError(400, "Provide the id of the waiting item and a non-negative option index.");
+      throw new HttpError(400, "The request needs the id of the waiting item and an option index of 0 or more.");
     }
     const { target } = await factoryTag(file);
     const item = (await pendingAttention(target)).find(({ id }) => id === body.id);
     if (!item)
-      throw new HttpError(409, "That prompt is no longer waiting.");
+      throw new HttpError(409, "The prompt is closed.");
     if (answering.has(item.id))
-      throw new HttpError(409, "An answer for this prompt is already being sent.");
+      throw new HttpError(409, "The factory already sends an answer for this prompt.");
     answering.add(item.id);
     try {
       await sendAnswer(item, body.index);
@@ -863,14 +867,14 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
   async function decideImprove(request, file) {
     const body = await readJSONBody(request);
     if (!isObject(body) || Object.keys(body).some((key) => !["proposal_id", "decision", "note"].includes(key)) || typeof body.proposal_id !== "string" || !["accepted", "declined"].includes(body.decision) || !(body.note === undefined || typeof body.note === "string")) {
-      throw new HttpError(400, "Provide proposal_id, decision (accepted or declined), and an optional note.");
+      throw new HttpError(400, "The request needs proposal_id and decision (accepted or declined). The note is optional.");
     }
     const { target } = await factoryTag(file);
     const run = deciding.then(() => decideProposal(target, body.proposal_id, body.decision, body.note));
     deciding = run.catch(() => {});
     const result = await run;
     if (!result)
-      throw new HttpError(404, "That proposal does not exist.");
+      throw new HttpError(404, "The proposal does not exist.");
     return result;
   }
   async function setSettings(request, file) {
@@ -879,7 +883,7 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
     const fields = { limits: ["investigation", "implementation"], lever: ["spend", "autonomy_cap"] };
     const sections = isObject(body?.set) ? Object.keys(body.set) : [];
     if (!known(body, ["set", "expected"]) || !known(body.expected, ["budget", ...Object.keys(fields)]) || !sections.length || !known(body.set, ["budget", ...Object.keys(fields)]) || sections.some((section) => !Object.hasOwn(body.expected, section)) || sections.includes("budget") && !Number.isSafeInteger(body.set.budget) || !(body.expected.budget === undefined || body.expected.budget === null || Number.isSafeInteger(body.expected.budget)) || Object.entries(fields).some(([section, keys]) => sections.includes(section) && !(known(body.set[section], keys) && known(body.expected[section], keys) && Object.keys(body.set[section]).length && Object.keys(body.set[section]).every((key) => Object.hasOwn(body.expected[section], key))))) {
-      throw new HttpError(400, "Provide set with budget, limits, or lever values, and the values you saw for each in expected.");
+      throw new HttpError(400, "The request needs set (budget, limits, or lever values). It also needs expected, with the value that the browser saw for each field.");
     }
     await loadFactory(file);
     const values = {};
@@ -897,11 +901,11 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
   }
   const requireToken = !isLoopback(options.host);
   const token = requireToken ? options.token ?? await persistedToken(join(directories[0].directory, "dashboard-token")) : undefined;
-  function allowedHosts(port) {
+  function allowedHosts(port2) {
     const hosts = new Set;
     const add = (addr) => {
-      hosts.add(`${bracket(addr)}:${port}`);
-      if (port === 80)
+      hosts.add(`${bracket(addr)}:${port2}`);
+      if (port2 === 80)
         hosts.add(bracket(addr));
     };
     if (isWildcard(options.host)) {
@@ -998,11 +1002,11 @@ p{margin:0;color:#f87171}
   }
   const server = createServer(async (request, response) => {
     try {
-      const port = server.address().port;
-      if (!allowedHosts(port).has(request.headers.host)) {
+      const port2 = server.address().port;
+      if (!allowedHosts(port2).has(request.headers.host)) {
         throw new HttpError(403, "Use the printed URL.");
       }
-      const url = new URL(request.url, `http://127.0.0.1:${port}`);
+      const url = new URL(request.url, `http://127.0.0.1:${port2}`);
       if (requireToken && request.method === "POST" && url.pathname === "/login")
         return await login(request, response);
       try {
@@ -1024,7 +1028,7 @@ p{margin:0;color:#f87171}
       } else if (request.method === "POST" && url.pathname === "/api/improve/decide") {
         send(response, 200, await decideImprove(request, url.searchParams.get("file")));
       } else if (request.method !== "GET") {
-        throw new HttpError(405, "Use GET, or POST /api/move, /api/settings, /api/attention/answer or /api/improve/decide for dashboard changes.");
+        throw new HttpError(405, "Use GET. To change the dashboard, use POST /api/move, /api/settings, /api/attention/answer or /api/improve/decide.");
       } else if (url.pathname === "/" || url.pathname === "/dashboard.html") {
         await sendAsset(request, response, "dashboard.html", "text/html; charset=utf-8");
       } else if (url.pathname === "/factory-data.mjs") {
@@ -1069,7 +1073,7 @@ p{margin:0;color:#f87171}
     for (const addr of addresses.length ? addresses : ["127.0.0.1"]) {
       console.log(`http://${bracket(addr)}:${port}/?token=${token}`);
     }
-    console.log("Plain HTTP: the token travels in clear text on this network. Use a trusted network only.");
+    console.log("The page uses plain HTTP. The token travels in clear text on this network. Use only a trusted network.");
   }
   process.on("SIGINT", () => server.close(() => {
     process.exitCode = 130;
