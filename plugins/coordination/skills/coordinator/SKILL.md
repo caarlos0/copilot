@@ -49,7 +49,7 @@ projects, choose one stable, unique filename-safe key. Use these filenames:
 Do not add dates, run IDs, or Copilot session IDs to these names. Split
 multi-project assignments between their project files. Use
 [handoff.example.json](handoff.example.json) as the JSON shape, not real data,
-and the bundled `handoff.mjs` below for every handoff write.
+and the bundled `coordinator.mjs handoff` command below for every handoff write.
 Tell the user the persistent handoff path and board URL.
 
 Allow only one coordinator writer per project and role. Claim ownership with
@@ -106,12 +106,12 @@ verify identity before sending input. Do not duplicate possibly running work.
 
 ### Write validated updates
 
-Resolve `handoff.mjs` beside this loaded skill and run it with Node or Bun.
+Resolve `coordinator.mjs` beside this loaded skill and run it with Node or Bun.
 Hold and verify your project/role owner lock first. Create the state directory
 if needed. Pass the canonical handoff path and explicit flags:
 
 ```sh
-node handoff.mjs ~/.local/state/copilot-coordinator/owner.repo-implementer.json \
+node coordinator.mjs handoff ~/.local/state/copilot-coordinator/owner.repo-implementer.json \
   --project owner/repo --role implementer --run-goal "Implement work for owner/repo"
 ```
 
@@ -120,11 +120,11 @@ The handoff ID comes from the filename. A new handoff requires `--project`,
 handoff, supply only changed fields. Add or update tasks by ID:
 
 ```sh
-node handoff.mjs ~/.local/state/copilot-coordinator/owner.repo-implementer.json \
+node coordinator.mjs handoff ~/.local/state/copilot-coordinator/owner.repo-implementer.json \
   --task issue-42 --goal "Fix issue 42" --status pending \
   --next-action "Write the worker brief" \
   --links '["https://github.com/owner/repo/issues/42"]'
-node handoff.mjs ~/.local/state/copilot-coordinator/owner.repo-implementer.json \
+node coordinator.mjs handoff ~/.local/state/copilot-coordinator/owner.repo-implementer.json \
   --task issue-42 --status running --worker block:actual-worker-id \
   --next-action "Read the worker result"
 ```
@@ -179,7 +179,7 @@ result paths.
 Use the ready-made [board.html](board.html); never generate HTML per run.
 It reads the JSON handoff directly, so there is no separate board state.
 The coordinator alone updates the handoff when tasks change, on each monitoring
-pass, and before pausing or ending the run. Use `handoff.mjs` for validated,
+pass, and before pausing or ending the run. Use `coordinator.mjs handoff` for validated,
 atomic updates so readers never see invalid or partial writes. Reuse this same
 file after completion and on later requests.
 The board reads the canonical handoff; do not create a separate board JSON,
@@ -208,11 +208,11 @@ and remaining work in `details`. Add fields there as needed; the board displays
 them without changing its HTML. Keep credentials and sensitive worker output
 out of the handoff and linked artifacts.
 
-Use the dependency-free local server to view the board. Resolve `serve.mjs`
+Use the dependency-free local server to view the board. Resolve `coordinator.mjs`
 beside this loaded `SKILL.md`, and run it from that skill directory:
 
 ```sh
-node serve.mjs
+node coordinator.mjs serve
 ```
 
 Bun can run the same script instead of Node. No packages need to be installed.
@@ -246,13 +246,13 @@ the command rather than bypassing restrictions or claiming it is available.
 
 ## Receive worker events
 
-Use the bundled `wait.mjs` for worker result notifications, independent of the
+Use the bundled `coordinator.mjs wait` for worker result notifications, independent of the
 board server. Resolve it beside this loaded skill. Create result parent
 directories before waiting. Run one attached async command for all active
 workers owned by this coordinator:
 
 ```sh
-node wait.mjs --cursor /absolute/state/project-role-cursor.json \
+node coordinator.mjs wait --cursor /absolute/state/project-role-cursor.json \
   /absolute/state/task-1-result.json /absolute/state/task-2-result.json
 ```
 

@@ -19,17 +19,17 @@ The skill disables model/user invocation; agents preload it through `skills:`.
 Each project has one writer per role and a persistent `<project>-reviewer.json`,
 `<project>-implementer.json`, or `<project>-coordinator.json` under
 `~/.local/state/copilot-coordinator/`. The board reads that same handoff.
-Workers atomically save cumulative results. The bundled `wait.mjs` notifies
+Workers atomically save cumulative results. The bundled `coordinator.mjs wait` command notifies
 unscheduled coordinators of content changes without a state-polling loop.
 Scheduled passes remain finite; general one-shot workers do not watch GitHub.
 
 The skill ships `board.html`, `handoff.example.json`, and a dependency-free
-loopback server. Run `node serve.mjs` from the resolved coordinator skill
+loopback server. Run `node coordinator.mjs serve` from the resolved coordinator skill
 directory, or use Bun. Use one server for all runs; do not generate HTML per run.
 Shared JSON validation lives beside the skill in `board-data.mjs`, a valibot
 schema bundled in (stages end at each cross-field rule, so the first error keeps
 the field order).
-Coordinators must write handoffs with the bundled `handoff.mjs` flags. It
+Coordinators must write handoffs with the bundled `coordinator.mjs handoff` flags. It
 validates the complete state and atomically replaces the file. The handoff
 stores its project once; tasks merge by ID and preserve unfinished work. Adding
 a new task removes existing `done` tasks last updated more than seven days ago,
@@ -55,13 +55,14 @@ worktrees and unfinished work.
 `board-data`, `handoff`, `wait`, `serve` and `coordinator` in `skills/coordinator/` are
 TypeScript, checked with `strict` on. Edit the `.ts`, run `bun run build` in
 `plugins/coordination`, and commit the `.ts` and the generated `.mjs` together. Each
-bundle sits at the path of its source, so `node wait.mjs` and the other commands
-need no Bun and no `node_modules`. `coordinator.mjs` is a dispatcher: it loads
+bundle sits at the path of its source, so `node coordinator.mjs wait` and the other
+commands need no Bun and no `node_modules`. `coordinator.mjs` is a dispatcher: it loads
 `handoff`, `wait` or `serve` only when you name it (`node coordinator.mjs wait ARGS`).
-Each of these three modules exports `main(argv)`. It runs the module only when
-`process.argv[1]` is its own `.mjs` file, so the dispatcher bundle does not run it twice.
-The old `handoff.mjs`, `wait.mjs` and `serve.mjs` stay until the documents use the
-dispatcher. `serve` reads `import.meta.url` to find
+The skill and the tests use it. Each of these three modules exports
+`main(argv)`. It runs the module only when `process.argv[1]` is its own `.mjs` file,
+so the dispatcher bundle does not run it twice.
+The old `handoff.mjs`, `wait.mjs` and `serve.mjs` stay because live runs use them.
+Do not use them in new text. A separate change deletes them. `serve` reads `import.meta.url` to find
 `board.html` and `board-data.mjs` beside it; both stay valid for that reason.
 `board-data.mjs` is served to the browser, so it must not import `node:` modules.
 The build fails when a coordination module imports a file outside this plugin,
