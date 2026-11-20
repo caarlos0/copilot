@@ -70,12 +70,11 @@ test("serves the dashboard and the shared data module without caching", async (t
   const data = await get(url, "/factory-data.mjs");
   assert.match(data.headers.get("content-type"), /text\/javascript/);
   assert.match(await data.text(), /^export \{[^}]*^ {2}states,$/ms);
-  for (const name of ["marked", "purify"]) {
-    const vendored = await get(url, `/vendor/${name}.min.js`);
-    assert.match(vendored.headers.get("content-type"), /text\/javascript/);
-    assert.equal(await vendored.text(), readFileSync(join(__dirname, "vendor", `${name}.min.js`), "utf8"));
-  }
-  assert.equal((await get(url, "/vendor/marked.LICENSE")).status, 404, "Only the two scripts are served.");
+  const markdown = await get(url, "/dashboard-markdown.mjs");
+  assert.equal(markdown.status, 200);
+  assert.match(markdown.headers.get("content-type"), /text\/javascript/);
+  assert.equal(await markdown.text(), readFileSync(join(__dirname, "dashboard-markdown.mjs"), "utf8"));
+  assert.equal((await get(url, "/vendor/marked.min.js")).status, 404, "There is no vendor route.");
 });
 
 test("lists valid factories with counts and reports invalid ones separately", async (t) => {
@@ -566,7 +565,7 @@ test("a 304 still redraws the Find work countdowns", async (t) => {
 });
 
 test("the page script parses, never renders data as HTML, and finds its elements", () => {
-  const script = html.match(/<script type="module">([\s\S]*?)<\/script>/)[1].replace(/^\s*import .+;\s*/m, "");
+  const script = html.match(/<script type="module">([\s\S]*?)<\/script>/)[1].replace(/^\s*import .+;$/gm, "");
   new vm.Script(script);
   assert.doesNotMatch(script, /innerHTML|insertAdjacentHTML|outerHTML/);
   const ids = new Set([...html.matchAll(/id="([^"]+)"/g)].map((match) => match[1]));
@@ -708,9 +707,10 @@ async function dashboard(t, { reducedMotion = true, confirm = () => true, now = 
     constructor(...args) { super(...(args.length ? args : [now])); }
     static now() { return now; }
   }
+  const { marked } = await import("./dashboard-markdown.mjs");
   const context = vm.createContext({
     ...await import("./factory-data.mjs"),
-    document, location, URL, URLSearchParams, Date: ClockDate,
+    document, location, URL, URLSearchParams, Date: ClockDate, marked,
     DOMPurify: { sanitize: (markup, config) => { sanitized.push({ markup, config }); return parseHTML(markup); } },
     history: { replaceState: (_, __, value) => { location.href = new URL(value, location).href; } },
     window: { addEventListener: (name, callback) => { if (name === "resize") resizeListeners.push(callback); }, confirm },
@@ -728,8 +728,7 @@ async function dashboard(t, { reducedMotion = true, confirm = () => true, now = 
     },
   });
   const script = html.match(/<script type="module">([\s\S]*?)<\/script>/)[1]
-    .replace(/^\s*import .+;\s*/m, "").replace(/\s*buildFlow\(\);\s*refresh\(\);\s*$/, "");
-  vm.runInContext(readFileSync(join(__dirname, "vendor", "marked.min.js"), "utf8"), context);
+    .replace(/^\s*import .+;$/gm, "").replace(/\s*buildFlow\(\);\s*refresh\(\);\s*$/, "");
   vm.runInContext(script, context);
   vm.runInContext("buildFlow();", context);
   const run = (source) => vm.runInContext(source, context);

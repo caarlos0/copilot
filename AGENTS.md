@@ -65,6 +65,9 @@ Runtime libraries (`write-file-atomic`, `valibot`) are `dependencies` in
 no `node_modules`; the import boundary applies to plugin sources, not to library
 files. A module served to the browser (`board-data`, `factory-data`) may use only
 libraries that need no `node:` built-ins, and `board-data.mjs` stays under 20 KB.
+A browser entry that inlines npm packages (`dashboard-markdown.ts`: `marked`,
+`dompurify`) is listed in `scripts/build.ts`, which minifies it and puts the
+packages' licence text in its header.
 Add a library only to replace code you would otherwise maintain.
 
 ## Plugin instructions

@@ -17,6 +17,8 @@
     "typescript": "^7.0.2"
   },
   "dependencies": {
+    "dompurify": "^3.4.17",
+    "marked": "^18.2.0",
     "valibot": "^1.5.0",
     "write-file-atomic": "^8.0.0"
   }

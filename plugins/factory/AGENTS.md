@@ -274,10 +274,14 @@ pretty-printed and highlighted (`highlightText`, built with `textContent`); the 
 with the brief rendered as GitHub-style Markdown (`renderMarkdown`): `marked` (GFM) parses it
 and DOMPurify always sanitizes the output (http(s) links only; raw HTML shows as text). Then
 `linkify()` runs on the text nodes, never inside code or existing links, and every link gets
-`target="_blank" rel="noopener noreferrer"`. Both libraries are minified, vendored files in
-`skills/lifecycle/vendor/` with their licenses (`*.LICENSE`). `serve.mjs` serves only the two
-`/vendor/*.min.js` files, from the same origin; there is no CDN and no runtime install. To
-update them, replace the files and keep the licenses. The test DOM stubs DOMPurify. Both load the
+`target="_blank" rel="noopener noreferrer"`. Both libraries are the npm packages `marked` and
+`dompurify` (normal dependencies in the root `package.json`). `dashboard-markdown.ts` re-exports
+them, and `bun run build` bundles and minifies it to `skills/lifecycle/dashboard-markdown.mjs`,
+with the full licence text of both packages in its header. The dashboard imports `marked` and
+`DOMPurify` from it. `serve.mjs` serves it at `/dashboard-markdown.mjs` from the same origin;
+there is no CDN, no `vendor/` route, and consumers need no `node_modules`. To update the
+libraries, run `bun update marked dompurify` and rebuild. The test DOM uses the real `marked`
+and stubs DOMPurify. Both load the
 file through `/api/artifact`, so the server's access checks apply. The coordinator records only
 `result` in a worker record, so `serve.mjs` finds each task worker's brief by the name
 `<project>-<task>-<role>-brief.md` (a recorded `brief` wins) and sends the ones whose file exists as
@@ -582,9 +586,10 @@ hand-written `.mjs`. A hook bundle imports its siblings (`gate.mjs`, `broker.mjs
 as external `.mjs` files and `attention` loads `broker.mjs` lazily, so a hook
 that exits early pays no start cost for it. `stop-hook` and `serve` read
 `import.meta.url` to find their files (`skills/lifecycle/` for `stop-hook`;
-`dashboard.html`, `vendor/` and `factory-data.mjs` beside `serve.mjs`); both stay
+`dashboard.html` and `factory-data.mjs` beside `serve.mjs`); both stay
 valid because a bundle sits at the path of its source. `dashboard.html` is a
-static asset, not TypeScript. `factory-data.ts` exports the `factory/v1` types (`Factory`,
+static asset, not TypeScript. `dashboard-markdown.ts` is a browser entry: `scripts/build.ts`
+bundles it for the browser with `marked` and `dompurify` inlined (see the brief popup above). `factory-data.ts` exports the `factory/v1` types (`Factory`,
 `Task`, `Worker`, and the others). The dashboard loads `factory-data.mjs` in the
 browser, so it must not import `node:` modules.
 

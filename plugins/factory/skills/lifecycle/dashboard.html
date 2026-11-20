@@ -527,9 +527,8 @@
     </aside>
     </div>
     <noscript>Enable JavaScript to read the factory.</noscript>
-    <script src="vendor/marked.min.js"></script>
-    <script src="vendor/purify.min.js"></script>
     <script type="module">
+      import { marked, DOMPurify } from "./dashboard-markdown.mjs";
       import { states, outcomes, transitions, artifactName, githubURL, advisoryURL, validate, countByState, entered, byRecency, cardSummary, rankTasks, compareFactories, factorySection, factorySections, fitProjectLabel, sortReferences, cyclesOf, operatorStates, operatorOutcomes, unblockState, unblockChoice, stripRecommended, blockerClasses, blockerMeta, nextRun, nextDue, leverSpends, leverAutonomyCaps, maxParallelWorkers, maxRoleLimit, digitIndex } from "./factory-data.mjs";
 
       const SVG = "http://www.w3.org/2000/svg";

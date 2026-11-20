@@ -484,7 +484,6 @@ import { candidates, stateDirectories } from "./state-dir.mjs";
 var factoryFile = /-factory\.json$/i;
 var maxBody = 16384;
 var tokenPattern = /^[\w.~-]{16,}$/;
-var VENDOR = new Set(["/vendor/marked.min.js", "/vendor/purify.min.js"]);
 var errorCode = (error) => error.code;
 var errorMessage = (error) => error.message;
 var bracket = (host) => host.includes(":") ? `[${host}]` : host;
@@ -1030,8 +1029,8 @@ p{margin:0;color:#f87171}
         await sendAsset(request, response, "dashboard.html", "text/html; charset=utf-8");
       } else if (url.pathname === "/factory-data.mjs") {
         await sendAsset(request, response, "factory-data.mjs", "text/javascript; charset=utf-8");
-      } else if (VENDOR.has(url.pathname)) {
-        await sendAsset(request, response, url.pathname.slice(1), "text/javascript; charset=utf-8");
+      } else if (url.pathname === "/dashboard-markdown.mjs") {
+        await sendAsset(request, response, "dashboard-markdown.mjs", "text/javascript; charset=utf-8");
       } else if (url.pathname === "/api/factories") {
         const { entries, tag } = await listingTags();
         await sendTagged(request, response, "listing", tag, () => listFactories(entries));
