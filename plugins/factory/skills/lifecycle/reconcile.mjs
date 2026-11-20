@@ -8,6 +8,7 @@ import { resolveAttention, sameId } from "./attention.mjs";
 import { resolveFactory, waiterPid } from "./broker.mjs";
 import { intervalMs } from "./factory-data.mjs";
 import { hooksInactive } from "./gate.mjs";
+import { scanProposals } from "./proposals.mjs";
 import { readJSON } from "./state-dir.mjs";
 
 const usage = "Usage: node reconcile.mjs FACTORY_FILE [--default-branch NAME] [--blocked-after 24h] [--attention-after 30m]";
@@ -214,6 +215,32 @@ async function reconcile(file, defaultBranch = "main", blockedAfter = intervalMs
     }
   } catch (error) {
     errors.push(`attention: ${error.message.split("\n")[0]}`);
+  }
+
+  // A proposal waits for the user for as long as it takes, so an undecided one is never stuck work.
+  // A decision the coordinator has not recorded in the result file is: the wake may have been lost.
+  // Only the newest proposal of a result file counts, as the next run overwrites that file; and a
+  // result with no change has nothing to apply.
+  try {
+    const { open: proposed, decided } = await scanProposals(await resolveFactory(file));
+    const newest = (proposal) => ![...proposed, ...decided].some(({ result, at }) =>
+      result === proposal.result && Date.parse(at) > Date.parse(proposal.at));
+    for (const proposal of decided.filter(newest)) {
+      const result = await readJSON(join(directory, proposal.result));
+      if (!result?.change || result.decision) continue;
+      findings.push({
+        kind: "improve-decided-unapplied",
+        rule: proposal.rule,
+        proposal_id: proposal.id,
+        change: proposal.kind,
+        title: proposal.title,
+        decision: proposal.decision,
+        decided_at: proposal.decided_at,
+        result: proposal.result,
+      });
+    }
+  } catch (error) {
+    errors.push(`improve: ${error.message.split("\n")[0]}`);
   }
 
   if (missing.length > 0 && rex()?.sessionGone) {

@@ -223,7 +223,7 @@ test("moving back persists the comment, keeps worker context, and rejects a stal
   });
   assert.equal(task.feedback.acknowledged_id, null);
   assert.deepEqual(JSON.parse(await readFile(join(directory, factoryFile), "utf8")), data);
-  assert.deepEqual(await (await get(url, `/api/factory?file=${factoryFile}`)).json(), { ...data, attention: [] });
+  assert.deepEqual(await (await get(url, `/api/factory?file=${factoryFile}`)).json(), { ...data, attention: [], proposals: [] });
   const stale = await move(url, unblocked);
   assert.equal(stale.status, 409);
   assert.match((await stale.json()).error, /changed since it was read/);
@@ -2589,4 +2589,86 @@ test("the badge, the page title and the waiting list show pending attention as d
   assert.equal(ui.get("attention-empty").hidden, false);
   await badge.fire("click");
   assert.equal(ui.get("detail").hidden, true, "A second click closes the list.");
+});
+
+test("an improve proposal shows in the payload, and deciding it records improve.decided once", async (t) => {
+  const { url, directory } = await server(t);
+  const path = `/api/factory?file=${factoryFile}`;
+  const events = join(directory, "owner.repo-factory-events.jsonl");
+  const proposed = (id, minutes) => ({
+    id: `e-${id}`, at: new Date(Date.now() - minutes * 60_000).toISOString(), type: "improve.proposed", task: null, source: "improve",
+    data: { rule: "self-improve", change: "limit", title: `Title ${id}`, evidence: `Evidence ${id}`, recommended: "decline", proposal_id: id, result: "r.json" },
+  });
+  const decide = (body, headers = {}) => get(url, `/api/improve/decide?file=${factoryFile}`, {
+    method: "POST",
+    headers: { Origin: new URL(url).origin, "Content-Type": "application/json", ...headers },
+    body: JSON.stringify(body),
+  });
+  const log = async () => (await readFile(events, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+
+  const first = await get(url, path);
+  assert.deepEqual((await first.json()).proposals, []);
+  await appendFile(events, [proposed("p-new", 1), proposed("p-old", 9)].map((event) => `${JSON.stringify(event)}\n`).join(""));
+  const listed = await get(url, path, { headers: { "If-None-Match": first.headers.get("etag") } });
+  assert.equal(listed.status, 200, "A new proposal changes the tag.");
+  const { proposals } = await listed.json();
+  assert.deepEqual(proposals.map(({ id }) => id), ["p-old", "p-new"]);
+  assert.deepEqual(proposals[1], {
+    id: "p-new", rule: "self-improve", kind: "limit", title: "Title p-new", evidence: "Evidence p-new",
+    recommended: "decline", result: "r.json", at: proposals[1].at,
+  });
+
+  const ok = await decide({ proposal_id: "p-new", decision: "accepted", note: "fine" });
+  assert.equal(ok.status, 200, await ok.clone().text());
+  assert.deepEqual(await ok.json(), { recorded: true, decision: "accepted" });
+  const [decided] = (await log()).filter(({ type }) => type === "improve.decided");
+  assert.deepEqual([decided.source, decided.task, decided.data], ["dashboard", null, { proposal_id: "p-new", decision: "accepted", note: "fine" }]);
+  assert.deepEqual((await (await get(url, path)).json()).proposals.map(({ id }) => id), ["p-old"], "A decided proposal disappears.");
+
+  const repeat = await decide({ proposal_id: "p-new", decision: "declined" });
+  assert.deepEqual(await repeat.json(), { recorded: false, decision: "accepted" }, "A repeat click keeps the first decision.");
+  const both = await Promise.all([decide({ proposal_id: "p-old", decision: "declined" }), decide({ proposal_id: "p-old", decision: "accepted" })]);
+  assert.deepEqual(both.map((response) => response.status), [200, 200]);
+  assert.equal((await log()).filter(({ type }) => type === "improve.decided").length, 2, "Two clicks at once record one decision.");
+
+  for (const [body, status] of [
+    [{ proposal_id: "missing", decision: "accepted" }, 404],
+    [{ proposal_id: "p-old", decision: "applied" }, 400],
+    [{ proposal_id: "p-old", decision: "accepted", extra: 1 }, 400],
+    [{ decision: "accepted" }, 400],
+  ]) assert.equal((await decide(body)).status, status, JSON.stringify(body));
+  assert.equal((await decide({ proposal_id: "p-old", decision: "accepted" }, { Origin: "http://evil.example" })).status, 403);
+  assert.equal((await log()).filter(({ type }) => type === "improve.decided").length, 2, "A refused request records nothing.");
+});
+
+test("a proposal row has Accept and Decline buttons that post the decision, and counts on the badge", async (t) => {
+  const posts = [];
+  let reply = { status: 409, body: { error: "Nope." } };
+  const ui = await dashboard(t, {
+    fetchRequest: async (path, init, request) => {
+      if (!path.startsWith("/api/improve/decide")) return request();
+      posts.push({ path, body: JSON.parse(init.body) });
+      return new Response(JSON.stringify(reply.body), { status: reply.status });
+    },
+  });
+  const proposal = { id: "p1", rule: "self-improve", kind: "limit", title: "Lower <b>cap</b>", evidence: "Idle 40m", recommended: "accept", result: "r.json", at: "2026-05-01T12:00:00Z" };
+  ui.run(`load({ ...snapshot, proposals: ${JSON.stringify([proposal])} }, lastSource)`);
+  assert.equal(ui.get("attention-badge").hidden, false);
+  assert.equal(ui.get("attention-count").textContent, "1");
+  await ui.get("attention-badge").fire("click");
+  const [row] = ui.get("attention-list").children;
+  assert.match(row.textContent, /Proposal: Lower <b>cap<\/b>.*limit.*Idle 40m/);
+  const [accept, decline] = row.querySelectorAll(".attention-answer");
+  assert.deepEqual([accept.textContent, decline.textContent], ["Accept (recommended)", "Decline"]);
+
+  await decline.fire("click");
+  assert.deepEqual(posts, [{ path: `/api/improve/decide?file=${encodeURIComponent(factoryFile)}`, body: { proposal_id: "p1", decision: "declined" } }]);
+  assert.match(row.textContent, /Not recorded: Nope\./);
+  assert.equal(accept.disabled, false, "A refused decision can be tried again.");
+
+  reply = { status: 200, body: { recorded: true, decision: "accepted" } };
+  await accept.fire("click");
+  assert.deepEqual(posts.at(-1).body, { proposal_id: "p1", decision: "accepted" });
+  assert.match(row.textContent, /Recorded: accepted\./);
+  assert.equal(accept.disabled && decline.disabled, true, "A recorded decision is not sent twice.");
 });

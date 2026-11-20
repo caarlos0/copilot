@@ -15,6 +15,9 @@ const reconcileMs = 5 * 60_000;
 const workerOutcomes = ["working", "waiting", "complete", "blocked"];
 const attentionKinds = ["permission", "sandbox-bypass", "ask-user", "other"];
 const maxAttentionText = 2000;
+const changeKinds = ["rule", "limit", "budget", "process", "skill"];
+const answers = ["accept", "decline"];
+const decisions = ["accepted", "declined"];
 
 // Each type lists whether it needs --task and the data keys it must carry.
 const eventTypes = {
@@ -29,6 +32,8 @@ const eventTypes = {
   "lever.updated": { task: false, data: ["spend", "autonomy_cap"] },
   "attention.requested": { task: false, data: ["session", "kind", "text"] },
   "attention.resolved": { task: false, data: ["session"] },
+  "improve.proposed": { task: false, data: ["rule", "change", "title", "evidence", "recommended", "proposal_id", "result"] },
+  "improve.decided": { task: false, data: ["proposal_id", "decision"] },
 };
 
 export const eventsFile = (file) =>
@@ -113,6 +118,27 @@ function validateEvent({ type, task, source, data }) {
     throw new UsageError(`worker.result outcome must be one of: ${workerOutcomes.join(", ")}.`);
   }
   if (type.startsWith("attention.")) validateAttention(type, data);
+  if (type.startsWith("improve.")) validateImprove(type, data);
+}
+
+function validateImprove(type, data) {
+  const text = (key) => {
+    if (typeof data[key] !== "string" || data[key] === "") throw new UsageError(`${type} data "${key}" must be a non-empty string.`);
+  };
+  text("proposal_id");
+  if (type === "improve.decided") {
+    if (!decisions.includes(data.decision)) throw new UsageError(`${type} decision must be one of: ${decisions.join(", ")}.`);
+    if (data.note !== undefined && typeof data.note !== "string") throw new UsageError(`${type} data "note" must be a string.`);
+    return;
+  }
+  for (const key of ["rule", "title", "result"]) text(key);
+  if (typeof data.evidence !== "string") throw new UsageError(`${type} data "evidence" must be a string.`);
+  if (data.evidence.length > maxAttentionText) throw new UsageError(`${type} data "evidence" is at most ${maxAttentionText} characters.`);
+  if (!changeKinds.includes(data.change)) throw new UsageError(`${type} change must be one of: ${changeKinds.join(", ")}.`);
+  if (data.result !== basename(data.result) || data.result.startsWith(".")) {
+    throw new UsageError(`${type} data "result" must name a file in the state directory.`);
+  }
+  if (!answers.includes(data.recommended)) throw new UsageError(`${type} recommended must be one of: ${answers.join(", ")}.`);
 }
 
 function validateAttention(type, data) {
@@ -421,6 +447,13 @@ emit    Appends one event and prints it. Types: ${Object.keys(eventTypes).join("
         kind (${attentionKinds.join(", ")}), text (a string of at most ${maxAttentionText} characters), and
         optional role, pane (strings) and options (an array of strings). attention.resolved needs
         only session. Wait with --exclude-source attention so these never wake the factory.
+        improve.proposed (--source improve, no --task) puts one proposed change of an improve rule
+        in the dashboard's "Waiting for you" list. data: rule, change (${changeKinds.join(", ")}), title,
+        evidence (a string of at most ${maxAttentionText} characters), recommended (${answers.join(", ")}),
+        proposal_id (unique), and result (the result file name). The dashboard server appends
+        improve.decided (--source dashboard; data proposal_id, decision ${decisions.join(" or ")}, optional note)
+        when the user clicks. Wait with --exclude-source improve so a proposal never wakes the factory;
+        the decision always does.
         pr.merged is a hint from the implementation worker (role, pr, merge_commit, head); the
         factory verifies the merge on GitHub before it resolves the task.
         factory.mjs emits task.moved, task.updated, and feedback.pending after every task write,

@@ -923,7 +923,7 @@
 
       // The header badge and the page title count the items that wait for the user.
       function drawAttention() {
-        const count = snapshot?.attention.length ?? 0;
+        const count = (snapshot?.attention.length ?? 0) + (snapshot?.proposals?.length ?? 0);
         const badge = document.getElementById("attention-badge");
         badge.hidden = count === 0;
         badge.setAttribute("aria-pressed", String(attentionOpen()));
@@ -1919,22 +1919,76 @@
         return node;
       }
 
+      // One proposed change of an improve rule. The server records the click as improve.decided; the
+      // row leaves the list on the next refresh, so a sent decision only shows a note until then.
+      function proposalRow(item) {
+        const node = element("li", null, "task-row");
+        node.dataset.proposal = item.id;
+        const heading = element("div", null, "row-head");
+        const chips = element("span", null, "chips");
+        const waited = element("span", null, "chip");
+        waited.append(elapsedLabel(item.at));
+        chips.append(element("span", item.kind, "chip"), waited);
+        heading.append(element("h3", `Proposal: ${item.title}`), chips);
+        node.append(heading);
+        if (item.evidence) node.append(element("p", item.evidence, "attention-text"));
+        const box = element("div", null, "attention-answers");
+        const status = element("p", null, "muted");
+        status.hidden = true;
+        status.setAttribute("role", "status");
+        const buttons = [["accepted", "Accept", "accept"], ["declined", "Decline", "decline"]].map(([decision, label, answer]) => {
+          const button = element("button", item.recommended === answer ? `${label} (recommended)` : label, "attention-answer");
+          button.type = "button";
+          button.dataset.decision = decision;
+          button.addEventListener("click", () => decide(item, decision, box, buttons, status));
+          return button;
+        });
+        box.append(...buttons, status);
+        node.append(box);
+        return node;
+      }
+
+      async function decide(item, decision, box, buttons, status) {
+        const file = selection;
+        for (const button of buttons) button.disabled = true;
+        box.setAttribute("aria-busy", "true");
+        status.hidden = true;
+        try {
+          const result = await requestJSON(`/api/improve/decide?${new URLSearchParams({ file })}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ proposal_id: item.id, decision }),
+          });
+          status.textContent = `Recorded: ${result.decision}.`;
+          status.hidden = false;
+          if (selection === file) refresh();
+        } catch (cause) {
+          status.textContent = `Not recorded: ${cause.message}`;
+          status.hidden = false;
+          for (const button of buttons) button.disabled = false;
+        } finally {
+          box.setAttribute("aria-busy", "false");
+        }
+      }
+
       function renderAttention() {
-        const items = snapshot.attention;
+        const proposals = snapshot.proposals ?? [];
+        const items = [...proposals, ...snapshot.attention];
         document.getElementById("detail-title").textContent = "Waiting for you";
         document.getElementById("detail-title").append(element("span", String(items.length), "counter"));
         setCloseLabel("Close waiting list");
         const list = document.getElementById("attention-list");
         const signature = JSON.stringify(items);
         if (list.dataset.signature !== signature) {
-          list.replaceChildren(...items.slice(0, attentionLimit).map(attentionRow));
+          list.replaceChildren(...items.slice(0, attentionLimit).map((item) => (proposals.includes(item) ? proposalRow : attentionRow)(item)));
           list.dataset.signature = signature;
         }
         refreshElapsedLabels(list);
+        const help = proposals.length ? `${attentionHelp} Accept or decline a proposed change with its buttons.` : attentionHelp;
         const note = document.getElementById("attention-note");
         note.textContent = items.length > attentionLimit
-          ? `${attentionHelp} Showing the oldest ${attentionLimit} of ${items.length}.`
-          : attentionHelp;
+          ? `${help} Showing the oldest ${attentionLimit} of ${items.length}.`
+          : help;
         document.getElementById("attention-empty").hidden = items.length > 0;
       }
 
@@ -2114,8 +2168,12 @@
       }
 
       function load(data, file) {
-        // A move or settings answer carries no attention list; keep the one on screen until the next refresh.
-        snapshot = { ...data, attention: data.attention ?? snapshot?.attention ?? [] };
+        // A move or settings answer carries no attention or proposal list; keep the ones on screen until the next refresh.
+        snapshot = {
+          ...data,
+          attention: data.attention ?? snapshot?.attention ?? [],
+          proposals: data.proposals ?? snapshot?.proposals ?? [],
+        };
         lastSource = file;
         document.getElementById("error").hidden = true;
         draw();

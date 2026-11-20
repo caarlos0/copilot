@@ -376,3 +376,37 @@ test("--attention-after must be a duration", async (t) => {
   assert.equal(result.status, 1);
   assert.match(result.stderr, /--attention-after must look like/);
 });
+
+test("an old undecided proposal is not stuck work, but a decision missing from the result file is", async (t) => {
+  const f = await fixture(t, fakeRex);
+  const days = (n) => new Date(Date.now() - n * 24 * 3_600_000).toISOString();
+  const proposed = (id, result, at) => ({
+    id: `p-${id}`, at, type: "improve.proposed", task: null, source: "improve",
+    data: { rule: "self-improve", change: "limit", title: `Title ${id}`, evidence: "e", recommended: "accept", proposal_id: id, result },
+  });
+  const decided = (id, decision, at) => ({
+    id: `d-${id}`, at, type: "improve.decided", task: null, source: "dashboard", data: { proposal_id: id, decision },
+  });
+  await writeFile(join(f.directory, "owner.repo-factory-events.jsonl"), [
+    proposed("old-open", "open-result.json", days(3)),
+    proposed("lost", "lost-result.json", days(2)),
+    decided("lost", "accepted", days(1)),
+    proposed("applied", "applied-result.json", days(2)),
+    decided("applied", "declined", days(1)),
+    proposed("replaced", "new-result.json", days(3)),
+    decided("replaced", "accepted", days(2)),
+    proposed("newer", "new-result.json", days(1)),
+  ].map((event) => `${JSON.stringify(event)}\n`).join(""));
+  const change = { kind: "limit", summary: "s" };
+  await writeFile(join(f.directory, "open-result.json"), JSON.stringify({ change }));
+  await writeFile(join(f.directory, "lost-result.json"), JSON.stringify({ change }));
+  await writeFile(join(f.directory, "applied-result.json"), JSON.stringify({ change, decision: { status: "declined" } }));
+  await writeFile(join(f.directory, "new-result.json"), JSON.stringify({ change }));
+
+  const { findings, errors } = await f.run([]);
+  assert.deepEqual(errors, []);
+  assert.deepEqual(findings.map(({ decided_at, ...rest }) => rest), [{
+    kind: "improve-decided-unapplied", rule: "self-improve", proposal_id: "lost", change: "limit",
+    title: "Title lost", decision: "accepted", result: "lost-result.json",
+  }]);
+});

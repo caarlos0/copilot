@@ -585,3 +585,21 @@ test("reconcile.due does not fire while paused or without --due, and resumes whe
   out = await pending;
   assert.deepEqual(out.events.map(({ type }) => type), ["reconcile.due"]);
 });
+
+test("improve events need no task, validate their data, and a waiter that skips improve still wakes for the decision", async (t) => {
+  const f = await fixture(t);
+  const proposed = { rule: "self-improve", change: "limit", title: "Lower the cap", evidence: "idle", recommended: "accept", proposal_id: "p1", result: "r.json" };
+  const emit = (type, body, source) => f.run("emit", f.factory, type, "--source", source, "--data", JSON.stringify(body));
+  const done = await f.wait("--exclude-source", "improve");
+  assert.equal(emit("improve.proposed", proposed, "improve").status, 0);
+  assert.equal(emit("improve.decided", { proposal_id: "p1", decision: "accepted", note: "ok" }, "dashboard").status, 0);
+  assert.deepEqual((await done()).events.map(({ type, source }) => [type, source]), [["improve.decided", "dashboard"]]);
+
+  for (const bad of [
+    { ...proposed, change: "plugin" }, { ...proposed, recommended: "maybe" }, { ...proposed, proposal_id: "" },
+    { ...proposed, evidence: 3 }, { ...proposed, result: "../r.json" }, { ...proposed, title: undefined },
+  ]) assert.equal(emit("improve.proposed", bad, "improve").status, 2, JSON.stringify(bad));
+  for (const bad of [{ proposal_id: "p1", decision: "applied" }, { proposal_id: "p1" }, { decision: "accepted" }]) {
+    assert.equal(emit("improve.decided", bad, "dashboard").status, 2, JSON.stringify(bad));
+  }
+});

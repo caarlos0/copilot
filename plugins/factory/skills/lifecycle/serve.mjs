@@ -9,6 +9,7 @@ import { gzipSync } from "node:zlib";
 import { countByState, isObject, validate } from "./factory-data.mjs";
 import { resolveAttention, scanStamp, sendAnswer } from "./attention.mjs";
 import { ConflictError, update } from "./factory.mjs";
+import { decideProposal, scanProposals } from "./proposals.mjs";
 import { candidates, stateDirectories } from "./state-dir.mjs";
 
 const factoryFile = /-factory\.json$/i;
@@ -189,19 +190,30 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
     return scans.get(target);
   }
 
+  // Open improve proposals, reread only when the events log changes size or time.
+  const proposalScans = new Map();
+  async function openProposals(target) {
+    const stamp = await scanStamp(target);
+    if (proposalScans.get(target)?.stamp !== stamp) {
+      proposalScans.set(target, { stamp, open: (await scanProposals(target)).open });
+    }
+    return proposalScans.get(target).open;
+  }
+
   // Pending attention items, oldest first. They live in the events log and the session logs, so the
   // tag covers them too: a change there refreshes the browser even when the factory file is the same.
   // The scan also records the items it finds closed (answered, pane gone, expired), so they
-  // clear without waiting for a reconcile run.
+  // clear without waiting for a reconcile run. Open improve proposals ride along as `proposals`.
   async function factoryView(entry) {
     const attention = (await pendingAttention(entry.target))
       .map(({ id, session, kind, text, options, role, pane, rex_session, task, at }) =>
         ({ id, session, kind, text, options, role, pane, rex_session: rex_session ?? null, task, at }))
       .sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
-    const digest = createHash("sha1").update(JSON.stringify(attention)).digest("base64url");
+    const proposals = await openProposals(entry.target);
+    const digest = createHash("sha1").update(JSON.stringify([attention, proposals])).digest("base64url");
     return {
       tag: `${entry.tag.slice(0, -1)}-${digest}"`,
-      body: async () => ({ ...(await readFactory(entry)), attention }),
+      body: async () => ({ ...(await readFactory(entry)), attention, proposals }),
     };
   }
 
@@ -386,6 +398,24 @@ Stop with Ctrl+C. No packages are required. Invalid arguments exit 2; startup fa
     return { sent: true };
   }
 
+  // The user's click on a proposal. The writes go one at a time, so two clicks on the same
+  // proposal record one decision; the second answer shows the first decision.
+  let deciding = Promise.resolve();
+  async function decideImprove(request, file) {
+    const body = await readJSONBody(request);
+    if (!isObject(body) || Object.keys(body).some((key) => !["proposal_id", "decision", "note"].includes(key)) ||
+        typeof body.proposal_id !== "string" || !["accepted", "declined"].includes(body.decision) ||
+        !(body.note === undefined || typeof body.note === "string")) {
+      throw new HttpError(400, "Provide proposal_id, decision (accepted or declined), and an optional note.");
+    }
+    const { target } = await factoryTag(file);
+    const run = deciding.then(() => decideProposal(target, body.proposal_id, body.decision, body.note));
+    deciding = run.catch(() => {});
+    const result = await run;
+    if (!result) throw new HttpError(404, "That proposal does not exist.");
+    return result;
+  }
+
   // set holds only the sections the user changed; expected holds what the browser saw for each of them.
   async function setSettings(request, file) {
     const body = await readJSONBody(request);
@@ -549,8 +579,10 @@ p{margin:0;color:#f87171}
         send(response, 200, await setSettings(request, url.searchParams.get("file")));
       } else if (request.method === "POST" && url.pathname === "/api/attention/answer") {
         send(response, 200, await answerAttention(request, url.searchParams.get("file")));
+      } else if (request.method === "POST" && url.pathname === "/api/improve/decide") {
+        send(response, 200, await decideImprove(request, url.searchParams.get("file")));
       } else if (request.method !== "GET") {
-        throw new HttpError(405, "Use GET, or POST /api/move, /api/settings or /api/attention/answer for dashboard changes.");
+        throw new HttpError(405, "Use GET, or POST /api/move, /api/settings, /api/attention/answer or /api/improve/decide for dashboard changes.");
       } else if (url.pathname === "/" || url.pathname === "/dashboard.html") {
         await sendAsset(request, response, "dashboard.html", "text/html; charset=utf-8");
       } else if (url.pathname === "/factory-data.mjs") {
