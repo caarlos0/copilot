@@ -395,9 +395,9 @@
       <div id="project-bar">
         <div id="project-switch">
           <button id="project-toggle" type="button" aria-expanded="false" aria-controls="project-menu"
-            aria-label="Switch project">
+            aria-label="Change project">
             <span id="project-name"></span>
-            <span id="project-dot" class="update-dot" role="img" aria-label="Another project updated" hidden></span>
+            <span id="project-dot" class="update-dot" role="img" aria-label="Another project has a change" hidden></span>
             <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
               <path d="M4.427 7.427 7.573 10.573a.6.6 0 0 0 .854 0l3.146-3.146A.25.25 0 0 0 11.396 7H4.604a.25.25 0 0 0-.177.427Z"/>
             </svg>
@@ -424,12 +424,12 @@
           </svg>
           <span id="attention-count"></span>
         </button>
-        <button id="open-palette" type="button" aria-haspopup="dialog" aria-label="Go to a task (Cmd+K)" title="Go to a task (Cmd+K)">
+        <button id="open-palette" type="button" aria-haspopup="dialog" aria-label="Open a task (Cmd+K)" title="Open a task (Cmd+K)">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"
             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/>
           </svg>
-          <span class="label">Go to</span>
+          <span class="label">Open task</span>
         </button>
         <button id="refresh" type="button" aria-label="Refresh" title="Refresh (R)" aria-keyshortcuts="r">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"
@@ -457,12 +457,12 @@
     <main>
       <p id="discovery-error" role="alert" hidden></p>
       <details id="skipped" hidden>
-        <summary>Some factories could not be listed</summary>
+        <summary>The dashboard cannot list some factories</summary>
         <ul id="skipped-files"></ul>
       </details>
       <p id="error" role="alert" hidden></p>
       <div id="flow-wrap">
-        <svg id="flow" viewBox="0 0 1160 720" role="group" aria-label="Factory flow: tasks per state"></svg>
+        <svg id="flow" viewBox="0 0 1160 720" role="group" aria-label="Factory flow: number of tasks in each state"></svg>
       </div>
       <dialog id="move-dialog" aria-labelledby="move-title">
         <div class="detail-head">
@@ -481,12 +481,12 @@
         <p id="result-error" class="muted" role="alert" hidden></p>
         <div id="result-body" tabindex="0" role="region" aria-label="Result"></div>
       </dialog>
-      <dialog id="palette-dialog" aria-label="Go to task">
+      <dialog id="palette-dialog" aria-label="Open task">
         <div class="detail-head">
-          <input id="palette-input" type="text" autocomplete="off" placeholder="Go to task" aria-label="Go to task"
+          <input id="palette-input" type="text" autocomplete="off" placeholder="Open task" aria-label="Open task"
             role="combobox" aria-expanded="true" aria-autocomplete="list" aria-controls="palette-list">
           <button id="close-palette" class="icon-button close-button" type="button" tabindex="-1"
-            aria-label="Close palette" title="Close palette">&times;</button>
+            aria-label="Close task search" title="Close task search">&times;</button>
         </div>
         <ul id="palette-list" role="listbox" aria-label="Tasks"></ul>
         <p id="palette-status" class="muted" role="status"></p>
@@ -513,20 +513,20 @@
       <div id="producers-view" hidden>
         <p id="producers-note" class="muted"></p>
         <ul id="rule-list"></ul>
-        <h3 id="improve-heading" class="section">Self-improve</h3>
+        <h3 id="improve-heading" class="section">Self-improvement</h3>
         <ul id="improve-list"></ul>
         <h3 class="section">Skipped</h3>
         <ul id="ignored-list"></ul>
-        <p id="ignored-empty" class="muted" hidden>Nothing skipped.</p>
+        <p id="ignored-empty" class="muted" hidden>The factory skipped nothing.</p>
       </div>
       <div id="attention-view" hidden>
-        <p id="attention-note" class="muted">Pick an option to type it into the pane. Answer other prompts in their pane.</p>
+        <p id="attention-note" class="muted">Select an option to send it to the pane. Answer other prompts in their own pane.</p>
         <ul id="attention-list"></ul>
-        <p id="attention-empty" class="muted" hidden>Nothing is waiting for you.</p>
+        <p id="attention-empty" class="muted" hidden>No item waits for you.</p>
       </div>
     </aside>
     </div>
-    <noscript>Enable JavaScript to read the factory.</noscript>
+    <noscript>The factory page needs JavaScript.</noscript>
     <script type="module">
       import { marked, DOMPurify } from "./dashboard-markdown.mjs";
       import { states, outcomes, transitions, artifactName, githubURL, advisoryURL, validate, countByState, entered, byRecency, cardSummary, rankTasks, compareFactories, factorySection, factorySections, fitProjectLabel, sortReferences, cyclesOf, operatorStates, operatorOutcomes, unblockState, unblockChoice, stripRecommended, blockerClasses, blockerMeta, nextRun, nextDue, leverSpends, leverAutonomyCaps, maxParallelWorkers, maxRoleLimit, digitIndex } from "./factory-data.mjs";
@@ -1020,7 +1020,7 @@
       }
 
       function dueIn(due) {
-        return due <= Date.now() ? "due now" : `next in ${span(Math.ceil((due - Date.now()) / 1000))}`;
+        return due <= Date.now() ? "due now" : `next run in ${span(Math.ceil((due - Date.now()) / 1000))}`;
       }
 
       // Octicons (16px): issue-opened and git-pull-request; a plain shield for advisories.
@@ -1090,7 +1090,7 @@
 
       function closeMove() {
         const comment = moveDialog.querySelector("textarea")?.value;
-        if (comment && !window.confirm("Discard your unsaved comment?")) return;
+        if (comment && !window.confirm("Do you want to discard your unsaved comment?")) return;
         moveDialog.close();
       }
 
@@ -1177,14 +1177,14 @@
           text = await response.text();
           if (!response.ok) {
             try { message = JSON.parse(text).error; } catch {}
-            message ??= `The server answered ${response.status}.`;
+            message ??= `The server returned status ${response.status}.`;
           } else if (markdown) {
             parsed = text;
           } else {
-            try { parsed = JSON.parse(text); } catch (cause) { message = `Not valid JSON: ${cause.message}`; }
+            try { parsed = JSON.parse(text); } catch (cause) { message = `The file is not valid JSON: ${cause.message}`; }
           }
         } catch (cause) {
-          message = `Could not load the file: ${cause.message}`;
+          message = `The page cannot load the file: ${cause.message}`;
         }
         if (load !== resultLoad) return;
         if (message) {
@@ -1198,7 +1198,7 @@
 
       function closeSettings() {
         const form = settingsDialog.querySelector("form");
-        if (form?.dirty() && !window.confirm("Discard your unsaved settings?")) return;
+        if (form?.dirty() && !window.confirm("Do you want to discard your unsaved settings?")) return;
         settingsDialog.close();
       }
 
@@ -1332,15 +1332,15 @@
 
       // One section per stored object. Each field is saved only when its value changed.
       const settingFields = [
-        { section: "budget", label: "Total workers running at the same time", blank: "No total cap", min: 1, max: maxParallelWorkers },
+        { section: "budget", label: "Maximum workers that run at the same time", blank: "No limit", min: 1, max: maxParallelWorkers },
         { section: "limits", key: "investigation", label: "Investigation workers", min: 1, max: maxRoleLimit },
         { section: "limits", key: "implementation", label: "Implementation workers", min: 1, max: maxRoleLimit },
-        { section: "lever", key: "spend", label: "Spend ceiling", choices: leverSpends },
-        { section: "lever", key: "autonomy_cap", label: "Autonomy ceiling", choices: leverAutonomyCaps },
+        { section: "lever", key: "spend", label: "Spend limit", choices: leverSpends },
+        { section: "lever", key: "autonomy_cap", label: "Autonomy limit", choices: leverAutonomyCaps },
       ];
       const settingHeadings = {
-        budget: ["Workers", "The factory reads these on its next pass and never starts a worker past them. Lowering them does not stop running workers."],
-        lever: ["Lever", "Ceilings only: they lower what Lever resolves and never raise it. They grant nothing."],
+        budget: ["Workers", "The factory reads these values at its next check. The factory does not start a worker above a limit. A lower limit does not stop a running worker."],
+        lever: ["Lever", "These values are limits only. They can lower the level that Lever selects. They cannot raise it. They give no permission."],
       };
 
       function seenSettings(data) {
@@ -1357,8 +1357,8 @@
         const recorded = data.tasks.filter((task) => task.details?.lever?.effective_level)
           .sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at))[0];
         return recorded
-          ? `Latest recorded autonomy: ${recorded.details.lever.effective_level} (${recorded.id}). Read-only.`
-          : "No task records an autonomy level yet.";
+          ? `Latest recorded autonomy level: ${recorded.details.lever.effective_level} (${recorded.id}). You cannot change it here.`
+          : "No task has an autonomy level yet.";
       }
 
       function settingsForm() {
@@ -1379,7 +1379,7 @@
           control.name = field.key ?? field.section;
           if (field.choices) {
             control.append(...["", ...field.choices].map((value) => {
-              const option = element("option", value || "No cap");
+              const option = element("option", value || "No limit");
               option.value = value;
               return option;
             }));
@@ -1430,7 +1430,7 @@
               if (control.value === initial.get(field)) control.value = value;
               initial.set(field, value);
             }
-            status.textContent = "Reloaded. Your edits are kept. Check them before saving again.";
+            status.textContent = "The page reloaded the settings. It kept your changes. Check your changes. Then save again.";
             error.hidden = true;
             reload.hidden = true;
             if (selection === file) load(data, file);
@@ -1479,7 +1479,7 @@
             if (settingsDialog.querySelector("form") === form) settingsDialog.close();
             if (selection === file) load(data, file);
           } catch (cause) {
-            failed(new Error(`Settings were not saved: ${cause.message}`));
+            failed(new Error(`The factory did not save the settings: ${cause.message}`));
           } finally {
             mutation += 1;
             fields.disabled = false;
@@ -1490,7 +1490,7 @@
 
       function blockContext(task) {
         const { from, reason, since } = task.blocker;
-        const heading = element("p", `Blocked in ${from}, started `, "muted");
+        const heading = element("p", `Blocked in ${from}. It started `, "muted");
         heading.append(elapsedLabel(since, " ago"));
         const body = rich("p", reason, "unblock-reason");
         body.tabIndex = 0;
@@ -1559,7 +1559,7 @@
           context.replaceChildren(...(blocked ? blockContext(current) : []));
           const suggested = blocked ? current.blocker.options ?? [] : [];
           options.hidden = !suggested.length;
-          options.replaceChildren(...(suggested.length ? [element("p", "Suggested answers. Pick one, then edit or write your own below.", "muted")] : []),
+          options.replaceChildren(...(suggested.length ? [element("p", "Suggested answers. Select one. Then change it or write your own answer below.", "muted")] : []),
             ...suggested.map((option) => {
               const choice = rich("button", stripRecommended(option.label), "option");
               choice.type = "button";
@@ -1584,10 +1584,10 @@
         comment.required = true;
         comment.maxLength = 4000;
         comment.rows = 3;
-        comment.placeholder = "For example: This is now unblocked.";
+        comment.placeholder = "Example: The blocker is gone.";
         commentLabel.append(comment);
         const notice = element("p",
-          "The factory must read the saved comment and reconcile workers. This does not stop running workers or merge a PR.",
+          "The factory must read the saved comment and reconcile the workers. This action does not stop a running worker. It does not merge a PR.",
           "muted");
         const error = element("p", null, "save-error");
         error.setAttribute("role", "alert");
@@ -1615,12 +1615,12 @@
             const latest = data.tasks.find((item) => item.id === task.id);
             if (!latest) {
               save.disabled = true;
-              throw new Error("This task no longer exists. Your comment has not been discarded.");
+              throw new Error("This task does not exist now. The page kept your comment.");
             }
             current = latest;
             setChoices();
             save.disabled = !state.options.length;
-            notice.textContent = `Current state: ${places[current.state].title}. Your comment is kept. Review the destination before saving again.`;
+            notice.textContent = `Current state: ${places[current.state].title}. The page kept your comment. Check the destination. Then save again.`;
             error.hidden = true;
             if (selection === file) load(data, file);
           } catch (cause) {
@@ -1658,7 +1658,7 @@
               if (ownsDialog) panel.focus();
             }
           } catch (cause) {
-            failed(new Error(`Move was not confirmed: ${cause.message} Reload the task before trying again.`));
+            failed(new Error(`The factory did not confirm the move: ${cause.message} Reload the task. Then try again.`));
           } finally {
             mutation += 1;
             fields.disabled = false;
@@ -1720,7 +1720,7 @@
         }
         const box = element("div", null, `history-node${step.operator ? " operator" : ""}`);
         box.style.setProperty("--c", `var(--${step.state})`);
-        box.title = [`${step.state} at ${step.at}`, step.operator ? "operator move from the dashboard" : null, step.note]
+        box.title = [`${step.state} at ${step.at}`, step.operator ? "move by the operator in the dashboard" : null, step.note]
           .filter(Boolean).join("\n");
         const head = element("div");
         head.append(element("span", step.state, "history-state"), " ", element("span", step.time, "history-time"));
@@ -1860,9 +1860,9 @@
           if (task.merge) {
             merge.append(`Merge decision recorded for ${task.merge.authorized_by} (${task.merge.source}) `,
               elapsedLabel(task.merge.authorized_at, " ago"),
-              task.merge.requested_at ? "; landing requested" : "");
+              task.merge.requested_at ? ". Landing requested." : "");
           } else {
-            merge.textContent = "Merge: no current-head decision recorded";
+            merge.textContent = "Merge: no decision for the current head";
           }
           extras[stepOf("review")]?.push(merge);
         }
@@ -1928,7 +1928,7 @@
           const feedback = task.history.find((item) => item.feedback_id === task.feedback.id);
           node.append(rich("p", feedback.note, "feedback-note"),
             element("p", task.feedback.acknowledged_id === task.feedback.id
-              ? "Factory acknowledged this direction." : "Awaiting factory acknowledgement.", "muted"));
+              ? "The factory acknowledged this comment." : "The factory did not acknowledge this comment yet.", "muted"));
         }
         node.append(element("h4", `History (${task.history.length})`), ...historyFlow(task, expanded, stepExtras(task)));
         if (task.details && Object.keys(task.details).length) {
@@ -2024,7 +2024,7 @@
 
       const attentionKinds = { permission: "Permission", "sandbox-bypass": "Sandbox bypass", "ask-user": "Question", other: "Other" };
       const attentionLimit = 20;
-      const attentionHelp = "Pick an option to type it into the pane. Answer other prompts in their pane.";
+      const attentionHelp = "Select an option to send it to the pane. Answer other prompts in their own pane.";
 
       // The async clipboard API needs a secure context; the LAN mode is plain HTTP.
       async function writeClipboard(value) {
@@ -2037,7 +2037,7 @@
         document.body.append(area);
         try {
           area.select();
-          if (!document.execCommand("copy")) throw new Error("Copy refused");
+          if (!document.execCommand("copy")) throw new Error("The browser did not copy the text");
         } finally {
           area.remove();
         }
@@ -2091,11 +2091,11 @@
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ id: item.id, index }),
           });
-          status.textContent = `Sent "${item.options[index]}". Waiting for the prompt to close.`;
+          status.textContent = `The page sent "${item.options[index]}". Wait for the prompt to close.`;
           status.hidden = false;
           if (selection === file) refresh();
         } catch (cause) {
-          status.textContent = `Not sent: ${cause.message}`;
+          status.textContent = `The page did not send the answer: ${cause.message}`;
           status.hidden = false;
           for (const button of buttons) button.disabled = false;
         } finally {
@@ -2165,7 +2165,7 @@
           status.hidden = false;
           if (selection === file) refresh();
         } catch (cause) {
-          status.textContent = `Not recorded: ${cause.message}`;
+          status.textContent = `The factory did not record the decision: ${cause.message}`;
           status.hidden = false;
           for (const button of buttons) button.disabled = false;
         } finally {
@@ -2186,10 +2186,10 @@
           list.dataset.signature = signature;
         }
         refreshElapsedLabels(list);
-        const help = proposals.length ? `${attentionHelp} Accept or decline a proposed change with its buttons.` : attentionHelp;
+        const help = proposals.length ? `${attentionHelp} Use the buttons to accept or decline a proposed change.` : attentionHelp;
         const note = document.getElementById("attention-note");
         note.textContent = items.length > attentionLimit
-          ? `${help} Showing the oldest ${attentionLimit} of ${items.length}.`
+          ? `${help} The list shows the oldest ${attentionLimit} of ${items.length} items.`
           : help;
         document.getElementById("attention-empty").hidden = items.length > 0;
       }
@@ -2210,7 +2210,7 @@
         }
         if (rule.prompt) node.append(rich("p", `Prompt: ${rule.prompt}`));
         const due = nextRun(rule);
-        const when = !rule.every ? "No schedule: runs on start or when asked."
+        const when = !rule.every ? "No schedule: the rule runs at start or on request."
           : [`Every ${rule.every}`, rule.last_run_at ? `last run ${age(rule.last_run_at)} ago` : "never run",
             ...(due === null ? ["disabled"] : [dueIn(due)])].join(", ");
         node.append(element("p", when, "muted"));
@@ -2227,10 +2227,10 @@
 
       function renderProducers() {
         document.getElementById("detail-title").textContent = "Find work";
-        setCloseLabel("Close find work");
+        setCloseLabel("Close Find work");
         const manual = element("li", null, "task-row");
         manual.append(element("h3", "User links"),
-          element("p", "Send an issue or PR link to the factory session. Links you send do not use the rules or the skipped list.", "muted"));
+          element("p", "Send an issue link or a PR link to the factory session. The factory does not use the rules or the skipped list for these links.", "muted"));
         document.getElementById("rule-list").replaceChildren(...snapshot.rules.filter(isFinder).map(ruleRow), manual);
         const improve = snapshot.rules.filter((rule) => !isFinder(rule));
         document.getElementById("improve-list").replaceChildren(...improve.map(ruleRow));
@@ -2298,7 +2298,7 @@
           }
           return button;
         };
-        const empty = () => element("p", "No valid factories found", "muted");
+        const empty = () => element("p", "The dashboard found no valid factories", "muted");
         // Items arrive sorted, so each section is one run; an empty section has no header.
         const sections = (build) => [
           ...items.map((item, index) => item.section === null && build(item, index)).filter(Boolean),
@@ -2323,7 +2323,7 @@
           : [empty()]));
         const current = items.find((item) => item.file === selection)?.label ?? "Projects";
         document.getElementById("project-name").textContent = current;
-        projectToggle.setAttribute("aria-label", `Switch project, current: ${current}`);
+        projectToggle.setAttribute("aria-label", `Change project, current: ${current}`);
         document.getElementById("project-dot").hidden = !items.some((item) => item.updated);
         projectMenu.replaceChildren(...(items.length
           ? sections((item) => {
@@ -2363,9 +2363,9 @@
 
       function showError(cause) {
         const error = document.getElementById("error");
-        error.textContent = `Read failed: ${cause.message} ${lastSource
-          ? `Showing the last successful snapshot of ${lastSource}; it may be stale.`
-          : "No snapshot loaded."}`;
+        error.textContent = `The page cannot read the factory: ${cause.message} ${lastSource
+          ? `The page shows the last good data of ${lastSource}. The data can be old.`
+          : "The page has no data."}`;
         error.hidden = false;
       }
 
@@ -2416,7 +2416,7 @@
             found = await discover();
           } catch (cause) {
             const error = document.getElementById("discovery-error");
-            error.textContent = `Could not list factories: ${cause.message}`;
+            error.textContent = `The page cannot list the factories: ${cause.message}`;
             error.hidden = false;
           }
           if (!selection && found?.factories.length) {

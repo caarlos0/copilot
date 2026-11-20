@@ -409,9 +409,9 @@ test("each settings section reports a stale read as a conflict, and old files st
   const file = join(directory, factoryFile);
   const original = await readFile(file, "utf8");
   const stale = [
-    [{ budget: 5 }, { budget: 9 }, /Budget changed since it was read/],
-    [{ limits: { investigation: 1 } }, { limits: { investigation: 2 } }, /limits changed since it was read/],
-    [{ lever: { spend: "max" } }, { lever: { spend: "high" } }, /lever changed since it was read/],
+    [{ budget: 5 }, { budget: 9 }, /budget changed since it was read/i],
+    [{ limits: { investigation: 1 } }, { limits: { investigation: 2 } }, /limits changed since it was read/i],
+    [{ lever: { spend: "max" } }, { lever: { spend: "high" } }, /lever changed since it was read/i],
   ];
   for (const [set, expected, message] of stale) {
     const response = await settings(url, { set, expected });
@@ -552,9 +552,9 @@ test("a 304 skips load and redraw", async (t) => {
 test("a 304 still redraws the Find work countdowns", async (t) => {
   const ui = await dashboard(t, { now: Date.parse("2026-05-01T11:35:00Z") });
   const source = ui.get("flow").querySelector(".source");
-  assert.equal(source.querySelector(".sub").textContent, "next in 25m");
+  assert.equal(source.querySelector(".sub").textContent, "next run in 25m");
   await source.fire("click");
-  assert.match(ui.get("rule-list").children[0].textContent, /last run 5m ago, next in 25m/);
+  assert.match(ui.get("rule-list").children[0].textContent, /last run 5m ago, next run in 25m/);
 
   ui.setNow(Date.parse("2026-05-01T12:05:00Z"));
   ui.run("let loads = 0; const original = load; load = (...args) => { loads += 1; return original(...args); }");
@@ -1440,7 +1440,7 @@ test("Find work lists rules, user links and skipped work without changing task s
   assert.equal(ui.get("detail-title").textContent, "Find work");
   assert.equal(ui.get("task-view").hidden, true);
   assert.equal(ui.get("producers-view").hidden, false);
-  assert.equal(ui.get("close-detail")["aria-label"], "Close find work");
+  assert.equal(ui.get("close-detail")["aria-label"], "Close Find work");
   const rows = ui.get("rule-list").children;
   assert.deepEqual(rows.map((row) => row.querySelector("h3").textContent), ["new-bugs", "find-more", "User links"]);
   assert.match(rows[0].textContent, /search.*enabled.*Search: repo:owner\/repo is:issue.*Every 30m, last run .* ago, due now/);
@@ -1482,7 +1482,7 @@ test("Find work shows a paused factory and disabled or unscheduled rules", async
   assert.equal(source.querySelector(".sub").textContent, "on request");
   await source.fire("click");
   assert.equal(ui.get("producers-note").textContent, "Scheduled rules do not run while the factory is paused.");
-  assert.match(ui.get("rule-list").children[0].textContent, /rule.*disabled.*No schedule: runs on start or when asked/);
+  assert.match(ui.get("rule-list").children[0].textContent, /rule.*disabled.*No schedule: the rule runs at start or on request/);
   assert.equal(ui.get("improve-heading").hidden, true);
   assert.equal(ui.get("ignored-empty").hidden, false);
 });
@@ -1499,7 +1499,7 @@ test("Unblock lists options, fills the comment verbatim and saves through the mo
   const state = form.querySelector("select");
   const comment = form.querySelector("textarea");
   const context = form.querySelector(".unblock-context");
-  assert.equal(context.children[0].textContent.startsWith("Blocked in investigation, started "), true);
+  assert.equal(context.children[0].textContent.startsWith("Blocked in investigation. It started "), true);
   const reason = context.querySelector(".unblock-reason");
   assert.equal(reason.textContent, "The docs build needs a token that the worker cannot read.");
   assert.equal(reason.tabIndex, 0);
@@ -1586,7 +1586,7 @@ test("Unblock without options shows only the state and the comment; other rows k
   const reason = form.querySelector(".unblock-reason");
   assert.equal(reason.textContent, "<b>Old</b> blocker");
   assert.equal(reason.querySelectorAll("b").length, 0);
-  assert.match(form.querySelector(".unblock-context").textContent, /^Blocked in implementation, started .+? ago/);
+  assert.match(form.querySelector(".unblock-context").textContent, /^Blocked in implementation\. It started .+? ago/);
   await ui.get("close-move").fire("click");
   ui.run("choose('initial')");
   assert.equal(ui.get("task-list").querySelector(".move").textContent, "Move");
@@ -1735,7 +1735,7 @@ test("the move popup confirms before discarding a draft through Esc, close, or b
     await close();
     assert.equal(ui.get("move-dialog").open, true, "Declining must keep the popup open.");
     assert.equal(comment.value, "Keep this draft");
-    assert.equal(confirmations.at(-1), "Discard your unsaved comment?");
+    assert.equal(confirmations.at(-1), "Do you want to discard your unsaved comment?");
 
     answer = true;
     await close();
@@ -1856,7 +1856,7 @@ test("the Settings item at the bottom of the sidebar opens one settings dialog",
   assert.deepEqual([spend.value, cap.value], ["", ""]);
   assert.deepEqual(spend.options.map((option) => option.value), ["", "standard", "high", "max"]);
   assert.deepEqual(cap.options.map((option) => option.value), ["", "L0", "L1", "L2", "L3", "L4", "L5"]);
-  assert.match(form.textContent, /Latest recorded autonomy: L4 \(issue-3\)/);
+  assert.match(form.textContent, /Latest recorded autonomy level: L4 \(issue-3\)/);
   ui.get("detail").hidden = false;
   ui.press("Escape");
   assert.equal(ui.get("detail").hidden, false, "Escape must not close the task panel behind the dialog.");
@@ -1879,7 +1879,7 @@ test("the settings dialog keeps its draft across refresh, reports a conflict, an
   assert.equal(ui.get("settings-body").querySelector("input"), budget);
   assert.equal(budget.value, "6");
   await form.fire("submit");
-  assert.match(form.querySelector(".save-error").textContent, /Budget changed since it was read/);
+  assert.match(form.querySelector(".save-error").textContent, /budget changed since it was read/i);
   assert.equal(ui.get("settings-dialog").open, true);
   assert.equal(JSON.parse(await readFile(file, "utf8")).budget.max_parallel_workers, 8);
   await ui.get("close-settings").fire("click");
@@ -1960,7 +1960,7 @@ test("the rules say only the user's click answers an attention prompt, and only 
   assert.match(agents, /POST \/api\/attention\/answer/);
   assert.match(agents, /coordinator\s+still\s+never\s+answers/);
   assert.match(skill, /never\s+answer\s+the\s+prompt,\s+never\s+type\s+or\s+send\s+keys\s+into\s+the\s+pane/);
-  assert.match(html, /Pick an option to type it into the pane/);
+  assert.match(html, /Select an option to send it to the pane/);
 });
 
 test("the worker write boundary is present in the skill and plugin rules", () => {
@@ -2379,7 +2379,7 @@ test("the project dropdown lists the sorted factories, switches on a pick, and c
   const menu = ui.get("project-menu");
   const names = () => menu.querySelectorAll(".name").map((name) => name.textContent);
   assert.equal(ui.get("project-name").textContent, "owner/repo");
-  assert.equal(toggle["aria-label"], "Switch project, current: owner/repo");
+  assert.equal(toggle["aria-label"], "Change project, current: owner/repo");
   assert.deepEqual(names(), ["other/repo", "owner/repo"], "The menu keeps the sidebar order.");
   assert.equal(menu.hidden, true);
 
@@ -2554,10 +2554,10 @@ esac
     [{ id: "ask", index: -1 }, 400, /option index/],
     [{ id: "ask", index: "1" }, 400, /option index/],
     [{ id: "ask", index: 1, extra: true }, 400, /option index/],
-    [{ id: "missing", index: 0 }, 409, /no longer waiting/],
+    [{ id: "missing", index: 0 }, 409, /prompt is closed/],
     [{ id: "perm", index: 0 }, 409, /no options/],
     [{ id: "odd", index: 0 }, 409, /no pane/],
-    [{ id: "gone", index: 0 }, 409, /no longer waiting/],
+    [{ id: "gone", index: 0 }, 409, /prompt is closed/],
   ];
   for (const [body, status, message] of refusals) {
     const response = await answer(body);
@@ -2609,13 +2609,13 @@ test("an ask_user prompt shows its options as buttons that post the pick, and th
 
   await green.fire("click");
   assert.deepEqual(posts, [{ path: `/api/attention/answer?file=${encodeURIComponent(factoryFile)}`, body: { id: "e1", index: 1 } }]);
-  assert.match(ask.textContent, /Not sent: That prompt is no longer waiting\./);
+  assert.match(ask.textContent, /The page did not send the answer: That prompt is no longer waiting\./);
   assert.equal(red.disabled, false, "A refused answer can be tried again.");
 
   reply = { status: 200, body: { sent: true } };
   await red.fire("click");
   assert.deepEqual(posts.at(-1).body, { id: "e1", index: 0 });
-  assert.match(ask.textContent, /Sent "red"\. Waiting for the prompt to close\./);
+  assert.match(ask.textContent, /The page sent "red"\. Wait for the prompt to close\./);
   assert.equal(red.disabled && green.disabled, true, "A sent answer is not sent twice.");
 });
 
@@ -2735,7 +2735,7 @@ test("a proposal row has Accept and Decline buttons that post the decision, and 
 
   await decline.fire("click");
   assert.deepEqual(posts, [{ path: `/api/improve/decide?file=${encodeURIComponent(factoryFile)}`, body: { proposal_id: "p1", decision: "declined" } }]);
-  assert.match(row.textContent, /Not recorded: Nope\./);
+  assert.match(row.textContent, /The factory did not record the decision: Nope\./);
   assert.equal(accept.disabled, false, "A refused decision can be tried again.");
 
   reply = { status: 200, body: { recorded: true, decision: "accepted" } };
@@ -2826,7 +2826,7 @@ test("the result popup shows the error and the raw body for a missing file or in
   await writeFile(join(ui.directory, rule.worker.result), "not <b>json</b>");
   const ruleRow = ui.run(`ruleRow(${JSON.stringify(rule)})`);
   await ruleRow.querySelectorAll("a").find((node) => node.textContent === "result").fire("click");
-  assert.match(ui.get("result-error").textContent, /^Not valid JSON/);
+  assert.match(ui.get("result-error").textContent, /^The file is not valid JSON/);
   assert.equal(ui.get("result-body").textContent, "not <b>json</b>");
   assert.equal(ui.get("result-body").querySelectorAll("b").length, 0);
 });
