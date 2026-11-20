@@ -266,9 +266,35 @@
       .link-button:hover:not(:disabled), .link-button:active:not(:disabled) { background: none; text-decoration: underline; }
       #result-body.markdown { overflow-wrap: anywhere; }
       #result-body.markdown > :first-child { margin-top: 0; }
-      #result-body.markdown h1, #result-body.markdown h2, #result-body.markdown h3, #result-body.markdown h4 { margin: 16px 0 8px; font-size: 14px; color: var(--fg); }
-      #result-body.markdown p, #result-body.markdown ul, #result-body.markdown ol { margin: 8px 0; }
-      #result-body.markdown ul, #result-body.markdown ol { padding-left: 24px; }
+      #result-body.markdown > :last-child { margin-bottom: 0; }
+      #result-body.markdown h1, #result-body.markdown h2, #result-body.markdown h3,
+      #result-body.markdown h4, #result-body.markdown h5, #result-body.markdown h6 { margin: 24px 0 12px; font-weight: 600; line-height: 1.25; color: var(--fg); }
+      #result-body.markdown h1 { font-size: 1.7em; }
+      #result-body.markdown h2 { font-size: 1.4em; }
+      #result-body.markdown h3 { font-size: 1.15em; }
+      #result-body.markdown h4 { font-size: 1em; }
+      #result-body.markdown h5 { font-size: .9em; }
+      #result-body.markdown h6 { font-size: .85em; color: var(--fg-muted); }
+      #result-body.markdown h1, #result-body.markdown h2 { padding-bottom: .3em; border-bottom: 1px solid var(--border); }
+      #result-body.markdown p, #result-body.markdown ul, #result-body.markdown ol,
+      #result-body.markdown blockquote, #result-body.markdown pre, #result-body.markdown table { margin: 0 0 12px; }
+      #result-body.markdown ul, #result-body.markdown ol { padding-left: 2em; }
+      #result-body.markdown li > p { margin: 0; }
+      #result-body.markdown li + li { margin-top: .25em; }
+      #result-body.markdown li > ul, #result-body.markdown li > ol { margin: .25em 0 0; }
+      #result-body.markdown li:has(> input[type="checkbox"]), #result-body.markdown li:has(> p > input[type="checkbox"]) { list-style: none; }
+      #result-body.markdown li input[type="checkbox"] { appearance: auto; width: 14px; height: 14px; padding: 0; border: 0; margin: 0 .5em 0 -1.4em; vertical-align: middle; }
+      #result-body.markdown a:not([href]) { color: inherit; }
+      #result-body.markdown blockquote { padding: 0 1em; color: var(--fg-muted); border-left: .25em solid var(--border); }
+      #result-body.markdown pre { padding: 12px 16px; overflow: auto; white-space: pre; background: var(--bg-muted); border-radius: 6px; }
+      #result-body.markdown pre code { padding: 0; font-size: inherit; line-height: inherit; background: none; white-space: pre; }
+      #result-body.markdown pre[data-lang]::before { content: attr(data-lang); display: block; margin-bottom: 8px; color: var(--fg-muted); font-size: 11px; }
+      #result-body.markdown hr { height: 0; margin: 20px 0; border: 0; border-top: 4px solid var(--border); }
+      #result-body.markdown table { display: block; width: max-content; max-width: 100%; overflow: auto; border-collapse: collapse; }
+      #result-body.markdown th, #result-body.markdown td { padding: 6px 13px; border: 1px solid var(--border); }
+      #result-body.markdown th { font-weight: 600; }
+      #result-body.markdown tr:nth-child(2n) td { background: var(--bg-muted); }
+      #result-body.markdown del { color: var(--fg-muted); }
       h4 { margin: 12px 0 0; font-size: 12px; font-weight: 600; color: var(--fg-muted); }
       ol.history { margin: 8px 0; padding: 0; list-style: none; font-size: 12px; }
       .history-gap { position: relative; display: flex; align-items: center; gap: 8px; min-height: 22px; margin-left: 24px;
@@ -502,6 +528,8 @@
     </aside>
     </div>
     <noscript>Enable JavaScript to read the factory.</noscript>
+    <script src="vendor/marked.min.js"></script>
+    <script src="vendor/purify.min.js"></script>
     <script type="module">
       import { states, outcomes, transitions, artifactName, githubURL, advisoryURL, validate, countByState, entered, byRecency, cardSummary, rankTasks, compareFactories, factorySection, factorySections, fitProjectLabel, sortReferences, cyclesOf, operatorStates, operatorOutcomes, unblockState, unblockChoice, stripRecommended, blockerClasses, blockerMeta, nextRun, nextDue, leverSpends, leverAutonomyCaps, maxParallelWorkers, maxRoleLimit, digitIndex } from "./factory-data.mjs";
 
@@ -1086,80 +1114,42 @@
         resultOpener = null;
       }
 
-      const MARKDOWN_INLINE = /`([^`\n]+)`|\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)|\*\*([^*\n]+)\*\*/g;
+      const escapeHTML = (text) => text.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
 
-      // Inline code, bold and http(s) links; everything else is text, set with textContent.
-      function markdownInline(text) {
-        const parts = [];
-        let last = 0;
-        for (const match of text.matchAll(MARKDOWN_INLINE)) {
-          if (match.index > last) parts.push(text.slice(last, match.index));
-          if (match[1] != null) parts.push(element("code", match[1]));
-          else if (match[4] != null) parts.push(element("strong", match[4]));
-          else {
-            const node = link(match[2], match[3]);
-            node.target = "_blank";
-            node.rel = "noopener noreferrer";
-            parts.push(node);
+      // A brief is data: raw HTML and images show as text and a link, never as elements.
+      marked.use({ renderer: {
+        html: ({ text }) => escapeHTML(text),
+        image: ({ href, text }) => `<a href="${escapeHTML(href)}">${escapeHTML(text)}</a>`,
+      } });
+
+      // Links and the checkboxes of task lists survive; every other URL scheme and all active content do not.
+      const SANITIZE = { RETURN_DOM_FRAGMENT: true, ALLOWED_URI_REGEXP: /^https?:\/\//i, ADD_ATTR: ["align"] };
+      const NOT_LINKIFIED = new Set(["A", "CODE", "PRE"]);
+
+      function linkifyText(node) {
+        for (const child of [...node.childNodes]) {
+          if (child.nodeType === 3) {
+            const parts = linkify(child.data);
+            if (parts.some((part) => typeof part !== "string")) child.replaceWith(...parts);
+          } else if (!NOT_LINKIFIED.has(child.tagName)) {
+            linkifyText(child);
           }
-          last = match.index + match[0].length;
         }
-        if (last < text.length) parts.push(text.slice(last));
-        return parts;
       }
 
-      // Headings, flat lists, fenced code and paragraphs. Nodes are built, never parsed from HTML.
+      // GitHub-flavoured Markdown through marked, then DOMPurify; GitHub references become links.
       function renderMarkdown(source) {
-        const root = element("div");
-        const lines = source.replace(/\r\n?/g, "\n").split("\n");
-        let paragraph = [];
-        let list = null;
-        let listTag = null;
-        const flush = () => {
-          if (paragraph.length) {
-            const node = element("p");
-            node.append(...markdownInline(paragraph.join(" ")));
-            root.append(node);
-          }
-          paragraph = [];
-        };
-        for (let index = 0; index < lines.length; index += 1) {
-          const line = lines[index];
-          const fence = /^\s*```/.test(line);
-          const heading = /^(#{1,6})\s+(.*)$/.exec(line);
-          const item = /^\s*(?:([-*+])|\d+[.)])\s+(.*)$/.exec(line);
-          if (fence) {
-            flush();
-            list = null;
-            const code = [];
-            while (++index < lines.length && !/^\s*```/.test(lines[index])) code.push(lines[index]);
-            root.append(element("pre", code.join("\n")));
-          } else if (heading) {
-            flush();
-            list = null;
-            const node = element(`h${Math.min(heading[1].length + 1, 4)}`);
-            node.append(...markdownInline(heading[2]));
-            root.append(node);
-          } else if (item) {
-            flush();
-            const tag = item[1] ? "ul" : "ol";
-            if (!list || listTag !== tag) {
-              list = element(tag);
-              listTag = tag;
-              root.append(list);
-            }
-            const node = element("li");
-            node.append(...markdownInline(item[2]));
-            list.append(node);
-          } else if (!line.trim()) {
-            flush();
-            list = null;
-          } else {
-            list = null;
-            paragraph.push(line.trim());
-          }
+        const root = DOMPurify.sanitize(marked.parse(source), SANITIZE);
+        linkifyText(root);
+        for (const anchor of root.querySelectorAll("a")) {
+          anchor.target = "_blank";
+          anchor.rel = "noopener noreferrer";
         }
-        flush();
+        for (const box of root.querySelectorAll("input")) box.type = "checkbox"; // DOMPurify drops the type; the only inputs are task-list boxes
+        for (const code of root.querySelectorAll("code")) {
+          const language = /(?:^| )language-(\S+)/.exec(code.className)?.[1];
+          if (language && code.parentNode?.tagName === "PRE") code.parentNode.dataset.lang = language;
+        }
         return root;
       }
 

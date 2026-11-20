@@ -17,6 +17,7 @@ import { candidates, stateDirectories } from "./state-dir.mjs";
 const factoryFile = /-factory\.json$/i;
 const maxBody = 16384;
 const tokenPattern = /^[\w.~-]{16,}$/;
+const VENDOR = new Set(["/vendor/marked.min.js", "/vendor/purify.min.js"]);
 
 const bracket = (host) => (host.includes(":") ? `[${host}]` : host);
 const isWildcard = (host) => host === "0.0.0.0" || host === "::";
@@ -604,6 +605,8 @@ p{margin:0;color:#f87171}
         await sendAsset(request, response, "dashboard.html", "text/html; charset=utf-8");
       } else if (url.pathname === "/factory-data.mjs") {
         await sendAsset(request, response, "factory-data.mjs", "text/javascript; charset=utf-8");
+      } else if (VENDOR.has(url.pathname)) {
+        await sendAsset(request, response, url.pathname.slice(1), "text/javascript; charset=utf-8");
       } else if (url.pathname === "/api/factories") {
         const { entries, tag } = await listingTags();
         await sendTagged(request, response, "listing", tag, () => listFactories(entries));

@@ -271,8 +271,13 @@ dashboard reads only the factory file. A `--workers` write that sets a worker
 A worker's `result` link (history step, Find work) and the "View result" link under
 a card summary open one popup with the result file, pretty-printed and highlighted
 (`highlightText`, built with `textContent`). A worker's `brief` link opens the same popup
-with the brief rendered as Markdown (`renderMarkdown`: headings, flat lists, fenced code,
-inline code, bold and http(s) links; nodes are built, never parsed from HTML). Both load the
+with the brief rendered as GitHub-style Markdown (`renderMarkdown`): `marked` (GFM) parses it
+and DOMPurify always sanitizes the output (http(s) links only; raw HTML shows as text). Then
+`linkify()` runs on the text nodes, never inside code or existing links, and every link gets
+`target="_blank" rel="noopener noreferrer"`. Both libraries are minified, vendored files in
+`skills/lifecycle/vendor/` with their licenses (`*.LICENSE`). `serve.mjs` serves only the two
+`/vendor/*.min.js` files, from the same origin; there is no CDN and no runtime install. To
+update them, replace the files and keep the licenses. The test DOM stubs DOMPurify. Both load the
 file through `/api/artifact`, so the server's access checks apply. The popup shows only the
 title, a close button and the document. The links keep their `href`, so a modified click still
 opens the raw file in a new tab. A task card has no "Task details" section. The history steps

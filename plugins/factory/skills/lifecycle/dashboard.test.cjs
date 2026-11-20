@@ -70,6 +70,12 @@ test("serves the dashboard and the shared data module without caching", async (t
   const data = await get(url, "/factory-data.mjs");
   assert.match(data.headers.get("content-type"), /text\/javascript/);
   assert.match(await data.text(), /export const states/);
+  for (const name of ["marked", "purify"]) {
+    const vendored = await get(url, `/vendor/${name}.min.js`);
+    assert.match(vendored.headers.get("content-type"), /text\/javascript/);
+    assert.equal(await vendored.text(), readFileSync(join(__dirname, "vendor", `${name}.min.js`), "utf8"));
+  }
+  assert.equal((await get(url, "/vendor/marked.LICENSE")).status, 404, "Only the two scripts are served.");
 });
 
 test("lists valid factories with counts and reports invalid ones separately", async (t) => {
@@ -605,9 +611,12 @@ async function dashboard(t, { reducedMotion = true, confirm = () => true, now = 
       };
     }
     append(...children) {
-      for (const child of children) if (child instanceof Element) child.parentNode = this;
+      for (const child of children) if (typeof child === "object") child.parentNode = this;
       this.children.push(...children);
     }
+    get childNodes() { return this.children; }
+    get tagName() { return this.tag.toUpperCase(); }
+    nodeType = 1;
     prepend(child) {
       child.parentNode = this;
       this.children.unshift(child);
@@ -656,6 +665,31 @@ async function dashboard(t, { reducedMotion = true, confirm = () => true, now = 
       });
     }
   }
+  class Text {
+    nodeType = 3;
+    constructor(data) { this.data = data; }
+    get textContent() { return this.data; }
+    replaceWith(...nodes) { this.parentNode.children.splice(this.parentNode.children.indexOf(this), 1, ...nodes); }
+  }
+  const entities = { "&lt;": "<", "&gt;": ">", "&quot;": '"', "&amp;": "&" };
+  const decode = (text) => text.replace(/&#(\d+);|&\w+;/g, (entity, code) => code ? String.fromCharCode(code) : entities[entity] ?? entity);
+  // Parses the well-formed HTML that marked prints; the real sanitizer needs a browser DOM.
+  const parseHTML = (markup) => {
+    const root = new Element("fragment");
+    const open = [root];
+    for (const [, closing, tag, attributes, text] of markup.matchAll(/<(\/?)([a-z0-9]+)((?:\s+[\w-]+(?:="[^"]*")?)*)\s*>|([^<]+)/g)) {
+      if (text != null) open.at(-1).append(new Text(decode(text)));
+      else if (closing) open.pop();
+      else {
+        const node = new Element(tag);
+        for (const [, name, value = ""] of attributes.matchAll(/([\w-]+)(?:="([^"]*)")?/g)) node.setAttribute(name, decode(value));
+        open.at(-1).append(node);
+        if (!["hr", "br", "input"].includes(tag)) open.push(node);
+      }
+    }
+    return root;
+  };
+  const sanitized = [];
   for (const [markup, tag, id] of html.matchAll(/<(\w+)[^>]*\bid="([^"]+)"[^>]*>/g)) {
     const node = new Element(tag);
     node.hidden = /\shidden(?=[\s>])/.test(markup);
@@ -676,6 +710,7 @@ async function dashboard(t, { reducedMotion = true, confirm = () => true, now = 
   const context = vm.createContext({
     ...await import("./factory-data.mjs"),
     document, location, URL, URLSearchParams, Date: ClockDate,
+    DOMPurify: { sanitize: (markup, config) => { sanitized.push({ markup, config }); return parseHTML(markup); } },
     history: { replaceState: (_, __, value) => { location.href = new URL(value, location).href; } },
     window: { addEventListener: (name, callback) => { if (name === "resize") resizeListeners.push(callback); }, confirm },
     matchMedia: (query) => ({ matches: /reduce/.test(query) ? reducedMotion : phoneWidth > 0 }),
@@ -693,6 +728,7 @@ async function dashboard(t, { reducedMotion = true, confirm = () => true, now = 
   });
   const script = html.match(/<script type="module">([\s\S]*?)<\/script>/)[1]
     .replace(/^\s*import .+;\s*/m, "").replace(/\s*buildFlow\(\);\s*refresh\(\);\s*$/, "");
+  vm.runInContext(readFileSync(join(__dirname, "vendor", "marked.min.js"), "utf8"), context);
   vm.runInContext(script, context);
   vm.runInContext("buildFlow();", context);
   const run = (source) => vm.runInContext(source, context);
@@ -702,7 +738,7 @@ async function dashboard(t, { reducedMotion = true, confirm = () => true, now = 
     document.listeners.get("keydown")(pressed);
     return pressed;
   };
-  return { run, document, directory, press, timers, resize: (width) => { elements.get("flow-wrap").clientWidth = width; resizeListeners.forEach((callback) => callback()); }, get: (id) => elements.get(id), setNow: (value) => { now = value; } };
+  return { run, document, directory, press, sanitized, timers, resize: (width) => { elements.get("flow-wrap").clientWidth = width; resizeListeners.forEach((callback) => callback()); }, get: (id) => elements.get(id), setNow: (value) => { now = value; } };
 }
 
 test("unchanged refresh updates elapsed labels without replacing expanded rows or move drafts", async (t) => {
@@ -2833,12 +2869,12 @@ test("history steps copy the worktree path with brief feedback", async (t) => {
   assert.equal(path[0].textContent, "Copy worktree path");
 });
 
-test("the brief link opens the popup with the brief rendered as safe Markdown", async (t) => {
+test("the brief link opens the popup with the brief rendered as sanitized Markdown", async (t) => {
   const ui = await dashboard(t);
   const name = "owner.repo-issue-9-implementation-brief.md";
   await writeFile(join(ui.directory, name), [
     "# Task <b>nine</b>", "", "Intro with `code`, **bold** and [a link](https://example.com/x).",
-    "[bad](javascript:alert(1)) <script>alert(1)</script>", "", "- one", "- two", "", "1. first", "", "```", "<i>raw</i>", "```",
+    "<script>alert(1)</script>", "", "- one", "- two", "", "1. first", "", "```", "<i>raw</i>", "```",
   ].join("\n"));
   const task = structuredClone(example.tasks.find((item) => item.id === "issue-9"));
   const row = ui.run(`taskRow(${JSON.stringify(task)}, new Set())`);
@@ -2852,19 +2888,74 @@ test("the brief link opens the popup with the brief rendered as safe Markdown", 
   assert.equal(ui.get("result-title").textContent, "issue-9: implementation brief");
   assert.equal(ui.get("result-error").hidden, true);
   const body = ui.get("result-body");
-  assert.equal(body.querySelector("h2").textContent, "Task <b>nine</b>");
+  assert.equal(body.querySelector("h1").textContent, "Task <b>nine</b>");
   assert.equal(body.querySelector("code").textContent, "code");
   assert.equal(body.querySelector("strong").textContent, "bold");
   assert.equal(body.querySelectorAll("a").length, 1);
   assert.equal(body.querySelector("a").href, "https://example.com/x");
   assert.equal(body.querySelector("a").rel, "noopener noreferrer");
+  assert.equal(body.querySelector("a").target, "_blank");
   assert.equal(body.querySelector("ul").querySelectorAll("li").length, 2);
   assert.equal(body.querySelector("ol").querySelectorAll("li").length, 1);
-  assert.equal(body.querySelector("pre").textContent, "<i>raw</i>");
+  assert.equal(body.querySelector("pre").textContent, "<i>raw</i>\n");
   for (const tag of ["script", "b", "i"]) assert.equal(body.querySelectorAll(tag).length, 0, `No ${tag} element.`);
-  assert.match(body.textContent, /\[bad\]\(javascript:alert\(1\)\) <script>alert\(1\)<\/script>/);
+  assert.match(body.textContent, /<script>alert\(1\)<\/script>/);
+
+  // The page hands the sanitizer a DOM fragment request that admits only http(s) URLs, and never raw HTML.
+  const { markup, config } = ui.sanitized.at(-1);
+  assert.equal(config.RETURN_DOM_FRAGMENT, true);
+  assert.equal(config.ALLOWED_URI_REGEXP.test("https://example.com"), true);
+  for (const url of ["javascript:alert(1)", "data:text/html,x", "mailto:a@b.c", "/relative"]) assert.equal(config.ALLOWED_URI_REGEXP.test(url), false, url);
+  assert.doesNotMatch(markup, /<script|<b>|<i>/);
 
   await brief.fire("click", { ctrlKey: true });
+});
+
+test("the Markdown popup renders the GitHub constructs", async (t) => {
+  const ui = await dashboard(t);
+  const body = ui.run(`renderMarkdown(${JSON.stringify([
+    "###### Small", "", "~~gone~~ and *italic*  ", "next line", "", "> quoted", "", "- parent", "  - child", "", "- [x] done", "- [ ] todo", "",
+    "| Name | Count |", "|:-----|------:|", "| a \\| b | 1 |", "", "---", "", "```js", "const a = 1 < 2;", "```", "", "![diagram](https://example.com/d.png)",
+  ].join("\n"))})`);
+  assert.equal(body.querySelector("h6").textContent, "Small");
+  assert.equal(body.querySelector("del").textContent, "gone");
+  assert.equal(body.querySelector("em").textContent, "italic");
+  assert.equal(body.querySelectorAll("br").length, 1);
+  assert.equal(body.querySelector("blockquote").textContent.trim(), "quoted");
+  const [parent] = body.querySelectorAll("li");
+  assert.equal(parent.querySelector("ul").querySelectorAll("li").length, 1, "A nested list stays inside its item.");
+  assert.deepEqual(body.querySelectorAll("input").map((box) => [box.type, "checked" in box]), [["checkbox", true], ["checkbox", false]]);
+  assert.deepEqual(body.querySelectorAll("th").map((cell) => [cell.textContent, cell.align]), [["Name", "left"], ["Count", "right"]]);
+  assert.deepEqual(body.querySelectorAll("td").map((cell) => cell.textContent), ["a | b", "1"]);
+  assert.equal(body.querySelectorAll("hr").length, 1);
+  const pre = body.querySelector("pre");
+  assert.equal(pre.dataset.lang, "js");
+  assert.equal(pre.textContent, "const a = 1 < 2;\n");
+  const image = body.querySelectorAll("a").at(-1);
+  assert.deepEqual([image.textContent, image.href], ["diagram", "https://example.com/d.png"], "An image is shown as a link, never loaded.");
+  assert.equal(body.querySelectorAll("img").length, 0);
+});
+
+test("the Markdown popup links GitHub references in text but not in code or links", async (t) => {
+  const ui = await dashboard(t);
+  const body = ui.run(`renderMarkdown(${JSON.stringify([
+    "# Fix #1", "", "Paragraph with other/repo#2 and GHSA-cfgh-2345-vwxc.", "", "- item #3", "", "> quote #4", "",
+    "| ref |", "|-----|", "| #5 |", "", "`code #6`", "", "```", "fence #7", "```", "", "[label #8](https://example.com)", "",
+    "Plain https://example.com/p and https://github.com/o/r/pull/9.",
+  ].join("\n"))})`);
+  const links = body.querySelectorAll("a").map((anchor) => [anchor.textContent, anchor.href]);
+  assert.deepEqual(links, [
+    ["#1", "https://github.com/owner/repo/issues/1"],
+    ["other/repo#2", "https://github.com/other/repo/issues/2"],
+    ["GHSA-cfgh-2345-vwxc", "https://github.com/advisories/GHSA-cfgh-2345-vwxc"],
+    ["#3", "https://github.com/owner/repo/issues/3"],
+    ["#4", "https://github.com/owner/repo/issues/4"],
+    ["#5", "https://github.com/owner/repo/issues/5"],
+    ["label #8", "https://example.com"],
+    ["https://example.com/p", "https://example.com/p"],
+    ["https://github.com/o/r/pull/9", "https://github.com/o/r/pull/9"],
+  ]);
+  for (const anchor of body.querySelectorAll("a")) assert.deepEqual([anchor.target, anchor.rel], ["_blank", "noopener noreferrer"]);
 });
 
 test("copy links fall back to the selection when the clipboard API is missing", async (t) => {
