@@ -190,6 +190,7 @@
       .icon-button { display: inline-flex; flex: none; align-items: center; justify-content: center;
         width: 32px; height: 32px; padding: 0; line-height: 1; }
       .icon-button svg { display: block; }
+      .inline-copy { width: 24px; height: 24px; margin-left: 4px; vertical-align: middle; }
       .settings-form h3 { margin: 24px 0 4px; padding-top: 16px; border-top: 1px solid var(--border); font-size: 14px; }
       .settings-form h3:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
       .settings-form input { display: block; width: 100%; margin-top: 4px; padding: 5px 12px; background: var(--bg); font-weight: 400; }
@@ -317,7 +318,7 @@
       /* Phones and touch screens: 44px targets and 16px inputs (iOS zooms smaller ones). */
       @media (max-width: 700px), (pointer: coarse) {
         button, select, input, textarea { min-height: 44px; font-size: 16px; }
-        .icon-button { width: 44px; height: 44px; }
+        .icon-button, .inline-copy { width: 44px; height: 44px; }
         .move { padding: 3px 16px; }
         .summary-toggle { padding: 0 8px 0 0; }
         summary { padding: 12px 0; }
@@ -1805,6 +1806,9 @@
             const item = element("li");
             const dot = element("span", null, `dot ${worker.status}`);
             item.append(dot, ...codeParts(`${role}: ${worker.status}${worker.name ? `, ${worker.name}` : ""}${worker.pane ? `, ${worker.pane}` : ""} `));
+            if (plainID(worker.pane)) {
+              item.append(copyButton("Copy focus command", focusCommand(snapshot.rex_session, worker.pane), "inline-copy"), " ");
+            }
             appendArtifacts(item, worker, { task: task.id, role });
             list.append(item);
           }
@@ -1812,7 +1816,8 @@
         }
         if (task.worktree) {
           const worktree = element("p", "Worktree: ", "muted");
-          worktree.append(element("code", task.worktree.path));
+          worktree.append(element("code", task.worktree.path),
+            copyButton("Copy worktree path", task.worktree.path, "inline-copy"));
           more.append(worktree);
         }
 
@@ -1932,16 +1937,46 @@
         button.replaceChildren(icon);
       }
 
+      // The async clipboard API needs a secure context; the LAN mode is plain HTTP.
+      async function writeClipboard(value) {
+        if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(value);
+        const area = element("textarea");
+        area.value = value;
+        area.setAttribute("readonly", "");
+        area.style.position = "fixed";
+        area.style.opacity = "0";
+        document.body.append(area);
+        try {
+          area.select();
+          if (!document.execCommand("copy")) throw new Error("Copy refused");
+        } finally {
+          area.remove();
+        }
+      }
+
       async function copyText(button, value) {
         const label = button.title;
         try {
-          await navigator.clipboard.writeText(value);
+          await writeClipboard(value);
           setCopyState(button, "Copied", CHECK_PATHS);
         } catch {
           setCopyState(button, "Copy failed", COPY_PATHS);
         }
-        setTimeout(() => setCopyState(button, label, COPY_PATHS), 2000);
+        setTimeout(() => setCopyState(button, label, COPY_PATHS), 1500);
       }
+
+      function copyButton(label, value, extraClass = "") {
+        const button = element("button", null, `icon-button ${extraClass}`.trim());
+        button.type = "button";
+        setCopyState(button, label, COPY_PATHS);
+        button.addEventListener("click", () => copyText(button, value));
+        return button;
+      }
+
+      // The pane and session go into a shell command, so only plain IDs are copied. Rex resolves a
+      // block ID in one session only, so the command names the session when it is known.
+      const plainID = (value) => typeof value === "string" && /^[\w:.-]+$/.test(value);
+      const focusCommand = (session, pane) => `rex focus ${plainID(session) ? `-s ${session} ` : ""}${pane}`;
 
       function optionList(options) {
         const list = element("ul", null, "attention-options");
@@ -2005,17 +2040,10 @@
         }
         const meta = [item.task && `Task ${item.task}`, item.role].filter(Boolean).join(", ");
         if (meta) node.append(element("p", meta, "muted"));
-        // The pane and session go into a shell command, so only plain IDs get a copy button. Rex
-        // resolves a block ID in one session only, so the command names the session when it is known.
-        const plain = (value) => typeof value === "string" && /^[\w:.-]+$/.test(value);
-        if (plain(item.pane)) {
-          const command = `rex focus ${plain(item.rex_session) ? `-s ${item.rex_session} ` : ""}${item.pane}`;
+        if (plainID(item.pane)) {
+          const command = focusCommand(item.rex_session, item.pane);
           const focus = element("p", null, "attention-focus");
-          const copy = element("button", null, "icon-button");
-          copy.type = "button";
-          setCopyState(copy, "Copy rex focus command", COPY_PATHS);
-          copy.addEventListener("click", () => copyText(copy, command));
-          focus.append(element("code", command), copy);
+          focus.append(element("code", command), copyButton("Copy rex focus command", command));
           node.append(focus);
         } else if (item.pane) {
           node.append(element("p", `Pane: ${item.pane}`, "muted"));

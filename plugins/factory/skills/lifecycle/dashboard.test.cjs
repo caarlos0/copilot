@@ -2761,3 +2761,62 @@ test("the result popup shows the error and the raw body for a missing file or in
   assert.equal(ui.get("result-body").textContent, "not <b>json</b>");
   assert.equal(ui.get("result-body").querySelectorAll("b").length, 0);
 });
+
+test("task details copy the focus command of each worker pane and the worktree path", async (t) => {
+  const ui = await dashboard(t);
+  ui.run("choose('implementation')");
+  const row = ui.get("task-list").children.find((node) => /issue-9/.test(node.textContent));
+  const [pane, path] = ["Copy focus command", "Copy worktree path"]
+    .map((label) => row.querySelectorAll("button").filter((button) => button.title === label));
+  assert.equal(pane.length, 2, "Each worker with a pane gets a focus button.");
+  assert.equal(path.length, 1);
+  for (const button of [...pane, path[0]]) {
+    assert.equal(button["aria-label"], button.title);
+    assert.equal(button.type, "button");
+    assert.equal(button.textContent, "", "The button shows a glyph, not text.");
+    assert.ok(button.querySelector("svg"));
+  }
+
+  ui.run("navigator = { clipboard: { writeText: async (value) => { globalThis.copied = value; } } }");
+  await pane[0].fire("click");
+  assert.equal(ui.run("copied"), "rex focus -s work pane-1");
+  await pane[1].fire("click");
+  assert.equal(ui.run("copied"), "rex focus -s work pane-2");
+  assert.equal(pane[1]["aria-label"], "Copied");
+  await path[0].fire("click");
+  assert.equal(ui.run("copied"), "/Users/me/src/repo.worktrees/issue-9");
+  assert.equal(path[0]["aria-label"], "Copied");
+
+  const timer = ui.timers.at(-1);
+  assert.equal(timer.delay, 1500);
+  timer.callback();
+  assert.equal(path[0]["aria-label"], "Copy worktree path");
+});
+
+test("copy buttons fall back to the selection when the clipboard API is missing", async (t) => {
+  const ui = await dashboard(t);
+  ui.run("choose('implementation')");
+  const row = ui.get("task-list").children.find((node) => /issue-9/.test(node.textContent));
+  const button = row.querySelectorAll("button").find((node) => node.title === "Copy worktree path");
+
+  const copied = [];
+  const create = ui.document.createElement;
+  ui.document.createElement = (tag) => {
+    const node = create(tag);
+    node.select = () => { node.selected = true; };
+    return node;
+  };
+  ui.document.body.append = (node) => { ui.document.body.area = node; };
+  ui.document.execCommand = (command) => {
+    copied.push([command, ui.document.body.area.value, ui.document.body.area.selected]);
+    return true;
+  };
+  ui.run("navigator = {}");
+  await button.fire("click");
+  assert.deepEqual(copied, [["copy", "/Users/me/src/repo.worktrees/issue-9", true]]);
+  assert.equal(button["aria-label"], "Copied");
+
+  ui.document.execCommand = () => false;
+  await button.fire("click");
+  assert.equal(button["aria-label"], "Copy failed");
+});
