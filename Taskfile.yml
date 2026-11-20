@@ -6,6 +6,38 @@ tasks:
       - task --list
     silent: true
 
+  build:
+    desc: Rebuild the generated bundles of every plugin
+    cmds:
+      - task: build:factory
+      - task: build:coordination
+
+  build:factory:
+    dir: plugins/factory
+    cmds:
+      - bun run build
+
+  build:coordination:
+    dir: plugins/coordination
+    cmds:
+      - bun run build
+
+  typecheck:
+    desc: Typecheck every plugin
+    cmds:
+      - task: typecheck:factory
+      - task: typecheck:coordination
+
+  typecheck:factory:
+    dir: plugins/factory
+    cmds:
+      - bun run typecheck
+
+  typecheck:coordination:
+    dir: plugins/coordination
+    cmds:
+      - bun run typecheck
+
   release:coding:
     desc: Release the coding plugin
     cmds:

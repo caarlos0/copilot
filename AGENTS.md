@@ -42,15 +42,18 @@ structure or workflows change.
 
 ## Tooling
 
-Bun and TypeScript are dev and CI tooling only. The root `package.json`,
-`bun.lock` and `tsconfig.json` serve this repository, not the plugins. Plugins
-ship plain `.mjs` files that run with `node`, so consumers need no Bun and no
-`node_modules`. Install with `bun install --frozen-lockfile`, then run
-`bun run test` and `bun run typecheck`.
+Bun and TypeScript are dev and CI tooling only. A plugin that has TypeScript
+sources (`factory`, `coordination`) owns its own `package.json`, `bun.lock` and
+`tsconfig.json`, and there is no root package file. Plugins ship plain `.mjs`
+files that run with `node`, so consumers need no Bun and no `node_modules`. In
+that plugin directory, install with `bun install --frozen-lockfile`, then run
+`bun run typecheck`. Run all tests from the repository root with
+`node --test plugins`. `task build` and `task typecheck` run every plugin.
 
 A `.mjs` with a same-named `.ts` beside it is a generated bundle. Edit the
-`.ts`, run `bun run build` (`scripts/build.ts`), and commit both files. Never
-edit the `.mjs`. CI runs `bun run build && git diff --exit-code`. Sibling
+`.ts`, run `bun run build` in the plugin directory (`scripts/build.ts`, shared by
+all plugins), and commit both files. Never
+edit the `.mjs`. CI runs the build of every plugin, then `git diff --exit-code`. Sibling
 `.mjs` imports stay external, and tests keep running the `.mjs` paths. A
 bundle must not read files beside itself through `import.meta.url` or
 `__dirname`; check this before you port a module. The build fails when a
@@ -58,10 +61,14 @@ plugin module imports a file outside its own plugin directory. A relative
 `import type` from a sibling `.ts` is erased, so the build cannot see it; keep
 those inside the plugin too. Use the same Bun minor as CI: output differs
 between Bun releases (local variable names), so a stale Bun leaves a diff in
-unrelated bundles.
+unrelated bundles. The build rewrites absolute checkout paths that Bun inlines
+(`__filename` of CommonJS libraries) to repository-relative paths, so output does
+not depend on where the repository is cloned.
 
-Runtime libraries (`write-file-atomic`, `valibot`) are `dependencies` in
-`package.json`. The build bundles them into each `.mjs`, so consumers still need
+Runtime libraries (`write-file-atomic`, `valibot`, `marked`, `dompurify`) are
+`dependencies` in the `package.json` of the plugin that uses them. Do not add a
+library to a plugin that does not import it. The build bundles them into each
+`.mjs`, so consumers still need
 no `node_modules`; the import boundary applies to plugin sources, not to library
 files. A module served to the browser (`board-data`, `factory-data`) may use only
 libraries that need no `node:` built-ins, and `board-data.mjs` stays under 20 KB.

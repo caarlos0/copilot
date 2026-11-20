@@ -35,7 +35,7 @@ var __toESM = (mod, isNodeMode, target) => {
 var __commonJS = (cb, mod) => () => (mod || cb((mod = { exports: {} }).exports, mod), mod.exports);
 var __require = /* @__PURE__ */ createRequire(import.meta.url);
 
-// node_modules/signal-exit/dist/cjs/signals.js
+// plugins/factory/node_modules/signal-exit/dist/cjs/signals.js
 var require_signals = __commonJS(function(exports) {
   Object.defineProperty(exports, "__esModule", { value: true });
   exports.signals = undefined;
@@ -49,7 +49,7 @@ var require_signals = __commonJS(function(exports) {
   }
 });
 
-// node_modules/signal-exit/dist/cjs/index.js
+// plugins/factory/node_modules/signal-exit/dist/cjs/index.js
 var require_cjs = __commonJS(function(exports) {
   var _a;
   Object.defineProperty(exports, "__esModule", { value: true });
@@ -252,9 +252,9 @@ var require_cjs = __commonJS(function(exports) {
   _a = signalExitWrap(processOk(process2) ? new SignalExit(process2) : new SignalExitFallback), exports.onExit = _a.onExit, exports.load = _a.load, exports.unload = _a.unload;
 });
 
-// node_modules/write-file-atomic/lib/index.js
+// plugins/factory/node_modules/write-file-atomic/lib/index.js
 var require_lib = __commonJS(function(exports, module) {
-  var __filename = "/Users/carlos/Developer/worktrees/copilot/swap-atomic-write-and-schema/node_modules/write-file-atomic/lib/index.js";
+  var __filename = "plugins/factory/node_modules/write-file-atomic/lib/index.js";
   module.exports = writeFile;
   module.exports.sync = writeFileSync;
   module.exports._getTmpname = getTmpname;

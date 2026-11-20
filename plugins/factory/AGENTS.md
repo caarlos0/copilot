@@ -275,12 +275,12 @@ with the brief rendered as GitHub-style Markdown (`renderMarkdown`): `marked` (G
 and DOMPurify always sanitizes the output (http(s) links only; raw HTML shows as text). Then
 `linkify()` runs on the text nodes, never inside code or existing links, and every link gets
 `target="_blank" rel="noopener noreferrer"`. Both libraries are the npm packages `marked` and
-`dompurify` (normal dependencies in the root `package.json`). `dashboard-markdown.ts` re-exports
-them, and `bun run build` bundles and minifies it to `skills/lifecycle/dashboard-markdown.mjs`,
+`dompurify` (normal dependencies in `plugins/factory/package.json`). `dashboard-markdown.ts` re-exports
+them, and `bun run build` (in `plugins/factory`) bundles and minifies it to `skills/lifecycle/dashboard-markdown.mjs`,
 with the full licence text of both packages in its header. The dashboard imports `marked` and
 `DOMPurify` from it. `serve.mjs` serves it at `/dashboard-markdown.mjs` from the same origin;
 there is no CDN, no `vendor/` route, and consumers need no `node_modules`. To update the
-libraries, run `bun update marked dompurify` and rebuild. The test DOM uses the real `marked`
+libraries, run `bun update marked dompurify` in `plugins/factory` and rebuild. The test DOM uses the real `marked`
 and stubs DOMPurify. Both load the
 file through `/api/artifact`, so the server's access checks apply. The coordinator records only
 `result` in a worker record, so `serve.mjs` finds each task worker's brief by the name
@@ -584,7 +584,7 @@ or scheduled rule remains actionable.
 `reconcile`, `pr-watch`, `worktree`, `factory-data`, `factory`, `broker` and
 `serve` in
 `skills/lifecycle/`, and `guard`, `attention` and `stop-hook` in `hooks/`, are
-TypeScript, checked with `strict` on. Edit the `.ts`, run `bun run build` at the repository root, and
+TypeScript, checked with `strict` on. Edit the `.ts`, run `bun run build` in `plugins/factory`, and
 commit the `.ts` and the generated `.mjs` together. The other modules are still
 hand-written `.mjs`. A hook bundle imports its siblings (`gate.mjs`, `broker.mjs`)
 as external `.mjs` files and `attention` loads `broker.mjs` lazily, so a hook
