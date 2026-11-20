@@ -12,32 +12,32 @@ var isLaunch = (c) => isCopilot(c) && /\s(?:-i|--interactive|-p|--prompt)\b/.tes
 var BASH_RULES = [
   {
     name: "gh-pr-merge",
-    reason: "the coordinator never merges a PR; an implementation worker lands it",
+    reason: "The coordinator never merges a PR. An implementation worker lands it.",
     deny: (c) => /^gh\b.*\bpr\s+merge\b/.test(c)
   },
   {
     name: "git-merge-ff-only",
-    reason: "the coordinator lands a branch only with `git merge --ff-only`",
+    reason: "The coordinator lands a branch only with `git merge --ff-only`.",
     deny: (c) => /^git(?:\s+-[Cc]\s+\S+)*\s+merge(?![-\w])/.test(c) && !/\s--ff-only\b/.test(c)
   },
   {
     name: "rex-session",
-    reason: "the factory runs in the Rex session it started in; never create or rename one",
+    reason: "The factory runs in the Rex session where it started. Never create or rename a Rex session.",
     deny: (c) => /^rex\s+new\b/.test(c) || /^rex\s+session\s+(?:new|create|rename)\b/.test(c)
   },
   {
     name: "waiter-async-bash",
-    reason: "arm `broker.mjs wait` as async bash and read its output; a waiter run with `&`, nohup, setsid, disown or stdout redirected is orphaned or unread, so its wake never reaches you",
+    reason: "Run `broker.mjs wait` as async bash and read its output. A waiter that runs with `&`, nohup, setsid, or disown, or with stdout sent to a file, has no reader. Its wake never reaches you.",
     deny: (c) => /^(?:\S*\/)?(?:node|bun)\s+\S*broker\.mjs\s+wait\b/.test(c) && (/\s&$/.test(c) || /(?:^|\s)(?:1|&)?>>?\s*(?!&)\S/.test(c))
   },
   {
     name: "copilot-autopilot",
-    reason: "workers never run with --autopilot",
+    reason: "A worker never runs with --autopilot.",
     deny: (c) => isCopilot(c) && /\s--autopilot\b/.test(c)
   },
   {
     name: "copilot-model",
-    reason: "every worker launch needs `--model claude-sonnet-5.5`",
+    reason: "Every worker launch needs `--model claude-sonnet-5.5`.",
     deny: (c) => isLaunch(c) && !/\s--model[ =]claude-sonnet-5\.5(?=\s|$)/.test(c)
   }
 ];
@@ -152,7 +152,7 @@ function targets(tool, args, cwd) {
 }
 function decide({ toolName = "", toolArgs, cwd = process.cwd() }) {
   if (DENIED_TOOLS.includes(toolName)) {
-    return { name: "no-subagents", reason: "the factory uses Rex workers, never subagents or workflows" };
+    return { name: "no-subagents", reason: "The factory uses Rex workers. Never use subagents or workflows." };
   }
   const args = typeof toolArgs === "string" ? JSON.parse(toolArgs) : toolArgs ?? {};
   if (toolName === "bash") {
@@ -169,7 +169,7 @@ function decide({ toolName = "", toolArgs, cwd = process.cwd() }) {
       if (!roots.some((r) => target === r || target.startsWith(r + sep))) {
         return {
           name: "write-boundary",
-          reason: `${path} is outside the state directories and $TMPDIR; the coordinator never edits product files, so give the change to a worker`
+          reason: `${path} is outside the state directories and $TMPDIR. The coordinator never edits product files. Give the change to a worker.`
         };
       }
     }

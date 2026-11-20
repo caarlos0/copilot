@@ -11,7 +11,7 @@
     "preToolUse": [
       {
         "type": "command",
-        "bash": "[ \"$FACTORY_COORDINATOR\" != 0 ] || exit 0; command -v node >/dev/null || exit 0; root=\"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$COPILOT_PLUGIN_ROOT}}\"; [ -f \"$root/hooks/guard.mjs\" ] || { echo 'factory guard: plugin root not found, guard skipped' >&2; exit 0; }; exec node \"$root/hooks/guard.mjs\"",
+        "bash": "[ \"$FACTORY_COORDINATOR\" != 0 ] || exit 0; command -v node >/dev/null || exit 0; root=\"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$COPILOT_PLUGIN_ROOT}}\"; [ -f \"$root/hooks/guard.mjs\" ] || { echo 'factory guard: plugin root not found. The guard does not run.' >&2; exit 0; }; exec node \"$root/hooks/guard.mjs\"",
         "timeoutSec": 25
       },
       {
