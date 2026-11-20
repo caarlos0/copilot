@@ -1,29 +1,29 @@
-const assert = require("node:assert/strict");
-const { readFileSync } = require("node:fs");
-const { mkdir, mkdtemp, readdir, rm, truncate, utimes, writeFile } = require("node:fs/promises");
-const { spawnSync } = require("node:child_process");
-const { join } = require("node:path");
-const { tmpdir } = require("node:os");
-const { test } = require("node:test");
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { mkdir, mkdtemp, readdir, rm, truncate, utimes, writeFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { test, type TestContext } from "node:test";
 
-const script = join(__dirname, "archive.mjs");
-const example = JSON.parse(readFileSync(join(__dirname, "factory.example.json"), "utf8"));
-const resolvedTask = example.tasks.find((task) => task.state === "resolved");
-const openTask = example.tasks.find((task) => task.state === "initial");
-const daysAgo = (days) => new Date(Date.now() - days * 86_400_000);
+const script = join(import.meta.dirname, "archive.mjs");
+const example = JSON.parse(readFileSync(join(import.meta.dirname, "factory.example.json"), "utf8"));
+const resolvedTask = example.tasks.find((task: { state: string }) => task.state === "resolved");
+const openTask = example.tasks.find((task: { state: string }) => task.state === "initial");
+const daysAgo = (days: number) => new Date(Date.now() - days * 86_400_000);
 
-const task = (template, id, patch = {}) => ({ ...template, id, issue: null, pr: null, links: [], ...patch });
-const resolved = (id, days, patch = {}) =>
+const task = (template: object, id: string, patch: Record<string, unknown> = {}) => ({ ...template, id, issue: null, pr: null, links: [], ...patch });
+const resolved = (id: string, days: number, patch: Record<string, unknown> = {}) =>
   task(resolvedTask, id, { updated_at: daysAgo(days).toISOString(), ...patch });
 
-async function fixture(t, tasks, archived = [], running = []) {
+async function fixture(t: TestContext, tasks: unknown[], archived: unknown[] = [], running: string[] = []) {
   const directory = await mkdtemp(join(tmpdir(), "factory-archive-test-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const file = join(directory, "owner.repo-factory.json");
   await writeFile(file, JSON.stringify({
     ...example,
     tasks,
-    rules: example.rules.map((rule) => running.includes(rule.id)
+    rules: example.rules.map((rule: { id: string; worker: object }) => running.includes(rule.id)
       ? { ...rule, worker: { ...rule.worker, status: "running" } } : rule),
   }));
   if (archived.length) {
@@ -33,13 +33,13 @@ async function fixture(t, tasks, archived = [], running = []) {
       format: "factory-archive/v1", project: example.project, day: "2026-01-01", tasks: archived,
     }));
   }
-  const put = async (name, age = 30) => {
+  const put = async (name: string, age = 30) => {
     const path = join(directory, name);
     await writeFile(path, "x");
     await utimes(path, daysAgo(age), daysAgo(age));
     return path;
   };
-  const clean = (...args) => {
+  const clean = (...args: string[]) => {
     const result = spawnSync(process.execPath, [script, "clean", file, ...args], { encoding: "utf8" });
     assert.equal(result.status, 0, result.stderr);
     return JSON.parse(result.stdout);
@@ -48,7 +48,7 @@ async function fixture(t, tasks, archived = [], running = []) {
   return { directory, put, clean, names };
 }
 
-const artifacts = (id) => [
+const artifacts = (id: string) => [
   `owner.repo-${id}-investigation-brief.md`,
   `owner.repo-${id}-implementation-brief.md`,
   `owner.repo-${id}-implementation-brief.97447fb3.md`,
@@ -63,7 +63,7 @@ test("dry run lists the artifacts of old resolved tasks and deletes nothing", as
   const result = f.clean();
   assert.equal(result.run, false);
   assert.deepEqual(result.tasks, ["old"]);
-  assert.deepEqual(result.delete.map((item) => item.path.split("/").pop()).sort(), artifacts("old").sort());
+  assert.deepEqual(result.delete.map((item: { path: string }) => item.path.split("/").pop()).sort(), artifacts("old").sort());
   assert.deepEqual(await f.names(), before);
 });
 
@@ -115,8 +115,8 @@ test("protects open tasks, pending feedback, referenced files and recent files",
   await f.put("owner.repo-old-implementation-brief.md", 0.5);
   await f.put("owner.repo-old-implementation-result.json");
   const result = f.clean("--run");
-  assert.deepEqual(result.delete.map((item) => item.path.split("/").pop()), ["owner.repo-old-implementation-result.json"]);
-  assert.deepEqual(result.kept.map((item) => item.reason), ["modified in the last 24 hours"]);
+  assert.deepEqual(result.delete.map((item: { path: string }) => item.path.split("/").pop()), ["owner.repo-old-implementation-result.json"]);
+  assert.deepEqual(result.kept.map((item: { reason: string }) => item.reason), ["modified in the last 24 hours"]);
   assert.deepEqual(await f.names().then((names) => names.filter((name) => name.endsWith(".md") || name.endsWith("result.json"))), [
     "owner.repo-old-implementation-brief.md",
     "owner.repo-open-implementation-brief.md",
@@ -139,7 +139,7 @@ test("an open task that references a file keeps it", async (t) => {
 
 test("reports large unreferenced files as stale-large and never deletes them", async (t) => {
   const f = await fixture(t, [task(openTask, "open", { details: { evidence: "owner.repo-kept.bin" } })]);
-  const big = async (name, age) => {
+  const big = async (name: string, age: number) => {
     const path = await f.put(name, age);
     await truncate(path, 101 * 1024 * 1024);
     await utimes(path, daysAgo(age), daysAgo(age));
@@ -150,13 +150,13 @@ test("reports large unreferenced files as stale-large and never deletes them", a
   await big("staging-new.tmp", 0.1);
   await f.put("small.tmp");
   const result = f.clean("--run");
-  assert.deepEqual(result["stale-large"].map((item) => item.path), [stale]);
+  assert.deepEqual(result["stale-large"].map((item: { path: string }) => item.path), [stale]);
   assert.ok((await f.names()).includes("staging-old.tmp"));
 });
 
 test("a large file named only by another factory file is not stale-large", async (t) => {
   const f = await fixture(t, [task(openTask, "open")]);
-  const big = async (name) => {
+  const big = async (name: string) => {
     const path = await f.put(name, 10);
     await truncate(path, 101 * 1024 * 1024);
     await utimes(path, daysAgo(10), daysAgo(10));
@@ -165,10 +165,10 @@ test("a large file named only by another factory file is not stale-large", async
   const stale = await big("unreferenced.tmp");
   await big("referenced.tmp");
   await writeFile(join(f.directory, "other.repo-factory.json"), JSON.stringify({ note: "referenced.tmp" }));
-  assert.deepEqual(f.clean()["stale-large"].map((item) => item.path), [stale]);
+  assert.deepEqual(f.clean()["stale-large"].map((item: { path: string }) => item.path), [stale]);
 });
 
-const basename = (item) => item.path.split("/").pop();
+const basename = (item: { path: string }) => item.path.split("/").pop();
 
 test("lists rule briefs and results of rules with no running worker by file age", async (t) => {
   const f = await fixture(t, [task(openTask, "open")]);

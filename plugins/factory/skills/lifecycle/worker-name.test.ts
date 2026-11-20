@@ -1,9 +1,9 @@
-const assert = require("node:assert/strict");
-const { spawnSync } = require("node:child_process");
-const { join } = require("node:path");
-const { test } = require("node:test");
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { join } from "node:path";
+import { test } from "node:test";
 
-const script = join(__dirname, "worker-name.mjs");
+const script = join(import.meta.dirname, "worker-name.mjs");
 
 async function load() {
   return (await import(script)).workerName;

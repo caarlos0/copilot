@@ -1,45 +1,45 @@
-const assert = require("node:assert/strict");
-const { existsSync, readFileSync, statSync } = require("node:fs");
-const { mkdtemp, rm, writeFile } = require("node:fs/promises");
-const { spawn } = require("node:child_process");
-const { join } = require("node:path");
-const { tmpdir } = require("node:os");
-const { test } = require("node:test");
+import assert from "node:assert/strict";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { test, type TestContext } from "node:test";
 
-const example = JSON.parse(readFileSync(join(__dirname, "factory.example.json"), "utf8"));
+const example = JSON.parse(readFileSync(join(import.meta.dirname, "factory.example.json"), "utf8"));
 const factoryFile = "owner.repo-factory.json";
 const unblocked = { task: "issue-5", state: "initial", comment: "This is now unblocked.", revision: 0 };
 
 // Spawns serve.mjs with the given extra args and resolves once it has printed its first
 // ready URL. The stderr accumulated so far is returned too, for the plain-HTTP warning.
-async function server(t, args = [], existing) {
+async function server(t: TestContext, args: string[] = [], existing?: string) {
   const directory = existing ?? await mkdtemp(join(tmpdir(), "factory-dashboard-lan-test-"));
   await writeFile(join(directory, factoryFile), JSON.stringify(example));
   const child = spawn(process.execPath,
-    [join(__dirname, "serve.mjs"), "--directory", directory, "--port", "0", ...args], { stdio: ["ignore", "pipe", "pipe"] });
+    [join(import.meta.dirname, "serve.mjs"), "--directory", directory, "--port", "0", ...args], { stdio: ["ignore", "pipe", "pipe"] });
   const closed = new Promise((resolve) => child.once("close", resolve));
   t.after(async () => {
     child.kill();
     await closed;
     await rm(directory, { recursive: true, force: true });
   });
-  const { url, stdout } = await new Promise((resolve, reject) => {
+  const { url, stdout } = await new Promise<{ url: URL; stdout: string }>((resolve, reject) => {
     let stdout = "";
     let stderr = "";
-    let url;
-    let settle;
+    let url: string | undefined;
+    let settle: NodeJS.Timeout | undefined;
     // Debounced so trailing startup lines (like the plain-HTTP warning) are captured too.
     child.stdout.on("data", (chunk) => {
       stdout += chunk;
       url ??= stdout.match(/^(http:\/\/\S+)\n/m)?.[1];
       if (!url) return;
       clearTimeout(settle);
-      settle = setTimeout(() => resolve({ url: new URL(url), stdout }), 20);
+      settle = setTimeout(() => resolve({ url: new URL(url!), stdout }), 20);
     });
     child.stderr.on("data", (chunk) => { stderr += chunk; });
     child.once("close", (code) => reject(new Error(`Server exited ${code}: ${stderr}`)));
   });
-  return { directory, url, token: url.searchParams.get("token"), stdout };
+  return { directory, url, token: url.searchParams.get("token")!, stdout };
 }
 
 test("the default loopback server takes no token", async (t) => {
@@ -68,9 +68,9 @@ test("a non-loopback --host requires a token on every request and warns about cl
 
   const first = await fetch(url, { redirect: "manual" });
   assert.equal(first.status, 302);
-  const location = new URL(first.headers.get("location"), url);
+  const location = new URL(first.headers.get("location")!, url);
   assert.equal(location.searchParams.get("token"), null, "the token is stripped from the redirect target");
-  const cookie = first.headers.get("set-cookie");
+  const cookie = first.headers.get("set-cookie")!;
   assert.match(cookie, /^token=[\w-]+; HttpOnly; SameSite=Strict; Path=\/; Max-Age=2592000$/);
 
   const withoutCookie = await fetch(location);
@@ -81,7 +81,7 @@ test("a non-loopback --host requires a token on every request and warns about cl
 
 test("a write is rejected without a token and accepted with one", async (t) => {
   const { url, token } = await server(t, ["--host", "0.0.0.0"]);
-  const move = (extra) => fetch(new URL(`/api/move?file=${factoryFile}`, url), {
+  const move = (extra: Record<string, string>) => fetch(new URL(`/api/move?file=${factoryFile}`, url), {
     method: "POST",
     headers: { Origin: url.origin, "Content-Type": "application/json", ...extra },
     body: JSON.stringify(unblocked),
@@ -99,7 +99,7 @@ test("a browser without a token gets a login form; the API keeps its JSON 401", 
 
   const page = await fetch(bare, { headers: html });
   assert.equal(page.status, 401);
-  assert.match(page.headers.get("content-type"), /^text\/html/);
+  assert.match(page.headers.get("content-type")!, /^text\/html/);
   const body = await page.text();
   assert.match(body, /<input type="password" name="token"/);
   assert.match(body, /name="viewport"/);
@@ -112,10 +112,10 @@ test("a browser without a token gets a login form; the API keeps its JSON 401", 
 
   const api = await fetch(new URL(`/api/factories`, bare), { headers: { Accept: "application/json" } });
   assert.equal(api.status, 401);
-  assert.match(api.headers.get("content-type"), /^application\/json/);
+  assert.match(api.headers.get("content-type")!, /^application\/json/);
   assert.match((await api.json()).error, /access token/);
   const asked = await fetch(new URL(`/api/factories`, bare), { headers: html });
-  assert.match(asked.headers.get("content-type"), /^application\/json/, "only the dashboard page gets the form");
+  assert.match(asked.headers.get("content-type")!, /^application\/json/, "only the dashboard page gets the form");
 });
 
 test("a malformed token cookie gets the login form, not a 500", async (t) => {
@@ -129,7 +129,7 @@ test("a malformed token cookie gets the login form, not a 500", async (t) => {
 
 test("POST /login sets the cookie and redirects to a same-origin path only", async (t) => {
   const { url, token } = await server(t, ["--host", "0.0.0.0"]);
-  const login = (values, extra = {}) => fetch(new URL("/login", url), {
+  const login = (values: Record<string, string>, extra: Record<string, string> = {}) => fetch(new URL("/login", url), {
     method: "POST",
     redirect: "manual",
     headers: { Origin: url.origin, "Content-Type": "application/x-www-form-urlencoded", ...extra },
@@ -139,7 +139,7 @@ test("POST /login sets the cookie and redirects to a same-origin path only", asy
   const ok = await login({ token });
   assert.equal(ok.status, 303);
   assert.equal(ok.headers.get("location"), "/");
-  const cookie = ok.headers.get("set-cookie");
+  const cookie = ok.headers.get("set-cookie")!;
   assert.match(cookie, /^token=[\w-]+; HttpOnly; SameSite=Strict; Path=\/; Max-Age=2592000$/);
   const authed = await fetch(new URL("/", url), { headers: { Cookie: cookie.split(";")[0], Accept: "text/html" } });
   assert.equal(authed.status, 200);

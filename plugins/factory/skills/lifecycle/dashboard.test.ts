@@ -1,19 +1,21 @@
-const assert = require("node:assert/strict");
-const { readFileSync } = require("node:fs");
-const { appendFile, chmod, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } = require("node:fs/promises");
-const { spawn, spawnSync } = require("node:child_process");
-const http = require("node:http");
-const { delimiter, dirname, join } = require("node:path");
-const { tmpdir } = require("node:os");
-const { gunzipSync } = require("node:zlib");
-const { test } = require("node:test");
-const vm = require("node:vm");
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { appendFile, chmod, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { spawn, spawnSync } from "node:child_process";
+import http from "node:http";
+import { delimiter, dirname, join } from "node:path";
+import { tmpdir } from "node:os";
+import { gunzipSync } from "node:zlib";
+import { test } from "node:test";
+import type { TestContext } from "node:test";
+import vm from "node:vm";
 
-const html = readFileSync(join(__dirname, "dashboard.html"), "utf8");
-const example = JSON.parse(readFileSync(join(__dirname, "factory.example.json"), "utf8"));
+const html = readFileSync(join(import.meta.dirname, "dashboard.html"), "utf8");
+const example = JSON.parse(readFileSync(join(import.meta.dirname, "factory.example.json"), "utf8"));
 const factoryFile = "owner.repo-factory.json";
+type Json = Record<string, any>;
 
-async function server(t, env = {}) {
+async function server(t: TestContext, env: NodeJS.ProcessEnv = {}) {
   const directory = await mkdtemp(join(tmpdir(), "factory-dashboard-test-"));
   const outside = await mkdtemp(join(tmpdir(), "factory-dashboard-outside-"));
   await writeFile(join(directory, factoryFile), JSON.stringify(example));
@@ -21,18 +23,18 @@ async function server(t, env = {}) {
   await writeFile(join(directory, "unrelated-notes.md"), "private\n");
   await writeFile(join(outside, "secret.md"), "secret\n");
   await symlink(join(outside, "secret.md"), join(directory, "owner.repo-issue-9-investigation-brief.md"));
-  const child = spawn(process.execPath, [join(__dirname, "serve.mjs"), "--directory", directory, "--port", "0"], {
+  const child = spawn(process.execPath, [join(import.meta.dirname, "serve.mjs"), "--directory", directory, "--port", "0"], {
     stdio: ["ignore", "pipe", "pipe"],
     env: { ...process.env, ...env },
   });
-  const closed = new Promise((resolve) => child.once("close", resolve));
+  const closed = new Promise<void>((resolve) => child.once("close", () => resolve()));
   t.after(async () => {
     child.kill();
     await closed;
     await rm(directory, { recursive: true, force: true });
     await rm(outside, { recursive: true, force: true });
   });
-  const url = await new Promise((resolve, reject) => {
+  const url = await new Promise<string>((resolve, reject) => {
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk) => {
@@ -46,13 +48,13 @@ async function server(t, env = {}) {
   return { directory, outside, url };
 }
 
-const get = async (base, path, init) => fetch(new URL(path, base), init);
-const move = (url, body, file = factoryFile, headers = {}) => get(url, `/api/move?file=${encodeURIComponent(file)}`, {
+const get = async (base: string, path: string, init?: RequestInit) => fetch(new URL(path, base), init);
+const move = (url: string, body: unknown, file = factoryFile, headers: Record<string, string> = {}) => get(url, `/api/move?file=${encodeURIComponent(file)}`, {
   method: "POST",
   headers: { Origin: new URL(url).origin, "Content-Type": "application/json", ...headers },
   body: JSON.stringify(body),
 });
-const settings = (url, body, file = factoryFile, headers = {}) => get(url, `/api/settings?file=${encodeURIComponent(file)}`, {
+const settings = (url: string, body: unknown, file = factoryFile, headers: Record<string, string> = {}) => get(url, `/api/settings?file=${encodeURIComponent(file)}`, {
   method: "POST",
   headers: { Origin: new URL(url).origin, "Content-Type": "application/json", ...headers },
   body: JSON.stringify(body),
@@ -63,14 +65,14 @@ test("serves the dashboard and the shared data module without caching", async (t
   const { url } = await server(t);
   const page = await get(url, "/");
   assert.equal(page.status, 200);
-  assert.match(page.headers.get("content-type"), /text\/html/);
+  assert.match(page.headers.get("content-type")!, /text\/html/);
   assert.equal(page.headers.get("cache-control"), "no-store");
   assert.equal(page.headers.get("x-content-type-options"), "nosniff");
   assert.equal(await page.text(), html);
   const bundle = await get(url, "/dashboard.mjs");
   assert.equal(bundle.status, 200);
-  assert.match(bundle.headers.get("content-type"), /text\/javascript/);
-  assert.equal(await bundle.text(), readFileSync(join(__dirname, "dashboard.mjs"), "utf8"));
+  assert.match(bundle.headers.get("content-type")!, /text\/javascript/);
+  assert.equal(await bundle.text(), readFileSync(join(import.meta.dirname, "dashboard.mjs"), "utf8"));
   for (const old of ["/factory-data.mjs", "/dashboard-markdown.mjs", "/vendor/marked.min.js"]) {
     assert.equal((await get(url, old)).status, 404, `${old} has no route.`);
   }
@@ -83,13 +85,13 @@ test("lists valid factories with counts and reports invalid ones separately", as
   await writeFile(join(outside, "outside.json"), JSON.stringify(example));
   await symlink(join(outside, "outside.json"), join(directory, "linked.repo-factory.json"));
   const listing = await (await get(url, "/api/factories")).json();
-  assert.deepEqual(listing.factories.map((item) => item.file), [factoryFile]);
+  assert.deepEqual(listing.factories.map((item: Json) => item.file), [factoryFile]);
   assert.equal(listing.factories[0].project, "owner/repo");
   assert.equal(listing.factories[0].task_count, 5);
   assert.deepEqual(listing.factories[0].counts, {
     initial: 1, investigation: 0, implementation: 1, review: 1, blocked: 1, resolved: 1,
   });
-  assert.deepEqual(listing.errors.map((item) => item.file), ["broken.repo-factory.json", "linked.repo-factory.json"]);
+  assert.deepEqual(listing.errors.map((item: Json) => item.file), ["broken.repo-factory.json", "linked.repo-factory.json"]);
 });
 
 test("serves one validated factory and rejects other files", async (t) => {
@@ -109,7 +111,7 @@ test("an unchanged factory answers 304 without a body, and a write brings a new 
   const { url } = await server(t);
   const path = `/api/factory?file=${factoryFile}`;
   const first = await get(url, path);
-  const tag = first.headers.get("etag");
+  const tag = first.headers.get("etag")!;
   assert.match(tag, /^"[\w-]+"$/);
   assert.equal(first.headers.get("cache-control"), "no-store");
   assert.equal((await first.json()).project, "owner/repo");
@@ -127,12 +129,12 @@ test("an unchanged factory answers 304 without a body, and a write brings a new 
   const changed = await get(url, path, { headers: { "If-None-Match": tag } });
   assert.equal(changed.status, 200);
   assert.notEqual(changed.headers.get("etag"), tag);
-  assert.equal((await changed.json()).tasks.find((task) => task.id === "issue-5").state, "initial");
+  assert.equal((await changed.json()).tasks.find((task: Json) => task.id === "issue-5").state, "initial");
 });
 
-const rawGet = (base, path, headers = {}) => new Promise((resolve, reject) => {
+const rawGet = (base: string, path: string, headers: http.OutgoingHttpHeaders = {}) => new Promise<{ status: number | undefined; headers: http.IncomingHttpHeaders; body: Buffer }>((resolve, reject) => {
   http.get(new URL(path, base), { headers }, (response) => {
-    const chunks = [];
+    const chunks: Buffer[] = [];
     response.on("data", (chunk) => chunks.push(chunk));
     response.on("end", () => resolve({ status: response.statusCode, headers: response.headers, body: Buffer.concat(chunks) }));
   }).on("error", reject);
@@ -166,13 +168,13 @@ test("gzips the pages and the API only for a client that asks, and a 304 stays b
   assert.equal((await move(url, unblocked)).status, 200);
   const changed = await rawGet(url, path, { "Accept-Encoding": "gzip" });
   assert.notEqual(changed.headers.etag, first.headers.etag);
-  assert.equal(JSON.parse(gunzipSync(changed.body)).tasks.find((task) => task.id === "issue-5").state, "initial");
+  assert.equal(JSON.parse(gunzipSync(changed.body).toString()).tasks.find((task: Json) => task.id === "issue-5").state, "initial");
 });
 
 test("the listing answers 304 until any file changes, and a broken file never poisons the cache", async (t) => {
   const { url, directory } = await server(t);
   const listed = () => get(url, "/api/factories");
-  const conditional = (tag) => get(url, "/api/factories", { headers: { "If-None-Match": tag } });
+  const conditional = (tag: string) => get(url, "/api/factories", { headers: { "If-None-Match": tag } });
   const first = await listed();
   const tag = first.headers.get("etag");
   assert.ok(tag);
@@ -181,8 +183,8 @@ test("the listing answers 304 until any file changes, and a broken file never po
   await writeFile(join(directory, "broken.repo-factory.json"), "{bad");
   const broken = await conditional(tag);
   assert.equal(broken.status, 200);
-  const brokenTag = broken.headers.get("etag");
-  assert.deepEqual((await broken.json()).errors.map((item) => item.file), ["broken.repo-factory.json"]);
+  const brokenTag = broken.headers.get("etag")!;
+  assert.deepEqual((await broken.json()).errors.map((item: Json) => item.file), ["broken.repo-factory.json"]);
   assert.equal((await conditional(brokenTag)).status, 304);
   assert.equal((await get(url, "/api/factory?file=broken.repo-factory.json")).status, 400);
 
@@ -191,7 +193,7 @@ test("the listing answers 304 until any file changes, and a broken file never po
   assert.equal(fixed.status, 200);
   const listing = await fixed.json();
   assert.deepEqual(listing.errors, []);
-  assert.deepEqual(listing.factories.map((item) => item.project).sort(), ["fixed/repo", "owner/repo"]);
+  assert.deepEqual(listing.factories.map((item: Json) => item.project).sort(), ["fixed/repo", "owner/repo"]);
   const served = await get(url, "/api/factory?file=broken.repo-factory.json");
   assert.equal(served.status, 200);
   assert.equal((await served.json()).project, "fixed/repo");
@@ -211,7 +213,7 @@ require("node:module").syncBuiltinESMExports();
 `);
   const { url, directory } = await server(t, { NODE_OPTIONS: `--require=${preload}` });
   const reads = async () => (await readFile(log, "utf8").catch(() => "")).length;
-  const listed = async () => (await (await get(url, "/api/factories")).json()).factories.map((item) => item.file).sort();
+  const listed = async () => (await (await get(url, "/api/factories")).json()).factories.map((item: Json) => item.file).sort();
 
   assert.deepEqual(await listed(), [factoryFile]);
   const first = await reads();
@@ -234,7 +236,7 @@ require("node:module").syncBuiltinESMExports();
 
 test("serves only artifacts that the selected factory references, inside the state directory", async (t) => {
   const { url } = await server(t);
-  const artifact = (name) => get(url, `/api/artifact?file=${factoryFile}&name=${encodeURIComponent(name)}`);
+  const artifact = (name: string) => get(url, `/api/artifact?file=${factoryFile}&name=${encodeURIComponent(name)}`);
   const ok = await artifact("owner.repo-issue-9-implementation-brief.md");
   assert.equal(ok.status, 200);
   assert.equal(await ok.text(), "# The brief\n");
@@ -252,7 +254,7 @@ test("moving back persists the comment, keeps worker context, and rejects a stal
   const response = await move(url, unblocked);
   assert.equal(response.status, 200, await response.clone().text());
   const data = await response.json();
-  const task = data.tasks.find((item) => item.id === unblocked.task);
+  const task = data.tasks.find((item: Json) => item.id === unblocked.task);
   assert.equal(task.state, "initial");
   assert.equal(task.blocker, null);
   assert.equal(task.revision, 1);
@@ -265,14 +267,14 @@ test("moving back persists the comment, keeps worker context, and rejects a stal
   const { usage, briefs, ...served } = await (await get(url, `/api/factory?file=${factoryFile}`)).json();
   assert.deepEqual(served, { ...data, attention: [], proposals: [] });
   assert.deepEqual(briefs, { "issue-9": { implementation: "owner.repo-issue-9-implementation-brief.md" } });
-  assert.deepEqual(Object.keys(usage).sort(), data.tasks.map((item) => item.id).sort());
+  assert.deepEqual(Object.keys(usage).sort(), data.tasks.map((item: Json) => item.id).sort());
   const stale = await move(url, unblocked);
   assert.equal(stale.status, 409);
   assert.match((await stale.json()).error, /changed since it was read/);
-  const review = example.tasks.find((item) => item.state === "review");
+  const review = example.tasks.find((item: Json) => item.state === "review");
   const returned = await move(url, { ...unblocked, task: review.id, state: "investigation" });
   assert.equal(returned.status, 200, await returned.clone().text());
-  const updated = (await returned.json()).tasks.find((item) => item.id === review.id);
+  const updated = (await returned.json()).tasks.find((item: Json) => item.id === review.id);
   assert.deepEqual(updated.workers, review.workers);
   assert.deepEqual(updated.worktree, review.worktree);
   assert.equal(updated.pr, review.pr);
@@ -290,10 +292,10 @@ test("the dashboard can resolve a task directly from every open state", async (t
     await t.test(state, async (t) => {
       const { url, directory } = await server(t);
       const file = join(directory, factoryFile);
-      let before = example.tasks.find((task) => task.state === (state === "investigation" ? "initial" : state));
+      let before = example.tasks.find((task: Json) => task.state === (state === "investigation" ? "initial" : state));
       if (state === "investigation") {
         const data = await update(file, { task: before.id, state });
-        before = data.tasks.find((task) => task.id === before.id);
+        before = data.tasks.find((task: Json) => task.id === before.id);
       }
       const comment = `Resolve as ${outcome}; no further work is needed.`;
       const response = await move(url, {
@@ -301,7 +303,7 @@ test("the dashboard can resolve a task directly from every open state", async (t
       });
       assert.equal(response.status, 200, await response.clone().text());
       const data = await response.json();
-      const task = data.tasks.find((item) => item.id === before.id);
+      const task = data.tasks.find((item: Json) => item.id === before.id);
       assert.equal(task.state, "resolved");
       assert.equal(task.blocker, null);
       assert.deepEqual(task.resolution, { outcome, note: comment, at: task.updated_at });
@@ -323,7 +325,7 @@ test("CLI and dashboard share the write lock; overlapping moves cannot overwrite
   await writeFile(`${file}.write.lock`, "", { flag: "wx" });
   const locked = await move(url, unblocked);
   assert.equal(locked.status, 409);
-  const cli = spawnSync(process.execPath, [join(__dirname, "factory.mjs"), file,
+  const cli = spawnSync(process.execPath, [join(import.meta.dirname, "factory.mjs"), file,
     "--task", unblocked.task, "--state", "initial"], { encoding: "utf8" });
   assert.equal(cli.status, 1, cli.stderr);
   assert.match(cli.stderr, /write is locked/);
@@ -332,8 +334,8 @@ test("CLI and dashboard share the write lock; overlapping moves cannot overwrite
   const results = await Promise.all([move(url, unblocked), move(url, { ...unblocked, comment: "A competing direction" })]);
   assert.deepEqual(results.map((result) => result.status).sort(), [200, 409]);
   const data = JSON.parse(await readFile(file, "utf8"));
-  const task = data.tasks.find((item) => item.id === unblocked.task);
-  assert.equal(task.history.filter((item) => item.source === "dashboard").length, 1);
+  const task = data.tasks.find((item: Json) => item.id === unblocked.task);
+  assert.equal(task.history.filter((item: Json) => item.source === "dashboard").length, 1);
   assert.equal(task.revision, 1);
 });
 
@@ -341,7 +343,7 @@ test("move endpoint rejects foreign pages, invalid moves and unconfined files wi
   const { url, directory } = await server(t);
   const file = join(directory, factoryFile);
   const original = await readFile(file, "utf8");
-  const cases = [
+  const cases: { headers?: Record<string, string>; body?: unknown; file?: string; status: number }[] = [
     { headers: { Origin: "https://evil.example" }, status: 403 },
     { headers: { Origin: "null" }, status: 403 },
     { headers: { "Sec-Fetch-Site": "cross-site" }, status: 403 },
@@ -407,7 +409,7 @@ test("each settings section reports a stale read as a conflict, and old files st
   const { url, directory } = await server(t);
   const file = join(directory, factoryFile);
   const original = await readFile(file, "utf8");
-  const stale = [
+  const stale: [Json, Json, RegExp][] = [
     [{ budget: 5 }, { budget: 9 }, /budget changed since it was read/i],
     [{ limits: { investigation: 1 } }, { limits: { investigation: 2 } }, /limits changed since it was read/i],
     [{ lever: { spend: "max" } }, { lever: { spend: "high" } }, /lever changed since it was read/i],
@@ -433,8 +435,8 @@ test("settings endpoint rejects foreign pages and bad input without writes", asy
   const file = join(directory, factoryFile);
   const original = await readFile(file, "utf8");
   const good = { set: { budget: 4 }, expected: seen };
-  const withSet = (set, expected = seen) => ({ set, expected });
-  const cases = [
+  const withSet = (set: Json, expected: Json = seen) => ({ set, expected });
+  const cases: { headers?: Record<string, string>; body?: unknown; file?: string; status: number }[] = [
     { headers: { Origin: "https://evil.example" }, status: 403 },
     { headers: { "Sec-Fetch-Site": "cross-site" }, status: 403 },
     { headers: { "Content-Type": "text/plain" }, status: 415 },
@@ -479,7 +481,7 @@ test("the CLI and the dashboard share the write lock for settings writes", async
   const original = await readFile(file, "utf8");
   await writeFile(`${file}.write.lock`, "", { flag: "wx" });
   assert.equal((await settings(url, { set: { budget: 4 }, expected: seen })).status, 409);
-  const cli = spawnSync(process.execPath, [join(__dirname, "factory.mjs"), file,
+  const cli = spawnSync(process.execPath, [join(import.meta.dirname, "factory.mjs"), file,
     "--budget", '{"max_parallel_workers":4}'], { encoding: "utf8" });
   assert.equal(cli.status, 1, cli.stderr);
   assert.match(cli.stderr, /write is locked/);
@@ -491,18 +493,18 @@ test("a dashboard move emits an event the factory waiter wakes on", async (t) =>
   const file = join(directory, factoryFile);
   const response = await move(url, unblocked);
   assert.equal(response.status, 200, await response.clone().text());
-  const waited = spawnSync(process.execPath, [join(__dirname, "broker.mjs"), "wait", file,
+  const waited = spawnSync(process.execPath, [join(import.meta.dirname, "broker.mjs"), "wait", file,
     "--since", "0", "--exclude-source", "coordinator", "--timeout", "5"], { encoding: "utf8" });
   assert.equal(waited.status, 0, waited.stderr);
   const { events } = JSON.parse(waited.stdout);
-  assert.ok(events.length > 0 && events.every((event) => event.source === "dashboard"), waited.stdout);
+  assert.ok(events.length > 0 && events.every((event: Json) => event.source === "dashboard"), waited.stdout);
 });
 
 test("accepts only GET on loopback host names", async (t) => {
   const { url } = await server(t);
   assert.equal((await get(url, "/", { method: "POST" })).status, 405);
   assert.equal((await get(url, "/nope")).status, 404);
-  const status = await new Promise((resolve, reject) => {
+  const status = await new Promise<number | undefined>((resolve, reject) => {
     const target = new URL(url);
     // A fresh agent ignores NODE_USE_ENV_PROXY, so the forged Host reaches the server.
     http.get({ agent: new http.Agent(), host: target.hostname, port: target.port, path: "/", headers: { Host: "evil.example" } },
@@ -517,7 +519,7 @@ test("accepts only GET on loopback host names", async (t) => {
 });
 
 test("a 304 skips load and redraw", async (t) => {
-  const answers = [];
+  const answers: [string, number][] = [];
   const ui = await dashboard(t, {
     fetchRequest: async (path, _, request) => {
       const response = await request();
@@ -534,7 +536,7 @@ test("a 304 skips load and redraw", async (t) => {
   assert.equal(ui.get("factories").children.length, 1, "the sidebar keeps its last listing");
 
   const data = structuredClone(example);
-  data.tasks.find((task) => task.id === "issue-5").title = "Changed title";
+  data.tasks.find((task: Json) => task.id === "issue-5").title = "Changed title";
   await writeFile(join(ui.directory, factoryFile), JSON.stringify(data));
   answers.length = 0;
   await ui.run("refresh()");
@@ -575,7 +577,7 @@ test("the page script imports only names that dashboard.mjs exports", async () =
 });
 
 test("the page script parses, never renders data as HTML, and finds its elements", () => {
-  const script = html.match(/<script type="module">([\s\S]*?)<\/script>/)[1].replace(/^\s*import .+;$/gm, "");
+  const script = html.match(/<script type="module">([\s\S]*?)<\/script>/)![1].replace(/^\s*import .+;$/gm, "");
   new vm.Script(script);
   assert.doesNotMatch(script, /innerHTML|insertAdjacentHTML|outerHTML/);
   const ids = new Set([...html.matchAll(/id="([^"]+)"/g)].map((match) => match[1]));
@@ -585,20 +587,29 @@ test("the page script parses, never renders data as HTML, and finds its elements
 });
 
 // Model only the DOM operations used by the task list; HTTP and the page script are real.
-async function dashboard(t, { reducedMotion = true, confirm = () => true, now = Date.now(), fetchRequest, phoneWidth = 0, env } = {}) {
+async function dashboard(t: TestContext, { reducedMotion = true, confirm = (): boolean => true, now = Date.now(), fetchRequest, phoneWidth = 0, env }: {
+  reducedMotion?: boolean;
+  confirm?: (...args: any[]) => boolean;
+  now?: number;
+  fetchRequest?: (path: string, init: any, request: () => Promise<Response>) => Promise<Response>;
+  phoneWidth?: number;
+  env?: NodeJS.ProcessEnv;
+} = {}) {
   const { url, directory } = await server(t, env);
-  const elements = new Map();
-  const document = {
-    getElementById: (id) => elements.get(id),
-    createElement: (tag) => new Element(tag),
+  const elements = new Map<string, any>();
+  const document: any = {
+    getElementById: (id: string) => elements.get(id),
+    createElement: (tag: string) => new Element(tag),
     querySelectorAll: () => [],
-    createElementNS: (_, tag) => new Element(tag),
+    createElementNS: (_: unknown, tag: string) => new Element(tag),
     listeners: new Map(),
-    addEventListener(name, callback) { this.listeners.set(name, callback); },
+    addEventListener(name: string, callback: unknown) { this.listeners.set(name, callback); },
     body: { closest: () => null },
   };
   class Element {
-    constructor(tag) {
+    [key: string]: any;
+    declare children: any[];
+    constructor(tag: string) {
       this.tag = tag;
       this.children = [];
       this.dataset = {};
@@ -610,9 +621,9 @@ async function dashboard(t, { reducedMotion = true, confirm = () => true, now = 
       this.hidden = false;
       this.className = "";
       this.classList = {
-        add: (name) => this.classList.toggle(name, true),
-        remove: (name) => this.classList.toggle(name, false),
-        toggle: (name, enabled) => {
+        add: (name: string) => this.classList.toggle(name, true),
+        remove: (name: string) => this.classList.toggle(name, false),
+        toggle: (name: string, enabled?: boolean) => {
           const names = new Set(this.className.split(" ").filter(Boolean));
           if (enabled ?? !names.has(name)) names.add(name);
           else names.delete(name);
@@ -620,18 +631,18 @@ async function dashboard(t, { reducedMotion = true, confirm = () => true, now = 
         },
       };
     }
-    append(...children) {
+    append(...children: any[]) {
       for (const child of children) if (typeof child === "object") child.parentNode = this;
       this.children.push(...children);
     }
     get childNodes() { return this.children; }
     get tagName() { return this.tag.toUpperCase(); }
     nodeType = 1;
-    prepend(child) {
+    prepend(child: any) {
       child.parentNode = this;
       this.children.unshift(child);
     }
-    replaceChildren(...children) {
+    replaceChildren(...children: any[]) {
       for (const child of this.children) if (child instanceof Element) child.parentNode = null;
       this.children = [];
       this.append(...children);
@@ -639,15 +650,15 @@ async function dashboard(t, { reducedMotion = true, confirm = () => true, now = 
     }
     remove() {
       if (!this.parentNode) return;
-      this.parentNode.children = this.parentNode.children.filter((child) => child !== this);
+      this.parentNode.children = this.parentNode.children.filter((child: any) => child !== this);
       this.parentNode = null;
     }
-    get textContent() { return this.children.map((child) => typeof child === "string" ? child : child.textContent).join(""); }
+    get textContent() { return this.children.map((child: any) => typeof child === "string" ? child : child.textContent).join(""); }
     set textContent(value) { this.children = [String(value)]; }
-    get options() { return this.children.filter((child) => child.tag === "option"); }
-    setAttribute(name, value) { this[name === "class" ? "className" : name] = value; }
-    addEventListener(name, callback) { this.listeners.set(name, callback); }
-    async fire(name, event = {}) {
+    get options() { return this.children.filter((child: any) => child.tag === "option"); }
+    setAttribute(name: string, value: unknown) { this[name === "class" ? "className" : name] = value; }
+    addEventListener(name: string, callback: unknown) { this.listeners.set(name, callback); }
+    async fire(name: string, event: Json = {}) {
       const dispatched = { target: this, ...event, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; } };
       await this.listeners.get(name)?.(dispatched);
       return dispatched;
@@ -655,16 +666,16 @@ async function dashboard(t, { reducedMotion = true, confirm = () => true, now = 
     getBoundingClientRect() { return { left: 100, right: 900, top: 100, bottom: 700 }; }
     focus() { document.activeElement = this; }
     closest() { return ["input", "textarea", "select"].includes(this.tag) || this.editable ? this : null; }
-    scrollIntoView(options) { this.scrolled = options; }
+    scrollIntoView(options: unknown) { this.scrolled = options; }
     requestSubmit() { this.submitted = this.fire("submit"); }
     showModal() { this.open = true; }
     close() { this.open = false; }
-    querySelector(selector) { return this.querySelectorAll(selector)[0] ?? null; }
-    querySelectorAll(selector) {
+    querySelector(selector: string) { return this.querySelectorAll(selector)[0] ?? null; }
+    querySelectorAll(selector: string): any[] {
       const match = /^([a-z][a-z0-9]*|\.[\w-]+)(?:\[(open|data-state)(?:="([^"]*)")?\])?$/.exec(selector);
       assert.ok(match, `Unsupported test selector: ${selector}`);
       const [, name, attribute, value] = match;
-      return this.children.flatMap((child) => {
+      return this.children.flatMap((child: any) => {
         if (!(child instanceof Element)) return [];
         const matches = name.startsWith(".") ? child.className.split(" ").includes(name.slice(1)) : child.tag === name;
         const attributeMatches = !attribute || (attribute === "open" ? child.open : child.dataset.state === value);
@@ -676,17 +687,18 @@ async function dashboard(t, { reducedMotion = true, confirm = () => true, now = 
     }
   }
   class Text {
+    [key: string]: any;
     nodeType = 3;
-    constructor(data) { this.data = data; }
+    constructor(data: string) { this.data = data; }
     get textContent() { return this.data; }
-    replaceWith(...nodes) { this.parentNode.children.splice(this.parentNode.children.indexOf(this), 1, ...nodes); }
+    replaceWith(...nodes: any[]) { this.parentNode.children.splice(this.parentNode.children.indexOf(this), 1, ...nodes); }
   }
-  const entities = { "&lt;": "<", "&gt;": ">", "&quot;": '"', "&amp;": "&" };
-  const decode = (text) => text.replace(/&#(\d+);|&\w+;/g, (entity, code) => code ? String.fromCharCode(code) : entities[entity] ?? entity);
+  const entities: Record<string, string> = { "&lt;": "<", "&gt;": ">", "&quot;": '"', "&amp;": "&" };
+  const decode = (text: string) => text.replace(/&#(\d+);|&\w+;/g, (entity: string, code: any) => code ? String.fromCharCode(code) : entities[entity] ?? entity);
   // Parses the well-formed HTML that marked prints; the real sanitizer needs a browser DOM.
-  const parseHTML = (markup) => {
+  const parseHTML = (markup: string) => {
     const root = new Element("fragment");
-    const open = [root];
+    const open: any[] = [root];
     for (const [, closing, tag, attributes, text] of markup.matchAll(/<(\/?)([a-z0-9]+)((?:\s+[\w-]+(?:="[^"]*")?)*)\s*>|([^<]+)/g)) {
       if (text != null) open.at(-1).append(new Text(decode(text)));
       else if (closing) open.pop();
@@ -699,36 +711,36 @@ async function dashboard(t, { reducedMotion = true, confirm = () => true, now = 
     }
     return root;
   };
-  const sanitized = [];
+  const sanitized: Json[] = [];
   for (const [markup, tag, id] of html.matchAll(/<(\w+)[^>]*\bid="([^"]+)"[^>]*>/g)) {
     const node = new Element(tag);
     node.hidden = /\shidden(?=[\s>])/.test(markup);
     elements.set(id, node);
   }
   elements.get("flow-wrap").clientWidth = phoneWidth;
-  const resizeListeners = [];
-  const timers = [];
+  const resizeListeners: (() => void)[] = [];
+  const timers: Json[] = [];
   elements.get("detail").append(...["detail-title", "close-detail", "task-list", "detail-empty"]
     .map((id) => elements.get(id)));
   elements.get("settings-dialog").append(...["settings-title", "close-settings", "settings-body"].map((id) => elements.get(id)));
   elements.get("move-dialog").append(...["move-title", "close-move", "move-body"].map((id) => elements.get(id)));
   const location = new URL(`?file=${factoryFile}`, url);
   class ClockDate extends Date {
-    constructor(...args) { super(...(args.length ? args : [now])); }
+    constructor(...args: any[]) { super(...((args.length ? args : [now]) as [number])); }
     static now() { return now; }
   }
   const { marked, ...data } = await import("./dashboard.mjs");
   const context = vm.createContext({
     ...data,
     document, location, URL, URLSearchParams, Date: ClockDate, marked,
-    DOMPurify: { sanitize: (markup, config) => { sanitized.push({ markup, config }); return parseHTML(markup); } },
-    history: { replaceState: (_, __, value) => { location.href = new URL(value, location).href; } },
-    window: { addEventListener: (name, callback) => { if (name === "resize") resizeListeners.push(callback); }, confirm },
-    matchMedia: (query) => ({ matches: /reduce/.test(query) ? reducedMotion : phoneWidth > 0 }),
+    DOMPurify: { sanitize: (markup: string, config: unknown) => { sanitized.push({ markup, config }); return parseHTML(markup); } },
+    history: { replaceState: (_: unknown, __: unknown, value: string) => { location.href = new URL(value, location).href; } },
+    window: { addEventListener: (name: string, callback: () => void) => { if (name === "resize") resizeListeners.push(callback); }, confirm },
+    matchMedia: (query: string) => ({ matches: /reduce/.test(query) ? reducedMotion : phoneWidth > 0 }),
     ResizeObserver: class { observe() {} },
-    setTimeout: (callback, delay) => { timers.push({ callback, delay }); return timers.length; },
+    setTimeout: (callback: unknown, delay: unknown) => { timers.push({ callback, delay }); return timers.length; },
     clearTimeout() {}, setInterval() {},
-    fetch: (path, options = {}) => {
+    fetch: (path: string, options: Json = {}) => {
       const init = {
         ...options,
         headers: { ...options.headers, ...(options.method === "POST" ? { Origin: new URL(url).origin } : {}) },
@@ -737,25 +749,25 @@ async function dashboard(t, { reducedMotion = true, confirm = () => true, now = 
       return fetchRequest ? fetchRequest(path, init, request) : request();
     },
   });
-  const script = html.match(/<script type="module">([\s\S]*?)<\/script>/)[1]
+  const script = html.match(/<script type="module">([\s\S]*?)<\/script>/)![1]
     .replace(/^\s*import .+;$/gm, "").replace(/\s*buildFlow\(\);\s*refresh\(\);\s*$/, "");
   vm.runInContext(script, context);
   vm.runInContext("buildFlow();", context);
-  const run = (source) => vm.runInContext(source, context);
+  const run = (source: string) => vm.runInContext(source, context);
   await run("refresh()");
-  const press = (key, event = {}) => {
+  const press = (key: string, event: Json = {}) => {
     const pressed = { key, target: document.body, ...event, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; } };
     document.listeners.get("keydown")(pressed);
     return pressed;
   };
-  return { run, document, directory, url, press, sanitized, timers, resize: (width) => { elements.get("flow-wrap").clientWidth = width; resizeListeners.forEach((callback) => callback()); }, get: (id) => elements.get(id), setNow: (value) => { now = value; } };
+  return { run, document, directory, url, press, sanitized, timers, resize: (width: number) => { elements.get("flow-wrap").clientWidth = width; resizeListeners.forEach((callback) => callback()); }, get: (id: string): Element => elements.get(id), setNow: (value: number) => { now = value; } };
 }
 
 test("unchanged refresh updates elapsed labels without replacing expanded rows or move drafts", async (t) => {
   const ui = await dashboard(t, { now: Date.parse("2026-05-01T12:05:00Z") });
   const data = structuredClone(example);
-  const review = data.tasks.find((task) => task.id === "issue-7");
-  review.merge = structuredClone(data.tasks.find((task) => task.id === "issue-3").merge);
+  const review = data.tasks.find((task: Json) => task.id === "issue-7");
+  review.merge = structuredClone(data.tasks.find((task: Json) => task.id === "issue-3").merge);
   review.merge.head = review.head;
   review.details = { verdict: "implement" };
   await writeFile(join(ui.directory, factoryFile), JSON.stringify(data));
@@ -823,13 +835,13 @@ test("Escape leaves the task list open while a popup owns the key", async (t) =>
 test("the sidebar lists every factory and blinks a dot on one that changed until it is selected", async (t) => {
   const ui = await dashboard(t);
   const other = "other.repo-factory.json";
-  const write = (updated_at) => writeFile(join(ui.directory, other),
+  const write = (updated_at: string) => writeFile(join(ui.directory, other),
     JSON.stringify({ ...example, id: "other-factory", project: "other/repo", updated_at }));
   const items = () => ui.get("factories").querySelectorAll("button");
   const dots = () => ui.get("factories").querySelectorAll(".update-dot");
   await write("2026-05-01T12:00:00Z");
   await ui.run("refresh()");
-  assert.deepEqual(items().map((item) => item.querySelector(".name").textContent), ["other/repo", "owner/repo"]);
+  assert.deepEqual(items().map((item: Json) => item.querySelector(".name").textContent), ["other/repo", "owner/repo"]);
   assert.equal(dots().length, 0, "The first sighting is a baseline, not an update.");
 
   await write("2026-05-01T13:00:00Z");
@@ -850,24 +862,24 @@ test("the sidebar lists every factory and blinks a dot on one that changed until
 
 test("the sidebar groups factories into Active, Idle and Finished sections in a stable order", async (t) => {
   const ui = await dashboard(t);
-  const write = (file, project, patch) => writeFile(join(ui.directory, file),
+  const write = (file: string, project: string, patch: Json) => writeFile(join(ui.directory, file),
     JSON.stringify({ ...example, id: project, project, updated_at: "2026-05-01T12:00:00Z", ...patch }));
   await write("a.repo-factory.json", "a/finished", { status: "finished" });
   await write("b.repo-factory.json", "b/idle", { tasks: [] });
   await ui.run("refresh()");
   const factories = ui.get("factories");
   const groups = () => factories.querySelectorAll(".factory-section");
-  assert.deepEqual(groups().map((group) => group.querySelector(".section-title").textContent), ["Active", "Idle", "Finished"]);
-  assert.deepEqual(groups().map((group) => group["aria-label"]), ["Active", "Idle", "Finished"]);
-  const names = () => factories.querySelectorAll("button").map((item) => item.querySelector(".name").textContent);
+  assert.deepEqual(groups().map((group: Json) => group.querySelector(".section-title").textContent), ["Active", "Idle", "Finished"]);
+  assert.deepEqual(groups().map((group: Json) => group["aria-label"]), ["Active", "Idle", "Finished"]);
+  const names = () => factories.querySelectorAll("button").map((item: Json) => item.querySelector(".name").textContent);
   assert.deepEqual(names(), ["owner/repo", "b/idle", "a/finished"]);
-  assert.deepEqual(factories.querySelectorAll("button").map((item) => item.querySelector("kbd").textContent), ["1", "2", "3"]);
+  assert.deepEqual(factories.querySelectorAll("button").map((item: Json) => item.querySelector("kbd").textContent), ["1", "2", "3"]);
   assert.match(factories.querySelectorAll("button")[2].className, /\bfinished\b/);
   assert.equal(factories.querySelectorAll("button")[0].className.includes("finished"), false);
 
   await rm(join(ui.directory, "b.repo-factory.json"));
   await ui.run("refresh()");
-  assert.deepEqual(groups().map((group) => group.querySelector(".section-title").textContent), ["Active", "Finished"]);
+  assert.deepEqual(groups().map((group: Json) => group.querySelector(".section-title").textContent), ["Active", "Finished"]);
 });
 
 test("digits select the Nth sidebar factory and the first nine items show a kbd badge", async (t) => {
@@ -877,11 +889,11 @@ test("digits select the Nth sidebar factory and the first nine items show a kbd 
     JSON.stringify({ ...example, id: "other-factory", project: "other/repo", updated_at: "2026-05-01T12:00:00Z" }));
   await ui.run("refresh()");
   const items = () => ui.get("factories").querySelectorAll("button");
-  assert.deepEqual(items().map((item) => item.querySelector("kbd").textContent), ["1", "2"]);
+  assert.deepEqual(items().map((item: Json) => item.querySelector("kbd").textContent), ["1", "2"]);
   assert.equal(items()[1]["aria-keyshortcuts"], "2");
   assert.equal(items()[1]["aria-current"], "true");
 
-  const ignored = async (key, event) => {
+  const ignored = async (key: string, event?: Json) => {
     const before = ui.run("location.href");
     const dispatched = await ui.press(key, event);
     assert.equal(ui.run("location.href"), before);
@@ -924,8 +936,8 @@ test("flow edges use only straight horizontal and vertical segments", async (t) 
   assert.equal(paths.length, 13);
   for (const path of paths) {
     assert.match(path, /^M[\d.,-]+( L[\d.,-]+)+$/, `Only M and L commands: ${path}`);
-    const points = path.slice(1).split(" L").map((point) => point.split(",").map(Number));
-    points.slice(1).forEach(([x, y], index) => {
+    const points = path.slice(1).split(" L").map((point: string) => point.split(",").map(Number));
+    points.slice(1).forEach(([x, y]: number[], index: number) => {
       const [px, py] = points[index];
       assert.ok(x === px || y === py, `Diagonal segment in ${path}`);
     });
@@ -942,7 +954,7 @@ test("the flow draws plain lines with a port at each end", async (t) => {
 test("both charts draw the same lines, and they are the allowed moves", async (t) => {
   const { transitions } = await import("./factory-data.mjs");
   const ui = await dashboard(t);
-  const drawn = (width) => {
+  const drawn = (width: number) => {
     ui.run(`buildFlow(${width})`);
     return ui.get("flow").querySelectorAll(".edge").map((edge) => edge.dataset.edge).sort();
   };
@@ -953,7 +965,7 @@ test("both charts draw the same lines, and they are the allowed moves", async (t
     "initial>resolved", "initial>review", "investigation>blocked", "investigation>implementation", "investigation>resolved",
     "review>blocked", "review>resolved", "source>initial",
   ]);
-  const moves = { ...transitions, source: ["initial"], initial: [...transitions.initial, "review"] };
+  const moves: Record<string, string[]> = { ...transitions, source: ["initial"], initial: [...transitions.initial, "review"] };
   for (const edge of horizontal) {
     const [from, to] = edge.split(">");
     assert.ok(moves[from].includes(to) || moves[to]?.includes(from), `${edge} is not an allowed move`);
@@ -984,19 +996,19 @@ test("on a phone the flow is one column at the screen width, drawn at scale 1", 
   stacked.slice(1).forEach((box, index) => assert.ok(box.y >= stacked[index].y + stacked[index].h, "Nothing overlaps."));
 
   const order = ["source", "initial", "investigation", "implementation", "review", "resolved", "blocked"];
-  const topOf = (group) => +group.querySelector(".box").y;
+  const topOf = (group: Json) => +group.querySelector(".box").y;
   const tops = order.map((state) => topOf(state === "source" ? flow.querySelector(".source") : ui.run(`nodeOf('${state}')`)));
   assert.deepEqual(tops, [...tops].sort((a, b) => a - b), "States run top to bottom in flow order.");
 
-  const points = flow.querySelectorAll(".edge").flatMap((edge) => edge.d.slice(1).split(" L").map((point) => point.split(",").map(Number)));
+  const points = flow.querySelectorAll(".edge").flatMap((edge) => edge.d.slice(1).split(" L").map((point: string) => point.split(",").map(Number)));
   assert.ok(points.every(([x, y]) => x >= 0 && x <= width && y >= 0 && y <= height), "Every line stays on the chart.");
 
-  const segments = (edge) => {
-    const route = edge.d.slice(1).split(" L").map((point) => point.split(",").map(Number));
-    return route.slice(1).map(([x, y], index) => ({ edge: edge.dataset.edge, from: route[index], to: [x, y] }));
+  const segments = (edge: Json) => {
+    const route = edge.d.slice(1).split(" L").map((point: string) => point.split(",").map(Number));
+    return route.slice(1).map(([x, y]: number[], index: number) => ({ edge: edge.dataset.edge, from: route[index], to: [x, y] }));
   };
   const all = flow.querySelectorAll(".edge").flatMap(segments);
-  const between = (value, a, b) => value > Math.min(a, b) && value < Math.max(a, b);
+  const between = (value: number, a: number, b: number) => value > Math.min(a, b) && value < Math.max(a, b);
   const crossings = new Set();
   for (const a of all.filter(({ from, to }) => from[1] === to[1])) {
     for (const b of all.filter(({ from, to }) => from[0] === to[0])) {
@@ -1022,12 +1034,12 @@ for (const width of [0, 390]) test(`hovering or focusing a state lights only its
   const ui = await dashboard(t);
   ui.run(`buildFlow(${width})`);
   const flow = ui.get("flow");
-  const has = (node, name) => node.className.split(" ").includes(name);
+  const has = (node: Json, name: string) => node.className.split(" ").includes(name);
   const lit = () => flow.querySelectorAll(".edge").filter((edge) => has(edge, "lit")).map((edge) => edge.dataset.edge).sort();
   const reached = () => flow.querySelectorAll(".node").filter((node) => has(node, "reach"))
     .map((node) => node.dataset.state).sort();
-  const node = (state) => ui.run(`nodeOf('${state}')`);
-  const edges = {
+  const node = (state: string) => ui.run(`nodeOf('${state}')`);
+  const edges: Record<string, string[]> = {
     initial: ["initial>blocked", "initial>investigation", "initial>resolved", "initial>review"],
     investigation: ["investigation>blocked", "investigation>implementation", "investigation>resolved"],
     implementation: ["implementation>blocked", "implementation>resolved", "implementation>review"],
@@ -1038,7 +1050,7 @@ for (const width of [0, 390]) test(`hovering or focusing a state lights only its
 
   assert.deepEqual(lit(), []);
   for (const state of states) {
-    const targets = [...transitions[state], ...(state === "initial" ? ["review"] : [])].sort();
+    const targets = [...(transitions as Record<string, string[]>)[state], ...(state === "initial" ? ["review"] : [])].sort();
     await node(state).fire("mouseenter");
     assert.deepEqual(lit(), edges[state], `${state} lights only its own moves`);
     assert.deepEqual(reached(), targets, `${state} reaches only its targets`);
@@ -1064,26 +1076,26 @@ test("rows show history, open references in a new tab, and highlight evidence", 
   const ui = await dashboard(t);
   ui.run("choose('implementation')");
   const row = ui.get("task-list").children[0];
-  const history = row.children.find((child) => child.tag === "ol");
+  const history = row.children.find((child: Json) => child.tag === "ol");
   assert.ok(history, "History must be a direct, always-visible part of the row.");
   assert.equal(history.children.length, 3);
-  const links = row.querySelectorAll("a").filter((node) => node.href?.startsWith("https://github.com/"));
+  const links = row.querySelectorAll("a").filter((node: Json) => node.href?.startsWith("https://github.com/"));
   assert.ok(links.length > 0);
   for (const node of links) {
     assert.equal(node.target, "_blank", node.href);
     assert.equal(node.rel, "noopener noreferrer", node.href);
   }
-  const evidence = row.querySelectorAll("button").find((node) => node.textContent === "Evidence and task details");
+  const evidence = row.querySelectorAll("button").find((node: Json) => node.textContent === "Evidence and task details");
   assert.equal(row.querySelector("pre"), null, "The evidence is not inline.");
   await evidence.fire("click");
   const popup = ui.get("result-body");
-  assert.equal(popup.textContent, JSON.stringify(example.tasks.find((task) => task.id === "issue-9").details, null, 2));
+  assert.equal(popup.textContent, JSON.stringify(example.tasks.find((task: Json) => task.id === "issue-9").details, null, 2));
   assert.equal(popup.querySelector(".json-key").textContent, '"verdict"');
   await ui.get("result-dialog").fire("cancel");
   const value = { note: 'say "a": 1', count: -2.5e3, ok: true, gone: null, list: [1, "x"] };
   const pre = ui.run(`highlightJSON(${JSON.stringify(value)})`);
   assert.equal(pre.textContent, JSON.stringify(value, null, 2));
-  const tokens = (name) => pre.querySelectorAll(`.json-${name}`).map((node) => node.textContent);
+  const tokens = (name: string) => pre.querySelectorAll(`.json-${name}`).map((node: Json) => node.textContent);
   assert.deepEqual(tokens("key"), ['"note"', '"count"', '"ok"', '"gone"', '"list"']);
   assert.deepEqual(tokens("string"), ['"say \\"a\\": 1"', '"x"']);
   assert.deepEqual(tokens("literal"), ["-2500", "true", "null", "1"]);
@@ -1091,11 +1103,11 @@ test("rows show history, open references in a new tab, and highlight evidence", 
 
 test("the evidence link opens the popup with the task details and is absent without details", async (t) => {
   const ui = await dashboard(t);
-  const task = structuredClone(example.tasks.find((item) => item.id === "issue-9"));
+  const task = structuredClone(example.tasks.find((item: Json) => item.id === "issue-9"));
   task.details = { notes: "<b>x</b>", verdict: "implement" };
   const row = ui.run(`taskRow(${JSON.stringify(task)}, new Set())`);
   assert.equal(row.querySelectorAll("details").length, 0, "There is no Task details section.");
-  const trigger = row.querySelectorAll("button").find((node) => node.textContent === "Evidence and task details");
+  const trigger = row.querySelectorAll("button").find((node: Json) => node.textContent === "Evidence and task details");
   await trigger.fire("click");
   assert.equal(ui.get("result-dialog").open, true);
   assert.equal(ui.get("result-title").textContent, "issue-9: evidence and task details");
@@ -1108,7 +1120,7 @@ test("the evidence link opens the popup with the task details and is absent with
 
   task.details = {};
   assert.equal(ui.run(`taskRow(${JSON.stringify(task)}, new Set())`).querySelectorAll("button")
-    .some((node) => node.textContent === "Evidence and task details"), false);
+    .some((node: Json) => node.textContent === "Evidence and task details"), false);
 });
 
 test("the list rebuilds only when a row's revision, update time or history changes", async (t) => {
@@ -1119,7 +1131,7 @@ test("the list rebuilds only when a row's revision, update time or history chang
   const first = () => ui.get("task-list").children[0];
   const row = first();
   const id = row.dataset.taskId;
-  const task = data.tasks.find((item) => item.id === id);
+  const task = data.tasks.find((item: Json) => item.id === id);
   await ui.run("refresh()");
   assert.equal(first(), row);
 
@@ -1146,7 +1158,7 @@ test("a row has the title and Move button in the head and the links on their own
   ui.run("choose('implementation')");
   const row = ui.get("task-list").children[0];
   const [head, links] = row.children;
-  assert.deepEqual(head.children.map((child) => child.tag), ["h3", "button"]);
+  assert.deepEqual(head.children.map((child: Json) => child.tag), ["h3", "button"]);
   assert.equal(head.children[1].className, "move");
   assert.equal(links.className, "links");
   assert.ok(links.children.length > 0);
@@ -1167,10 +1179,10 @@ test("reference links get an issue or pull request glyph and show the bare numbe
 
 test("a row lists issues first, then pull requests, each by ascending number, without duplicates", async (t) => {
   const ui = await dashboard(t);
-  const url = (kind, number) => `https://github.com/owner/repo/${kind}/${number}`;
+  const url = (kind: string, number: number) => `https://github.com/owner/repo/${kind}/${number}`;
   const task = { ...example.tasks[0], issue: url("issues", 9), pr: url("pull", 30), links: [url("pull", 4), url("issues", 40), url("issues", 9)] };
   const row = ui.run(`taskRow(${JSON.stringify(task)}, new Set())`);
-  assert.deepEqual(row.querySelector(".links").children.map((node) => node.href), [url("issues", 9), url("issues", 40), url("pull", 4), url("pull", 30)]);
+  assert.deepEqual(row.querySelector(".links").children.map((node: Json) => node.href), [url("issues", 9), url("issues", 40), url("pull", 4), url("pull", 30)]);
 });
 
 test("a row shows one chip for a resource listed with a fragment, a query or another case, but keeps other repos", async (t) => {
@@ -1183,7 +1195,7 @@ test("a row shows one chip for a resource listed with a fragment, a query or ano
     links: [`${issue}#issuecomment-1`, `${issue}?notification_referrer_id=x`, "https://github.com/Owner/Repo/issues/1009", "https://github.com/other/repo/issues/1009"],
   };
   const row = ui.run(`taskRow(${JSON.stringify(task)}, new Set())`);
-  assert.deepEqual(row.querySelector(".links").children.map((node) => node.href), [issue, "https://github.com/other/repo/issues/1009"]);
+  assert.deepEqual(row.querySelector(".links").children.map((node: Json) => node.href), [issue, "https://github.com/other/repo/issues/1009"]);
 });
 
 test("a row shows one chip when a link repeats the issue with another owner/repo case", async (t) => {
@@ -1200,12 +1212,12 @@ test("a row shows one chip when a link repeats the issue with another owner/repo
     ],
   };
   const row = ui.run(`taskRow(${JSON.stringify(task)}, new Set())`);
-  assert.deepEqual(row.querySelector(".links").children.map((node) => node.textContent), ["1009", "24065", "508", "44083"]);
+  assert.deepEqual(row.querySelector(".links").children.map((node: Json) => node.textContent), ["1009", "24065", "508", "44083"]);
 });
 
 test("a GHSA ID and an advisory URL each become one link to the canonical advisory", async (t) => {
   const ui = await dashboard(t);
-  const anchors = (text) => JSON.parse(ui.run(`JSON.stringify(codeParts(${JSON.stringify(text)}).filter((part) => typeof part !== "string")
+  const anchors = (text: string) => JSON.parse(ui.run(`JSON.stringify(codeParts(${JSON.stringify(text)}).filter((part) => typeof part !== "string")
     .map((part) => ({ text: part.textContent, href: part.href, target: part.target })))`));
   const canonical = "https://github.com/advisories/GHSA-cfgh-2345-vwxc";
   assert.deepEqual(anchors("Fixes ghsa-CFGH-2345-vwxc."), [{ text: "ghsa-CFGH-2345-vwxc", href: canonical, target: "_blank" }]);
@@ -1229,7 +1241,7 @@ test("a row lists one canonical advisory chip for an ID form, a repo URL and an 
   };
   const row = ui.run(`taskRow(${JSON.stringify(task)}, new Set())`);
   const links = row.querySelector(".links").children;
-  assert.deepEqual(links.map((node) => node.href), ["https://github.com/owner/repo/issues/9", "https://github.com/owner/repo/pull/4", canonical]);
+  assert.deepEqual(links.map((node: Json) => node.href), ["https://github.com/owner/repo/issues/9", "https://github.com/owner/repo/pull/4", canonical]);
   assert.equal(links[2].textContent, "GHSA-cfgh-2345-vwxc");
   assert.equal(links[2].children[0]["aria-label"], "Security advisory");
 });
@@ -1253,38 +1265,38 @@ test("history steps carry relative gaps, loop and operator markers", async (t) =
     { state: "implementation", at: "2026-05-04T17:31:00Z", note: "Resumed." },
   ];
   const steps = JSON.parse(ui.run(`JSON.stringify(historySteps(${JSON.stringify(history)}))`));
-  assert.deepEqual(steps.map((step) => step.state), history.map((item) => item.state));
-  assert.deepEqual(steps.map((step) => step.gap), [null, "+2m", "+7h 28m", "+1m", "+0s", "+3d"]);
-  assert.deepEqual(steps.map((step) => step.back), [null, null, null, "rework", null, "unblocked"]);
-  assert.deepEqual(steps.map((step) => step.operator), [false, false, false, false, true, false]);
+  assert.deepEqual(steps.map((step: Json) => step.state), history.map((item) => item.state));
+  assert.deepEqual(steps.map((step: Json) => step.gap), [null, "+2m", "+7h 28m", "+1m", "+0s", "+3d"]);
+  assert.deepEqual(steps.map((step: Json) => step.back), [null, null, null, "rework", null, "unblocked"]);
+  assert.deepEqual(steps.map((step: Json) => step.operator), [false, false, false, false, true, false]);
   assert.equal(steps[0].note, null);
 });
 
 test("history renders one flow step per entry, even for a single entry", async (t) => {
   const ui = await dashboard(t);
   for (const id of ["issue-12", "issue-7"]) {
-    const task = example.tasks.find((item) => item.id === id);
+    const task = example.tasks.find((item: Json) => item.id === id);
     const row = ui.run(`taskRow(${JSON.stringify(task)}, new Set())`);
-    const history = row.children.find((child) => child.tag === "ol");
+    const history = row.children.find((child: Json) => child.tag === "ol");
     assert.equal(history.children.length, task.history.length, id);
-    assert.deepEqual(history.querySelectorAll(".history-state").map((node) => node.textContent),
-      task.history.map((item) => item.state));
+    assert.deepEqual(history.querySelectorAll(".history-state").map((node: Json) => node.textContent),
+      task.history.map((item: Json) => item.state));
     assert.equal(row.querySelector("h4").textContent, `History (${task.history.length})`);
     assert.equal(history.querySelectorAll(".history-gap").length, task.history.length - 1);
   }
-  const loop = ui.run(`taskRow(${JSON.stringify(example.tasks.find((item) => item.id === "issue-7"))}, new Set())`);
-  assert.equal(loop.querySelectorAll(".history-gap").filter((gap) => gap.textContent.includes("↩ rework")).length, 1);
+  const loop = ui.run(`taskRow(${JSON.stringify(example.tasks.find((item: Json) => item.id === "issue-7"))}, new Set())`);
+  assert.equal(loop.querySelectorAll(".history-gap").filter((gap: Json) => gap.textContent.includes("↩ rework")).length, 1);
 });
 
 test("history marks operator moves and keeps their note visible", async (t) => {
   const ui = await dashboard(t);
-  const task = structuredClone(example.tasks.find((item) => item.id === "issue-9"));
+  const task = structuredClone(example.tasks.find((item: Json) => item.id === "issue-9"));
   task.history.push({ state: "blocked", at: "2026-05-02T00:00:00Z", note: "Wait for the vendor.", source: "dashboard", feedback_id: "f1" });
   task.state = "blocked";
   const row = ui.run(`taskRow(${JSON.stringify(task)}, new Set())`);
   const nodes = row.querySelectorAll(".history-node");
   assert.equal(nodes.length, 4);
-  assert.equal(nodes.filter((node) => node.className.split(" ").includes("operator")).length, 1);
+  assert.equal(nodes.filter((node: Json) => node.className.split(" ").includes("operator")).length, 1);
   assert.equal(nodes.at(-1).querySelector(".history-badge").textContent, "operator");
   assert.equal(nodes.at(-1).querySelector(".history-note").textContent, "Wait for the vendor.");
   assert.match(nodes.at(-1).title, /Wait for the vendor\./);
@@ -1292,7 +1304,7 @@ test("history marks operator moves and keeps their note visible", async (t) => {
 
 test("long histories fold older steps and keep them reachable across refreshes", async (t) => {
   const ui = await dashboard(t);
-  const task = structuredClone(example.tasks.find((item) => item.id === "issue-7"));
+  const task = structuredClone(example.tasks.find((item: Json) => item.id === "issue-7"));
   while (task.history.length < 25) {
     const at = new Date(Date.parse(task.history.at(-1).at) + 60_000).toISOString();
     task.history.push({ state: task.history.length % 2 ? "implementation" : "review", at, note: `Step ${task.history.length}.` });
@@ -1300,20 +1312,20 @@ test("long histories fold older steps and keep them reachable across refreshes",
   task.state = task.history.at(-1).state;
   const row = ui.run(`taskRow(${JSON.stringify(task)}, new Set())`);
   assert.equal(row.querySelector("h4").textContent, "History (25)");
-  assert.deepEqual(row.querySelectorAll("ol").map((list) => list.children.length), [17, 8]);
+  assert.deepEqual(row.querySelectorAll("ol").map((list: Json) => list.children.length), [17, 8]);
   assert.equal(row.querySelectorAll(".history-node").length, 25);
-  const folded = row.children.find((child) => child.className === "history-earlier");
+  const folded = row.children.find((child: Json) => child.className === "history-earlier");
   assert.equal(folded.open, false);
   assert.equal(folded.querySelector("summary").textContent, "Earlier steps (17)");
   assert.equal(folded.dataset.taskId, `${task.id}:history`);
   const reopened = ui.run(`taskRow(${JSON.stringify(task)}, new Set(["${task.id}:history"]))`);
-  assert.equal(reopened.children.find((child) => child.className === "history-earlier").open, true);
+  assert.equal(reopened.children.find((child: Json) => child.className === "history-earlier").open, true);
 });
 
 test("a resolved task shows how long ago it resolved", async (t) => {
   const ui = await dashboard(t, { now: Date.parse("2026-05-01T12:05:00Z") });
   const data = structuredClone(example);
-  const task = data.tasks.find((task) => task.state === "resolved");
+  const task = data.tasks.find((task: Json) => task.state === "resolved");
   task.history.at(-1).at = "2026-05-01T12:02:00Z";
   await writeFile(join(ui.directory, factoryFile), JSON.stringify(data));
   await ui.run("refresh()");
@@ -1331,7 +1343,7 @@ test("resolved sublists count each outcome and open only matching tasks", async 
   const data = structuredClone(example);
   const { operatorOutcomes } = await import("./factory-data.mjs");
   for (const [index, outcome] of [...operatorOutcomes, "duplicate"].entries()) {
-    const task = structuredClone(example.tasks.find((task) => task.state === "initial"));
+    const task = structuredClone(example.tasks.find((task: Json) => task.state === "initial"));
     task.id = `resolution-${index}`;
     task.title = `${outcome} task ${index}`;
     task.issue = null;
@@ -1409,14 +1421,14 @@ test("Blocked has one line per state that never overlaps another", async (t) => 
   const ui = await dashboard(t);
   const edges = ui.get("flow").querySelectorAll(".edge");
   const keys = edges.map((edge) => edge.dataset.edge);
-  const parse = (path) => path.slice(1).split(" L").map((point) => point.split(",").map(Number));
-  const lanes = [];
+  const parse = (path: string) => path.slice(1).split(" L").map((point) => point.split(",").map(Number));
+  const lanes: Json[] = [];
   for (const state of ["initial", "investigation", "implementation", "review"]) {
     const key = `${state}>blocked`;
     const edge = edges.find((item) => item.dataset.edge === key);
     assert.ok(edge, `Missing edge ${key}`);
     const points = parse(edge.d);
-    assert.equal(points.at(-1)[1], 430, `${key} meets the top of Blocked`);
+    assert.equal(points.at(-1)![1], 430, `${key} meets the top of Blocked`);
     assert.equal(points[0][1], 320, `${key} meets the bottom of its state`);
     lanes.push({ key, points });
   }
@@ -1424,11 +1436,11 @@ test("Blocked has one line per state that never overlaps another", async (t) => 
     "A line joins two states once, not once per direction.");
   assert.equal(new Set(keys).size, keys.length, "Edge keys are unique");
 
-  const segments = (points) => points.slice(1).map(([x, y], index) => {
+  const segments = (points: number[][]) => points.slice(1).map(([x, y], index) => {
     const [px, py] = points[index];
     return { x1: Math.min(x, px), x2: Math.max(x, px), y1: Math.min(y, py), y2: Math.max(y, py) };
   });
-  const touch = (a, b) => a.x1 <= b.x2 && b.x1 <= a.x2 && a.y1 <= b.y2 && b.y1 <= a.y2;
+  const touch = (a: Json, b: Json) => a.x1 <= b.x2 && b.x1 <= a.x2 && a.y1 <= b.y2 && b.y1 <= a.y2;
   lanes.forEach((a, index) => lanes.slice(index + 1).forEach((b) => {
     for (const first of segments(a.points)) {
       for (const second of segments(b.points)) {
@@ -1518,7 +1530,7 @@ test("Unblock lists options, fills the comment verbatim and saves through the mo
   assert.match(context.querySelector(".unblock-notes").textContent, /blocked .*: Needs a token\./);
   assert.equal(comment.value, "");
   const choices = form.querySelectorAll(".option");
-  assert.deepEqual(choices.map((choice) => choice.children[0]), ["Add the docs token to the CI secrets", "Skip the docs build in CI"]);
+  assert.deepEqual(choices.map((choice: Json) => choice.children[0]), ["Add the docs token to the CI secrets", "Skip the docs build in CI"]);
   assert.match(choices[0].textContent, /Recommended/);
   assert.doesNotMatch(choices[1].textContent, /Recommended/);
   await choices[0].fire("click");
@@ -1529,7 +1541,7 @@ test("Unblock lists options, fills the comment verbatim and saves through the mo
   assert.equal(state.value, "investigation");
   comment.value = "Use a custom token instead.";
   await form.fire("submit");
-  const saved = JSON.parse(await readFile(join(ui.directory, factoryFile), "utf8")).tasks.find((task) => task.id === "issue-5");
+  const saved = JSON.parse(await readFile(join(ui.directory, factoryFile), "utf8")).tasks.find((task: Json) => task.id === "issue-5");
   assert.equal(saved.state, "investigation");
   assert.equal(saved.blocker, null);
   assert.equal(saved.history.at(-1).note, "Use a custom token instead.");
@@ -1541,8 +1553,8 @@ test("Unblock lists options, fills the comment verbatim and saves through the mo
 test("the blocker class and owner show in the Unblock popup, and the class rows filter blocked tasks", async (t) => {
   const ui = await dashboard(t);
   const data = structuredClone(example);
-  const base = data.tasks.find((item) => item.id === "issue-5");
-  const extra = (id, blocker) => ({ ...structuredClone(base), id, title: id, issue: null, pr: null, blocker: { ...base.blocker, ...blocker } });
+  const base = data.tasks.find((item: Json) => item.id === "issue-5");
+  const extra = (id: string, blocker: Json) => ({ ...structuredClone(base), id, title: id, issue: null, pr: null, blocker: { ...base.blocker, ...blocker } });
   const plain = extra("plain", { reason: "Old blocker" });
   delete plain.blocker.class;
   delete plain.blocker.owner;
@@ -1555,7 +1567,7 @@ test("the blocker class and owner show in the Unblock popup, and the class rows 
     ["ci-infra", "CI infra", "1"], ["approval", "Approval", "0"], ["none", "No class", "1"],
   ]);
   assert.equal(ui.get("blocker-filter"), undefined);
-  const row = (key) => rows.find((item) => item.dataset.class === key);
+  const row = (key: string) => rows.find((item: Json) => item.dataset.class === key);
   assert.equal(row("ci-infra")["aria-label"], "Blocked: CI infra, 1 task");
   await ui.run("choose('blocked')");
   const ids = () => ui.get("task-list").children.map((item) => item.dataset.taskId).sort();
@@ -1583,7 +1595,7 @@ test("the blocker class and owner show in the Unblock popup, and the class rows 
 test("Unblock without options shows only the state and the comment; other rows keep Move", async (t) => {
   const ui = await dashboard(t);
   const data = structuredClone(example);
-  const task = data.tasks.find((item) => item.id === "issue-5");
+  const task = data.tasks.find((item: Json) => item.id === "issue-5");
   task.blocker = { from: "implementation", reason: "<b>Old</b> blocker", since: task.blocker.since };
   await writeFile(join(ui.directory, factoryFile), JSON.stringify(data));
   await ui.run("refresh()");
@@ -1607,7 +1619,7 @@ test("Unblock without options shows only the state and the comment; other rows k
 test("Unblock shows a long reason in full and only the last three history notes, newest first", async (t) => {
   const ui = await dashboard(t);
   const data = structuredClone(example);
-  const task = data.tasks.find((item) => item.id === "issue-5");
+  const task = data.tasks.find((item: Json) => item.id === "issue-5");
   const reason = `${"x".repeat(2500)}\n${"y".repeat(2500)}`;
   task.blocker.reason = reason;
   task.history = ["one", "two", "three", "four"].map((note, index) => ({
@@ -1619,7 +1631,7 @@ test("Unblock shows a long reason in full and only the last three history notes,
   await ui.get("task-list").querySelector(".move").fire("click");
   const context = ui.get("move-body").querySelector(".unblock-context");
   assert.equal(context.querySelector(".unblock-reason").textContent, reason);
-  const notes = context.querySelector(".unblock-notes").children.map((item) => item.textContent.replace(/^.*: /, ""));
+  const notes = context.querySelector(".unblock-notes").children.map((item: Json) => item.textContent.replace(/^.*: /, ""));
   assert.deepEqual(notes, ["four", "three", "two"]);
 });
 
@@ -1634,7 +1646,7 @@ test("Reload task refreshes the blocker reason and keeps the comment draft", asy
     task: "issue-5", blocker: JSON.stringify({ reason: "A new reason." }),
   });
   await form.fire("submit");
-  await form.querySelectorAll("button").find((button) => button.textContent === "Reload task").fire("click");
+  await form.querySelectorAll("button").find((button: Json) => button.textContent === "Reload task").fire("click");
   assert.equal(form.querySelector(".unblock-reason").textContent, "A new reason.");
   assert.equal(form.querySelector("textarea").value, "My draft");
 });
@@ -1665,12 +1677,12 @@ test("Move opens a separate popup whose draft survives refresh and conflict", as
   assert.equal(form.querySelector(".save-error").hidden, false);
   assert.equal(ui.get("move-dialog").open, true);
   assert.equal(comment.value, "This is now unblocked.\nUse the new docs setup.");
-  assert.equal(JSON.parse(await readFile(file, "utf8")).tasks.find((task) => task.id === "issue-5").state, "blocked");
-  const reload = form.querySelectorAll("button").find((button) => button.textContent === "Reload task");
+  assert.equal(JSON.parse(await readFile(file, "utf8")).tasks.find((task: Json) => task.id === "issue-5").state, "blocked");
+  const reload = form.querySelectorAll("button").find((button: Json) => button.textContent === "Reload task");
   await reload.fire("click");
   assert.equal(comment.value, "This is now unblocked.\nUse the new docs setup.");
   await form.fire("submit");
-  const saved = JSON.parse(await readFile(file, "utf8")).tasks.find((task) => task.id === "issue-5");
+  const saved = JSON.parse(await readFile(file, "utf8")).tasks.find((task: Json) => task.id === "issue-5");
   assert.equal(saved.state, "initial");
   assert.equal(saved.history.at(-1).note, comment.value);
   assert.equal(saved.feedback.acknowledged_id, null);
@@ -1682,10 +1694,10 @@ test("Move opens a separate popup whose draft survives refresh and conflict", as
 });
 
 test("a pending move response does not close another task's draft", async (t) => {
-  let markMoveStarted;
-  const moveStarted = new Promise((resolve) => { markMoveStarted = resolve; });
-  let releaseMoveResponse;
-  const moveResponseReleased = new Promise((resolve) => { releaseMoveResponse = resolve; });
+  let markMoveStarted!: () => void;
+  const moveStarted = new Promise<void>((resolve) => { markMoveStarted = resolve; });
+  let releaseMoveResponse!: () => void;
+  const moveResponseReleased = new Promise<void>((resolve) => { releaseMoveResponse = resolve; });
   const ui = await dashboard(t, {
     fetchRequest: async (path, _, request) => {
       const response = await request();
@@ -1720,7 +1732,7 @@ test("a pending move response does not close another task's draft", async (t) =>
 });
 
 test("the move popup confirms before discarding a draft through Esc, close, or backdrop", async (t) => {
-  const confirmations = [];
+  const confirmations: string[] = [];
   let answer = false;
   const ui = await dashboard(t, { confirm: (message) => { confirmations.push(message); return answer; } });
   const file = join(ui.directory, factoryFile);
@@ -1774,9 +1786,9 @@ test("a saved move fades out before its row is removed, even during refresh", as
     "The running-worker activity indicator remains separate from the task label.");
   const list = ui.get("task-list");
   const row = list.children[0];
-  const animation = {};
+  const animation: Json = {};
   let fades = 0;
-  row.animate = (frames, options) => {
+  row.animate = (frames: Json, options: Json) => {
     fades += 1;
     assert.deepEqual(Array.from(frames.opacity), [1, 0]);
     assert.equal(options.duration, 300);
@@ -1793,7 +1805,7 @@ test("a saved move fades out before its row is removed, even during refresh", as
   assert.equal(row.inert, true, "The departing row must not accept another move.");
   assert.equal(ui.get("detail-empty").hidden, true);
   const file = join(ui.directory, factoryFile);
-  assert.equal(JSON.parse(await readFile(file, "utf8")).tasks.find((task) => task.id === "issue-5").state, "initial");
+  assert.equal(JSON.parse(await readFile(file, "utf8")).tasks.find((task: Json) => task.id === "issue-5").state, "initial");
   await ui.run("refresh()");
   assert.equal(list.children[0], row, "Refresh must not cut the fade short.");
   assert.equal(fades, 1);
@@ -1830,9 +1842,9 @@ test("the popup can resolve an initial task with an outcome and comment", async 
   await button.fire("click");
   const form = ui.get("move-body").querySelector("form");
   const selects = form.querySelectorAll("select");
-  const state = selects.find((select) => select.name === "state");
-  const outcome = selects.find((select) => select.name === "resolution");
-  assert.ok(state.options.some((option) => option.value === "resolved"), "Resolved must be selectable.");
+  const state = selects.find((select: Json) => select.name === "state");
+  const outcome = selects.find((select: Json) => select.name === "resolution");
+  assert.ok(state.options.some((option: Json) => option.value === "resolved"), "Resolved must be selectable.");
   state.value = "resolved";
   await state.fire("change");
   assert.equal(outcome.disabled, false);
@@ -1841,13 +1853,13 @@ test("the popup can resolve an initial task with an outcome and comment", async 
   const comment = form.querySelector("textarea");
   comment.value = "No longer needed. Stop work on this task.";
   await ui.run("refresh()");
-  assert.equal(form.querySelectorAll("select").find((select) => select.name === "resolution").value, "cancelled");
+  assert.equal(form.querySelectorAll("select").find((select: Json) => select.name === "resolution").value, "cancelled");
   await form.fire("keydown", { key: "Enter" });
   assert.equal(form.submitted, undefined, "Plain Enter must not save the move.");
   await form.fire("keydown", { key: "Enter", metaKey: true });
   await form.submitted;
   const saved = JSON.parse(await readFile(join(ui.directory, factoryFile), "utf8"))
-    .tasks.find((task) => task.id === "issue-12");
+    .tasks.find((task: Json) => task.id === "issue-12");
   assert.equal(saved.state, "resolved");
   assert.equal(saved.resolution.outcome, "cancelled");
   assert.equal(saved.resolution.note, comment.value);
@@ -1861,11 +1873,11 @@ test("the Settings item at the bottom of the sidebar opens one settings dialog",
   await ui.get("open-settings").fire("click");
   assert.equal(ui.get("settings-dialog").open, true);
   const form = ui.get("settings-body").querySelector("form");
-  assert.deepEqual(form.querySelectorAll("input").map((input) => input.value), ["10", "3", "3"]);
+  assert.deepEqual(form.querySelectorAll("input").map((input: Json) => input.value), ["10", "3", "3"]);
   const [spend, cap] = form.querySelectorAll("select");
   assert.deepEqual([spend.value, cap.value], ["", ""]);
-  assert.deepEqual(spend.options.map((option) => option.value), ["", "standard", "high", "max"]);
-  assert.deepEqual(cap.options.map((option) => option.value), ["", "L0", "L1", "L2", "L3", "L4", "L5"]);
+  assert.deepEqual(spend.options.map((option: Json) => option.value), ["", "standard", "high", "max"]);
+  assert.deepEqual(cap.options.map((option: Json) => option.value), ["", "L0", "L1", "L2", "L3", "L4", "L5"]);
   assert.match(form.textContent, /Latest recorded autonomy level: L4 \(issue-3\)/);
   ui.get("detail").hidden = false;
   ui.press("Escape");
@@ -1895,7 +1907,7 @@ test("the settings dialog keeps its draft across refresh, reports a conflict, an
   await ui.get("close-settings").fire("click");
   assert.equal(confirms.length, 1, "A changed value asks before discarding.");
   assert.equal(ui.get("settings-dialog").open, true);
-  const reload = form.querySelectorAll("button").find((button) => button.textContent === "Reload settings");
+  const reload = form.querySelectorAll("button").find((button: Json) => button.textContent === "Reload settings");
   await reload.fire("click");
   assert.equal(budget.value, "6", "Reload keeps the draft.");
   assert.equal(cap.value, "L2");
@@ -1930,10 +1942,10 @@ test("the settings dialog validates numbers before sending and saves nothing whe
 });
 
 test("the delegate-always rule is present in the agent, skill, and plugin rules", () => {
-  const plugin = join(__dirname, "..", "..");
+  const plugin = join(import.meta.dirname, "..", "..");
   for (const file of [
     join(plugin, "agents", "general.agent.md"),
-    join(__dirname, "SKILL.md"),
+    join(import.meta.dirname, "SKILL.md"),
     join(plugin, "AGENTS.md"),
   ]) {
     const text = readFileSync(file, "utf8");
@@ -1951,8 +1963,8 @@ test("the delegate-always rule is present in the agent, skill, and plugin rules"
 });
 
 test("the agent, skill, and plugin rules say the coordinator never exceeds the budget", () => {
-  const plugin = join(__dirname, "..", "..");
-  for (const file of [join(plugin, "agents", "general.agent.md"), join(__dirname, "SKILL.md"), join(plugin, "AGENTS.md")]) {
+  const plugin = join(import.meta.dirname, "..", "..");
+  for (const file of [join(plugin, "agents", "general.agent.md"), join(import.meta.dirname, "SKILL.md"), join(plugin, "AGENTS.md")]) {
     const text = readFileSync(file, "utf8");
     assert.match(text, /budget\.max_parallel_workers/, file);
     assert.match(text, /never\s+exceeds?\s+(it|the\s+budget)/i, file);
@@ -1960,9 +1972,9 @@ test("the agent, skill, and plugin rules say the coordinator never exceeds the b
 });
 
 test("the rules say only the user's click answers an attention prompt, and only an ask_user one", () => {
-  const plugin = join(__dirname, "..", "..");
+  const plugin = join(import.meta.dirname, "..", "..");
   const agents = readFileSync(join(plugin, "AGENTS.md"), "utf8");
-  const skill = readFileSync(join(__dirname, "SKILL.md"), "utf8");
+  const skill = readFileSync(join(import.meta.dirname, "SKILL.md"), "utf8");
   for (const [text, file] of [[agents, "AGENTS.md"], [skill, "SKILL.md"]]) {
     assert.match(text, /click/, file);
     assert.doesNotMatch(text, /dashboard\s+shows\s+the\s+open\s+items\s+read\s+only|dashboard\s+never\s+answers\s+a\s+prompt/i, file);
@@ -1974,7 +1986,7 @@ test("the rules say only the user's click answers an attention prompt, and only 
 });
 
 test("the worker write boundary is present in the skill and plugin rules", () => {
-  for (const file of [join(__dirname, "SKILL.md"), join(__dirname, "..", "..", "AGENTS.md")]) {
+  for (const file of [join(import.meta.dirname, "SKILL.md"), join(import.meta.dirname, "..", "..", "AGENTS.md")]) {
     const text = readFileSync(file, "utf8");
     assert.match(text, /only\s+writable\s+root/i, file);
     assert.match(text, /primary checkout/, file);
@@ -1983,7 +1995,7 @@ test("the worker write boundary is present in the skill and plugin rules", () =>
 });
 
 test("the standing cost lines are one block in the skill and are mapped in improve.md", () => {
-  const skill = readFileSync(join(__dirname, "SKILL.md"), "utf8");
+  const skill = readFileSync(join(import.meta.dirname, "SKILL.md"), "utf8");
   const block = skill.match(/Standing cost lines:\n([\s\S]*?)\n```/);
   assert.ok(block, "SKILL.md has the standing cost lines block");
   const lines = block[1];
@@ -1991,15 +2003,15 @@ test("the standing cost lines are one block in the skill and are mapped in impro
   assert.match(lines, /2\. View a file before you edit it\..*edit, not create, for a file that\s+exists/s);
   assert.match(lines, /3\. This brief has the default for every decision.*nudges in one message/s);
   assert.match(lines, /4\. When the PR is handed to review.*`waiting` result.*fresh\s+worker.*short handoff/s);
-  const improve = readFileSync(join(__dirname, "improve.md"), "utf8");
+  const improve = readFileSync(join(import.meta.dirname, "improve.md"), "utf8");
   for (const signal of ["tools.manage_schedule.calls", "tools.create.failures", "tools.edit.failures", "idle.over_10_minutes"]) {
     assert.ok(improve.includes(signal), signal);
   }
-  assert.match(readFileSync(join(__dirname, "..", "..", "AGENTS.md"), "utf8"), /four\s+standing\s+cost\s+lines/);
+  assert.match(readFileSync(join(import.meta.dirname, "..", "..", "AGENTS.md"), "utf8"), /four\s+standing\s+cost\s+lines/);
 });
 
 test("the worker deny flags are one identical constant in the skill and plugin rules", () => {
-  const constants = [join(__dirname, "SKILL.md"), join(__dirname, "..", "..", "AGENTS.md")].map((file) => {
+  const constants = [join(import.meta.dirname, "SKILL.md"), join(import.meta.dirname, "..", "..", "AGENTS.md")].map((file) => {
     const lines = readFileSync(file, "utf8").split("\n").filter((line) => line.startsWith("--deny-tool="));
     assert.equal(lines.length, 1, file);
     return lines[0];
@@ -2012,7 +2024,7 @@ test("the worker deny flags are one identical constant in the skill and plugin r
 
 test("code-like text renders as inline code, escaped, once, and without touching links", async (t) => {
   const ui = await dashboard(t);
-  const parts = (text) => JSON.parse(ui.run(`JSON.stringify(codeParts(${JSON.stringify(text)})
+  const parts = (text: string) => JSON.parse(ui.run(`JSON.stringify(codeParts(${JSON.stringify(text)})
     .map((part) => typeof part === "string" ? part : { code: part.textContent, tag: part.tag }))`));
   const uuid = "01a1ec42-3b1e-7470-b269-912f7f7bd4fd";
   const sha = "be66032a1b2c3d4e5f60718293a4b5c6d7e8f901";
@@ -2025,17 +2037,17 @@ test("code-like text renders as inline code, escaped, once, and without touching
     assert.deepEqual(parts(plain), [plain]);
   }
   assert.deepEqual(parts("<b>x</b> abc1234"), ["<b>x</b> ", { code: "abc1234", tag: "code" }]);
-  assert.deepEqual(parts(`${uuid} ${uuid}`).filter((part) => part.code).length, 2);
+  assert.deepEqual(parts(`${uuid} ${uuid}`).filter((part: Json) => part.code).length, 2);
 });
 
 test("commit hashes, #N, owner/repo#N and GitHub URLs become safe links", async (t) => {
   const ui = await dashboard(t);
-  const parts = (text) => JSON.parse(ui.run(`JSON.stringify(codeParts(${JSON.stringify(text)}).map((part) => {
+  const parts = (text: string) => JSON.parse(ui.run(`JSON.stringify(codeParts(${JSON.stringify(text)}).map((part) => {
     if (typeof part === "string") return part;
     const anchor = part.tag === "a" ? part : part.children[0];
     return { tag: part.tag, text: part.textContent, ...(anchor?.tag === "a" ? { href: anchor.href, target: anchor.target, rel: anchor.rel } : {}) };
   }))`));
-  const link = (text, href) => ({ tag: "a", text, href, target: "_blank", rel: "noopener noreferrer" });
+  const link = (text: string, href: string) => ({ tag: "a", text, href, target: "_blank", rel: "noopener noreferrer" });
   ui.run('snapshot.project = "github/runtime"');
   assert.deepEqual(parts("Fixed by `76b60939`, see PR #40789 and other/repo#9."), [
     "Fixed by ", { tag: "code", text: "76b60939", href: "https://github.com/github/runtime/commit/76b60939", target: "_blank", rel: "noopener noreferrer" },
@@ -2058,7 +2070,7 @@ test("commit hashes, #N, owner/repo#N and GitHub URLs become safe links", async 
 test("a link inside a suggested answer does not pick the answer", async (t) => {
   const ui = await dashboard(t);
   const data = structuredClone(example);
-  data.tasks.find((item) => item.id === "issue-5").blocker.options = [{ label: "Merge #7" }];
+  data.tasks.find((item: Json) => item.id === "issue-5").blocker.options = [{ label: "Merge #7" }];
   await writeFile(join(ui.directory, factoryFile), JSON.stringify(data));
   await ui.run("refresh()");
   ui.run("choose('blocked')");
@@ -2073,19 +2085,19 @@ test("a link inside a suggested answer does not pick the answer", async (t) => {
 test("rows wrap UUIDs, SHAs, panes, paths and backticked text in code and keep links", async (t) => {
   const ui = await dashboard(t);
   const pane = "block:01a1ec42-3b1e-7470-b269-912f7f7bd4fd";
-  const task = structuredClone(example.tasks.find((item) => item.id === "issue-5"));
+  const task = structuredClone(example.tasks.find((item: Json) => item.id === "issue-5"));
   task.blocker.reason = "Run `npm test` after be66032 lands in /tmp/work/tree. Check `a.json`.";
   task.worktree = { path: "/tmp/work/tree", branch: "x" };
   task.workers = { implementation: { status: "running", name: "Fix 9a8b7c6", pane, brief: "brief.md", result: "result.json" } };
   task.history.at(-1).note = "Merged as 0123abc.";
   const row = ui.run(`taskRow(${JSON.stringify(task)}, new Set())`);
-  const codes = row.querySelectorAll("code").map((node) => node.textContent);
+  const codes = row.querySelectorAll("code").map((node: Json) => node.textContent);
   for (const expected of ["npm test", "be66032", "/tmp/work/tree", "a.json", "9a8b7c6", "0123abc"]) {
     assert.ok(codes.includes(expected), `${expected} in ${JSON.stringify(codes)}`);
   }
-  assert.ok(codes.every((value) => !value.includes("`")));
+  assert.ok(codes.every((value: string) => !value.includes("`")));
   const worker = row.querySelector(".step-extra");
-  assert.equal(worker.querySelectorAll("code").some((node) => node.textContent === pane), false, "The block ID is not shown.");
+  assert.equal(worker.querySelectorAll("code").some((node: Json) => node.textContent === pane), false, "The block ID is not shown.");
   assert.ok(worker.querySelectorAll("a").length >= 1, "Artifact links stay links.");
   assert.equal(row.querySelector(".blocker-options").querySelectorAll("li").length, task.blocker.options.length);
 });
@@ -2093,7 +2105,7 @@ test("rows wrap UUIDs, SHAs, panes, paths and backticked text in code and keep l
 test("the unblock popup wraps backticked option labels in code inside the button", async (t) => {
   const ui = await dashboard(t);
   const data = structuredClone(example);
-  data.tasks.find((item) => item.id === "issue-5").blocker.options = [{ label: "Run `gh auth login` first" }];
+  data.tasks.find((item: Json) => item.id === "issue-5").blocker.options = [{ label: "Run `gh auth login` first" }];
   await writeFile(join(ui.directory, factoryFile), JSON.stringify(data));
   await ui.run("refresh()");
   ui.run("choose('blocked')");
@@ -2126,7 +2138,7 @@ test("Cmd+K and Ctrl+K toggle the task palette, and other dialogs keep it closed
 });
 
 test("r refreshes like the button, and is ignored while typing, with modifiers, or with a dialog open", async (t) => {
-  const answers = [];
+  const answers: string[] = [];
   const ui = await dashboard(t, {
     fetchRequest: async (path, _, request) => {
       answers.push(path.split("?")[0]);
@@ -2134,7 +2146,7 @@ test("r refreshes like the button, and is ignored while typing, with modifiers, 
     },
   });
   const calls = () => answers.filter((path) => path === "/api/factory").length;
-  const ignored = async (event, setup = () => {}) => {
+  const ignored = async (event: Json, setup: (open: boolean) => void = () => {}) => {
     const before = calls();
     setup(true);
     const dispatched = ui.press("r", event);
@@ -2165,7 +2177,7 @@ test("a hidden tab stops polling, and showing it again refreshes once", async (t
       return request();
     },
   });
-  const timer = () => ui.timers.at(-1);
+  const timer = () => ui.timers.at(-1)!;
   assert.equal(timer().delay, 30000);
   requests = 0;
 
@@ -2196,20 +2208,20 @@ test("a hidden tab stops polling, and showing it again refreshes once", async (t
 });
 
 test("the Refresh button is disabled and busy while a refresh runs, and works again after it ends, also on failure", async (t) => {
-  let release;
-  let reached;
+  let release!: () => void;
+  let reached!: () => void;
   let fail = false;
   let hold = false;
   const ui = await dashboard(t, {
     fetchRequest: async (path, _, request) => {
       if (hold && path.startsWith("/api/factory?")) {
-        await new Promise((resolve) => { release = resolve; reached(); });
+        await new Promise<void>((resolve) => { release = resolve; reached(); });
         if (fail) throw new Error("boom");
       }
       return request();
     },
   });
-  const hit = () => new Promise((resolve) => { reached = resolve; });
+  const hit = () => new Promise<void>((resolve) => { reached = resolve; });
   const button = ui.get("refresh");
   assert.equal(button.disabled === true, false);
   hold = true;
@@ -2334,16 +2346,16 @@ test("palette arrows wrap and Enter docks the task's list and focuses its row", 
 
 test("a card shows the worker summary for its state, else the newest, and folds a long one", async (t) => {
   const ui = await dashboard(t);
-  const task = structuredClone(example.tasks.find((item) => item.id === "issue-5"));
+  const task = structuredClone(example.tasks.find((item: Json) => item.id === "issue-5"));
   const long = `Plan for #12 and be66032: ${"step ".repeat(60)}`;
   task.state = "review";
   task.workers = {
     investigation: { status: "closed", summary: "Old finding.", summary_at: "2026-05-01T10:00:00Z" },
     implementation: { status: "closed", summary: long, summary_at: "2026-05-02T10:00:00Z" },
   };
-  const card = (value) => ui.run(`taskRow(${JSON.stringify(value)}, new Set())`);
+  const card = (value: Json) => ui.run(`taskRow(${JSON.stringify(value)}, new Set())`);
   let row = card(task);
-  const heading = (node) => node.querySelector("h4").textContent;
+  const heading = (node: Json) => node.querySelector("h4").textContent;
   assert.equal(heading(row.querySelector(".summary")), "implementation summary", "No review summary: the newest wins.");
   task.state = "investigation";
   row = card(task);
@@ -2393,7 +2405,7 @@ test("the project dropdown lists the sorted factories, switches on a pick, and c
   assert.deepEqual(names(), ["other/repo", "owner/repo"], "The menu keeps the sidebar order.");
   assert.equal(menu.hidden, true);
 
-  const inside = { closest: (selector) => selector === "#project-switch" ? menu : null };
+  const inside = { closest: (selector: string) => selector === "#project-switch" ? menu : null };
   await toggle.fire("click");
   await ui.document.listeners.get("click")({ target: inside });
   assert.equal(menu.hidden, false);
@@ -2424,23 +2436,23 @@ test("the project dropdown lists the sorted factories, switches on a pick, and c
 test("the factory payload lists pending attention oldest first, and its tag follows the events", async (t) => {
   const { url, directory } = await server(t);
   const path = `/api/factory?file=${factoryFile}`;
-  const log = (id, type, at, data, task = null) => appendFile(join(directory, "owner.repo-factory-events.jsonl"),
+  const log = (id: string, type: string, at: string, data: Json, task: string | null = null) => appendFile(join(directory, "owner.repo-factory-events.jsonl"),
     `${JSON.stringify({ id, at, type, task, source: "attention", data })}\n`);
-  const ago = (minutes) => new Date(Date.now() - minutes * 60_000).toISOString();
-  const read = (tag) => get(url, path, tag ? { headers: { "If-None-Match": tag } } : undefined);
+  const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
+  const read = (tag?: string) => get(url, path, tag ? { headers: { "If-None-Match": tag } } : undefined);
 
   const first = await read();
   assert.deepEqual((await first.json()).attention, []);
-  const empty = first.headers.get("etag");
+  const empty = first.headers.get("etag")!;
 
   await log("e1", "attention.requested", ago(1), { session: "s-new", kind: "ask-user", text: "Pick one", options: ["a", "b"], role: "implementation" }, "issue-5");
   await log("e2", "attention.requested", ago(9), { session: "s-old", kind: "permission", text: "Run command: ls" });
   const changed = await read(empty);
   assert.equal(changed.status, 200, "A new item changes the tag while the factory file stays the same.");
-  const tag = changed.headers.get("etag");
+  const tag = changed.headers.get("etag")!;
   assert.notEqual(tag, empty);
   const { attention } = await changed.json();
-  assert.deepEqual(attention.map((item) => item.session), ["s-old", "s-new"]);
+  assert.deepEqual(attention.map((item: Json) => item.session), ["s-old", "s-new"]);
   assert.deepEqual(attention[1], {
     id: "e1", session: "s-new", kind: "ask-user", text: "Pick one", options: ["a", "b"], role: "implementation",
     pane: null, rex_session: null, task: "issue-5", at: attention[1].at,
@@ -2451,7 +2463,7 @@ test("the factory payload lists pending attention oldest first, and its tag foll
   const resolved = await read(tag);
   assert.equal(resolved.status, 200);
   assert.notEqual(resolved.headers.get("etag"), tag);
-  assert.deepEqual((await resolved.json()).attention.map((item) => item.session), ["s-new"]);
+  assert.deepEqual((await resolved.json()).attention.map((item: Json) => item.session), ["s-new"]);
 });
 
 test("the factory payload drops an item whose pane is gone, and records its resolution", async (t) => {
@@ -2470,7 +2482,7 @@ esac
   const { url, directory } = await server(t, { PATH: `${bin}${delimiter}${process.env.PATH}` });
   const events = join(directory, "owner.repo-factory-events.jsonl");
   const at = new Date(Date.now() - 20 * 60_000).toISOString();
-  const request = (id, session, pane) => ({ id, at, type: "attention.requested", task: null, source: "attention",
+  const request = (id: string, session: string, pane: string) => ({ id, at, type: "attention.requested", task: null, source: "attention",
     data: { session, kind: "sandbox-bypass", text: "Run command: ls", role: "backlog", pane } });
   await appendFile(events, [
     request("e1", "s-gone", "block:01a1f4d3-c03e-7f0b-bc24-060b0352db5f"),
@@ -2478,7 +2490,7 @@ esac
   ].map((event) => `${JSON.stringify(event)}\n`).join(""));
 
   const path = `/api/factory?file=${factoryFile}`;
-  assert.deepEqual((await (await get(url, path)).json()).attention.map((item) => item.session), ["s-live"]);
+  assert.deepEqual((await (await get(url, path)).json()).attention.map((item: Json) => item.session), ["s-live"]);
   await get(url, path);
   const resolved = (await readFile(events, "utf8")).trim().split("\n").map((line) => JSON.parse(line))
     .filter(({ type }) => type === "attention.resolved");
@@ -2499,8 +2511,8 @@ echo block:01a1f4e8-4bb0-72d2-bff2-25420482aad9
   const { url, directory } = await server(t, { PATH: `${bin}${delimiter}${process.env.PATH}`, FACTORY_SESSION_STATE: sessions });
   const events = join(directory, "owner.repo-factory-events.jsonl");
   const at = new Date(Date.now() - 20 * 60_000).toISOString();
-  const line = (event) => `${JSON.stringify(event)}\n`;
-  const request = (id, session) => line({ id, at, type: "attention.requested", task: null, source: "attention",
+  const line = (event: Json) => `${JSON.stringify(event)}\n`;
+  const request = (id: string, session: string) => line({ id, at, type: "attention.requested", task: null, source: "attention",
     data: { session, kind: "permission", text: "Run command: ls", role: "backlog", pane: "block:01a1f4e8-4bb0-72d2-bff2-25420482aad9" } });
   await appendFile(events, request("e1", "s1"));
   await mkdir(join(sessions, "s1"));
@@ -2508,7 +2520,7 @@ echo block:01a1f4e8-4bb0-72d2-bff2-25420482aad9
   await writeFile(sessionLog, "");
 
   const path = `/api/factory?file=${factoryFile}`;
-  const waiting = async () => (await (await get(url, path)).json()).attention.map((item) => item.id);
+  const waiting = async () => (await (await get(url, path)).json()).attention.map((item: Json) => item.id);
   const scans = async () => (await readFile(calls, "utf8")).trim().split("\n").length;
   assert.deepEqual(await waiting(), ["e1"]);
   assert.deepEqual(await waiting(), ["e1"]);
@@ -2540,7 +2552,7 @@ esac
   const { url, directory } = await server(t, { PATH: `${bin}${delimiter}${process.env.PATH}` });
   const live = "block:01a1f4e8-4bb0-72d2-bff2-25420482aad9";
   const at = new Date(Date.now() - 60_000).toISOString();
-  const request = (id, session, data) => ({ id, at, type: "attention.requested", task: null, source: "attention",
+  const request = (id: string, session: string, data?: Json) => ({ id, at, type: "attention.requested", task: null, source: "attention",
     data: { session, kind: "ask-user", text: "Pick one", options: ["a", "b", "c"], role: "implementation", pane: live, ...data } });
   await appendFile(join(directory, "owner.repo-factory-events.jsonl"), [
     request("ask", "s-ask", {}),
@@ -2549,7 +2561,7 @@ esac
     request("gone", "s-gone", { pane: "block:01a1f4d3-c03e-7f0b-bc24-060b0352db5f" }),
   ].map((event) => `${JSON.stringify(event)}\n`).join(""));
 
-  const answer = (body, headers = {}) => get(url, `/api/attention/answer?file=${factoryFile}`, {
+  const answer = (body: Json, headers: Record<string, string> = {}) => get(url, `/api/attention/answer?file=${factoryFile}`, {
     method: "POST",
     headers: { Origin: new URL(url).origin, "Content-Type": "application/json", ...headers },
     body: JSON.stringify(body),
@@ -2560,7 +2572,7 @@ esac
   assert.equal(ok.status, 200, await ok.clone().text());
   assert.equal(await keys(), `send-key -s session:two -b ${live} down down enter\n`);
 
-  const refusals = [
+  const refusals: [Json, number, RegExp][] = [
     [{ id: "ask", index: -1 }, 400, /option index/],
     [{ id: "ask", index: "1" }, 400, /option index/],
     [{ id: "ask", index: 1, extra: true }, 400, /option index/],
@@ -2592,8 +2604,8 @@ esac
 });
 
 test("an ask_user prompt shows its options as buttons that post the pick, and the others stay copy-only", async (t) => {
-  const posts = [];
-  let reply = { status: 409, body: { error: "That prompt is no longer waiting." } };
+  const posts: Json[] = [];
+  let reply: Json = { status: 409, body: { error: "That prompt is no longer waiting." } };
   const ui = await dashboard(t, {
     fetchRequest: async (path, init, request) => {
       if (!path.startsWith("/api/attention/answer")) return request();
@@ -2624,7 +2636,7 @@ test("an ask_user prompt shows its options as buttons that post the pick, and th
 
   reply = { status: 200, body: { sent: true } };
   await red.fire("click");
-  assert.deepEqual(posts.at(-1).body, { id: "e1", index: 0 });
+  assert.deepEqual(posts.at(-1)!.body, { id: "e1", index: 0 });
   assert.match(ask.textContent, /The page sent "red"\. Wait for the prompt to close\./);
   assert.equal(red.disabled && green.disabled, true, "A sent answer is not sent twice.");
 });
@@ -2637,11 +2649,11 @@ test("the badge, the page title and the waiting list show pending attention as d
   assert.equal(badge.hidden, true, "The badge is hidden at zero.");
   assert.equal(ui.document.title, "owner/repo - Factory");
 
-  const item = (n, extra = {}) => ({
+  const item = (n: number, extra: Json = {}) => ({
     session: `s${n}`, kind: "sandbox-bypass", text: `Run command: <b>rm</b> ${n}`, options: [], role: "implementation",
     pane: `block:p${n}`, rex_session: n === 0 ? "session:s0" : null, task: "issue-5", at: `2026-05-01T12:0${n % 10}:00Z`, ...extra,
   });
-  const show = (items) => ui.run(`load({ ...snapshot, attention: ${JSON.stringify(items)} }, lastSource)`);
+  const show = (items: Json[]) => ui.run(`load({ ...snapshot, attention: ${JSON.stringify(items)} }, lastSource)`);
   show([item(0, { options: ["yes", "no"] }), item(1, { pane: "block:x; rm -rf ~" })]);
   assert.equal(badge.hidden, false);
   assert.equal(ui.get("attention-count").textContent, "2");
@@ -2677,11 +2689,11 @@ test("an improve proposal shows in the payload, and deciding it records improve.
   const { url, directory } = await server(t);
   const path = `/api/factory?file=${factoryFile}`;
   const events = join(directory, "owner.repo-factory-events.jsonl");
-  const proposed = (id, minutes) => ({
+  const proposed = (id: string, minutes: number) => ({
     id: `e-${id}`, at: new Date(Date.now() - minutes * 60_000).toISOString(), type: "improve.proposed", task: null, source: "improve",
     data: { rule: "self-improve", change: "limit", title: `Title ${id}`, evidence: `Evidence ${id}`, recommended: "decline", proposal_id: id, result: "r.json" },
   });
-  const decide = (body, headers = {}) => get(url, `/api/improve/decide?file=${factoryFile}`, {
+  const decide = (body: Json, headers: Record<string, string> = {}) => get(url, `/api/improve/decide?file=${factoryFile}`, {
     method: "POST",
     headers: { Origin: new URL(url).origin, "Content-Type": "application/json", ...headers },
     body: JSON.stringify(body),
@@ -2691,10 +2703,10 @@ test("an improve proposal shows in the payload, and deciding it records improve.
   const first = await get(url, path);
   assert.deepEqual((await first.json()).proposals, []);
   await appendFile(events, [proposed("p-new", 1), proposed("p-old", 9)].map((event) => `${JSON.stringify(event)}\n`).join(""));
-  const listed = await get(url, path, { headers: { "If-None-Match": first.headers.get("etag") } });
+  const listed = await get(url, path, { headers: { "If-None-Match": first.headers.get("etag")! } });
   assert.equal(listed.status, 200, "A new proposal changes the tag.");
   const { proposals } = await listed.json();
-  assert.deepEqual(proposals.map(({ id }) => id), ["p-old", "p-new"]);
+  assert.deepEqual(proposals.map(({ id }: Json) => id), ["p-old", "p-new"]);
   assert.deepEqual(proposals[1], {
     id: "p-new", rule: "self-improve", kind: "limit", title: "Title p-new", evidence: "Evidence p-new",
     recommended: "decline", result: "r.json", at: proposals[1].at,
@@ -2705,7 +2717,7 @@ test("an improve proposal shows in the payload, and deciding it records improve.
   assert.deepEqual(await ok.json(), { recorded: true, decision: "accepted" });
   const [decided] = (await log()).filter(({ type }) => type === "improve.decided");
   assert.deepEqual([decided.source, decided.task, decided.data], ["dashboard", null, { proposal_id: "p-new", decision: "accepted", note: "fine" }]);
-  assert.deepEqual((await (await get(url, path)).json()).proposals.map(({ id }) => id), ["p-old"], "A decided proposal disappears.");
+  assert.deepEqual((await (await get(url, path)).json()).proposals.map(({ id }: Json) => id), ["p-old"], "A decided proposal disappears.");
 
   const repeat = await decide({ proposal_id: "p-new", decision: "declined" });
   assert.deepEqual(await repeat.json(), { recorded: false, decision: "accepted" }, "A repeat click keeps the first decision.");
@@ -2718,14 +2730,14 @@ test("an improve proposal shows in the payload, and deciding it records improve.
     [{ proposal_id: "p-old", decision: "applied" }, 400],
     [{ proposal_id: "p-old", decision: "accepted", extra: 1 }, 400],
     [{ decision: "accepted" }, 400],
-  ]) assert.equal((await decide(body)).status, status, JSON.stringify(body));
+  ] as [Json, number][]) assert.equal((await decide(body)).status, status, JSON.stringify(body));
   assert.equal((await decide({ proposal_id: "p-old", decision: "accepted" }, { Origin: "http://evil.example" })).status, 403);
   assert.equal((await log()).filter(({ type }) => type === "improve.decided").length, 2, "A refused request records nothing.");
 });
 
 test("a proposal row has Accept and Decline buttons that post the decision, and counts on the badge", async (t) => {
-  const posts = [];
-  let reply = { status: 409, body: { error: "Nope." } };
+  const posts: Json[] = [];
+  let reply: Json = { status: 409, body: { error: "Nope." } };
   const ui = await dashboard(t, {
     fetchRequest: async (path, init, request) => {
       if (!path.startsWith("/api/improve/decide")) return request();
@@ -2750,7 +2762,7 @@ test("a proposal row has Accept and Decline buttons that post the decision, and 
 
   reply = { status: 200, body: { recorded: true, decision: "accepted" } };
   await accept.fire("click");
-  assert.deepEqual(posts.at(-1).body, { proposal_id: "p1", decision: "accepted" });
+  assert.deepEqual(posts.at(-1)!.body, { proposal_id: "p1", decision: "accepted" });
   assert.match(row.textContent, /Recorded: accepted\./);
   assert.equal(accept.disabled && decline.disabled, true, "A recorded decision is not sent twice.");
 });
@@ -2760,7 +2772,7 @@ test("the result highlighter colours each token class and never renders a string
   const source = '{"a": "<script>alert(1)</script>", "n": -2.5e3, "ok": true, "gone": null, "list": [1, "x"]}';
   const pre = ui.run(`highlightText(${JSON.stringify(source)})`);
   assert.equal(pre.textContent, source);
-  const tokens = (name) => pre.querySelectorAll(`.json-${name}`).map((node) => node.textContent);
+  const tokens = (name: string) => pre.querySelectorAll(`.json-${name}`).map((node: Json) => node.textContent);
   assert.deepEqual(tokens("key"), ['"a"', '"n"', '"ok"', '"gone"', '"list"']);
   assert.deepEqual(tokens("string"), ['"<script>alert(1)</script>"', '"x"']);
   assert.deepEqual(tokens("literal"), ["-2.5e3", "true", "null", "1"]);
@@ -2769,7 +2781,7 @@ test("the result highlighter colours each token class and never renders a string
 
 test("a task card has one result link, on the history step, in every state", async (t) => {
   const ui = await dashboard(t);
-  const task = structuredClone(example.tasks.find((item) => item.id === "issue-9"));
+  const task = structuredClone(example.tasks.find((item: Json) => item.id === "issue-9"));
   task.workers.implementation.summary = "Shipped.";
   for (const state of ["implementation", "blocked", "resolved"]) {
     task.state = state;
@@ -2777,9 +2789,9 @@ test("a task card has one result link, on the history step, in every state", asy
     const row = ui.run(`taskRow(${JSON.stringify(task)}, new Set())`);
     assert.ok(row.querySelector(".summary"), `${state} shows the summary.`);
     assert.equal(row.querySelector(".summary").querySelectorAll("a").length, 0, `${state}: no link under the summary.`);
-    const results = row.querySelectorAll("a").filter((node) => node.textContent === "result");
+    const results = row.querySelectorAll("a").filter((node: Json) => node.textContent === "result");
     assert.equal(results.length, 2, `${state}: one result link per worker.`);
-    assert.equal(row.querySelector("ol").querySelectorAll("a").filter((node) => node.textContent === "result").length, 2,
+    assert.equal(row.querySelector("ol").querySelectorAll("a").filter((node: Json) => node.textContent === "result").length, 2,
       `${state}: the links are in the history.`);
   }
 });
@@ -2789,12 +2801,12 @@ test("the result link in a history step opens the result popup", async (t) => {
   const name = "owner.repo-issue-9-implementation-result.json";
   const raw = '{"outcome":"complete","note":"<script>alert(1)</script>","count":3}';
   await writeFile(join(ui.directory, name), raw);
-  const task = structuredClone(example.tasks.find((item) => item.id === "issue-9"));
+  const task = structuredClone(example.tasks.find((item: Json) => item.id === "issue-9"));
   task.state = "implementation";
   task.workers.implementation.summary = "Shipped.";
   const row = ui.run(`taskRow(${JSON.stringify(task)}, new Set())`);
   const href = `/api/artifact?file=${encodeURIComponent(factoryFile)}&name=${encodeURIComponent(name)}`;
-  const inDetails = row.querySelectorAll("a").find((node) => node.textContent === "result" && node.href === href);
+  const inDetails = row.querySelectorAll("a").find((node: Json) => node.textContent === "result" && node.href === href);
   const dialog = ui.get("result-dialog");
 
   const modified = await inDetails.fire("click", { ctrlKey: true });
@@ -2823,19 +2835,19 @@ test("the result link in a history step opens the result popup", async (t) => {
 
 test("the result popup shows the error and the raw body for a missing file or invalid JSON", async (t) => {
   const ui = await dashboard(t);
-  const task = structuredClone(example.tasks.find((item) => item.id === "issue-9"));
+  const task = structuredClone(example.tasks.find((item: Json) => item.id === "issue-9"));
   const row = ui.run(`taskRow(${JSON.stringify(task)}, new Set())`);
-  const missing = row.querySelectorAll("a").find((node) => node.textContent === "result");
+  const missing = row.querySelectorAll("a").find((node: Json) => node.textContent === "result");
   await missing.fire("click");
   assert.equal(ui.get("result-error").hidden, false);
   assert.match(ui.get("result-error").textContent, /is not in the state directory/);
   assert.match(ui.get("result-body").textContent, /is not in the state directory/);
   await ui.get("result-dialog").fire("cancel");
 
-  const rule = example.rules.find((item) => item.worker?.result);
+  const rule = example.rules.find((item: Json) => item.worker?.result);
   await writeFile(join(ui.directory, rule.worker.result), "not <b>json</b>");
   const ruleRow = ui.run(`ruleRow(${JSON.stringify(rule)})`);
-  await ruleRow.querySelectorAll("a").find((node) => node.textContent === "result").fire("click");
+  await ruleRow.querySelectorAll("a").find((node: Json) => node.textContent === "result").fire("click");
   assert.match(ui.get("result-error").textContent, /^The file is not valid JSON/);
   assert.equal(ui.get("result-body").textContent, "not <b>json</b>");
   assert.equal(ui.get("result-body").querySelectorAll("b").length, 0);
@@ -2843,22 +2855,22 @@ test("the result popup shows the error and the raw body for a missing file or in
 
 test("history steps carry the worker and the worktree link only while live, and no pane ID or chips", async (t) => {
   const ui = await dashboard(t);
-  const task = structuredClone(example.tasks.find((item) => item.id === "issue-9"));
-  const row = (value) => ui.run(`taskRow(${JSON.stringify(value)}, new Set())`);
-  const labels = (node) => node.querySelectorAll("button").map((button) => button.textContent).filter((text) => /^Copy /.test(text));
-  const steps = (node) => node.querySelector("ol").children;
+  const task = structuredClone(example.tasks.find((item: Json) => item.id === "issue-9"));
+  const row = (value: Json) => ui.run(`taskRow(${JSON.stringify(value)}, new Set())`);
+  const labels = (node: Json) => node.querySelectorAll("button").map((button: Json) => button.textContent).filter((text: string) => /^Copy /.test(text));
+  const steps = (node: Json) => node.querySelector("ol").children;
 
   let node = row(task);
   const [, investigation, implementation] = steps(node);
   for (const code of ["pane-1", "pane-2", "owner/repo", "issue-9"]) {
-    assert.equal(node.querySelectorAll("code").some((item) => item.textContent === code), false, `${code} is not shown as a chip.`);
+    assert.equal(node.querySelectorAll("code").some((item: Json) => item.textContent === code), false, `${code} is not shown as a chip.`);
   }
   assert.equal(node.querySelector("details"), null, "There is no Task details section.");
   assert.equal(node.textContent.includes("Worktree"), false, "No Worktree label.");
   assert.deepEqual(labels(investigation), []);
-  assert.deepEqual(investigation.querySelectorAll("a").map((a) => a.textContent), ["result"], "A brief the server refuses has no link.");
+  assert.deepEqual(investigation.querySelectorAll("a").map((a: Json) => a.textContent), ["result"], "A brief the server refuses has no link.");
   assert.deepEqual(labels(implementation), ["Copy worktree path"]);
-  assert.deepEqual(implementation.querySelectorAll("a").map((a) => a.textContent), ["brief", "result"]);
+  assert.deepEqual(implementation.querySelectorAll("a").map((a: Json) => a.textContent), ["brief", "result"]);
   assert.equal(implementation.querySelectorAll("svg").length, 0, "The links have no glyph.");
 
   task.workers.implementation.status = "unknown";
@@ -2870,16 +2882,16 @@ test("history steps carry the worker and the worktree link only while live, and 
   task.resolution = { outcome: "merged", note: null };
   node = row(task);
   assert.deepEqual(labels(node), [], "A resolved task has no worktree link.");
-  assert.equal(node.querySelectorAll("a").filter((a) => a.textContent === "brief").length, 1, "Workers and their links stay.");
+  assert.equal(node.querySelectorAll("a").filter((a: Json) => a.textContent === "brief").length, 1, "Workers and their links stay.");
 });
 
 test("history steps copy the worktree path with brief feedback", async (t) => {
   const ui = await dashboard(t);
   ui.run("choose('implementation')");
   const row = ui.get("task-list").children.find((node) => /Retry loop never stops/.test(node.textContent));
-  const rex = row.querySelectorAll("button").filter((button) => /Rex/.test(button.textContent));
+  const rex = row.querySelectorAll("button").filter((button: Json) => /Rex/.test(button.textContent));
   assert.equal(rex.length, 0, "No Rex command link.");
-  const path = row.querySelectorAll("button").filter((button) => button.textContent === "Copy worktree path");
+  const path = row.querySelectorAll("button").filter((button: Json) => button.textContent === "Copy worktree path");
   assert.equal(path.length, 1);
   assert.equal(path[0].type, "button");
 
@@ -2888,7 +2900,7 @@ test("history steps copy the worktree path with brief feedback", async (t) => {
   assert.equal(ui.run("copied"), "/Users/me/src/repo.worktrees/issue-9");
   assert.equal(path[0].textContent, "Copied");
 
-  const timer = ui.timers.at(-1);
+  const timer = ui.timers.at(-1)!;
   assert.equal(timer.delay, 1500);
   timer.callback();
   assert.equal(path[0].textContent, "Copy worktree path");
@@ -2897,7 +2909,7 @@ test("history steps copy the worktree path with brief feedback", async (t) => {
 test("a resolved task shows the brief link by naming convention, and none once the file is gone", async (t) => {
   const ui = await dashboard(t);
   const data = structuredClone(example);
-  const task = data.tasks.find((item) => item.id === "issue-3");
+  const task = data.tasks.find((item: Json) => item.id === "issue-3");
   task.workers = {
     investigation: { status: "closed", mode: "one-shot", result: "owner.repo-issue-3-investigation-result.json" },
     implementation: { status: "closed", result: "owner.repo-issue-3-implementation-result.json" },
@@ -2909,8 +2921,8 @@ test("a resolved task shows the brief link by naming convention, and none once t
   const card = () => ui.run(`taskRow(${JSON.stringify(ui.run("snapshot.tasks.find((item) => item.id === 'issue-3')"))}, new Set())`);
 
   const href = `/api/artifact?file=${encodeURIComponent(factoryFile)}&name=${encodeURIComponent(name)}`;
-  const briefs = card().querySelectorAll("a").filter((node) => node.textContent === "brief");
-  assert.deepEqual(briefs.map((node) => node.href), [href], "Only the worker whose brief file exists has the link.");
+  const briefs = card().querySelectorAll("a").filter((node: Json) => node.textContent === "brief");
+  assert.deepEqual(briefs.map((node: Json) => node.href), [href], "Only the worker whose brief file exists has the link.");
   const response = await get(ui.url, href);
   assert.equal(response.status, 200);
   assert.equal(await response.text(), "# Fix the typo\n");
@@ -2919,8 +2931,8 @@ test("a resolved task shows the brief link by naming convention, and none once t
 
   await rm(join(ui.directory, name));
   await ui.run("refresh()");
-  assert.equal(card().querySelectorAll("a").filter((node) => node.textContent === "brief").length, 0);
-  assert.equal(card().querySelectorAll("a").filter((node) => node.textContent === "result").length, 2);
+  assert.equal(card().querySelectorAll("a").filter((node: Json) => node.textContent === "brief").length, 0);
+  assert.equal(card().querySelectorAll("a").filter((node: Json) => node.textContent === "result").length, 2);
 });
 
 test("the brief link opens the popup with the brief rendered as sanitized Markdown", async (t) => {
@@ -2930,10 +2942,10 @@ test("the brief link opens the popup with the brief rendered as sanitized Markdo
     "# Task <b>nine</b>", "", "Intro with `code`, **bold** and [a link](https://example.com/x).",
     "<script>alert(1)</script>", "", "- one", "- two", "", "1. first", "", "```", "<i>raw</i>", "```",
   ].join("\n"));
-  const task = structuredClone(example.tasks.find((item) => item.id === "issue-9"));
+  const task = structuredClone(example.tasks.find((item: Json) => item.id === "issue-9"));
   const row = ui.run(`taskRow(${JSON.stringify(task)}, new Set())`);
   const href = `/api/artifact?file=${encodeURIComponent(factoryFile)}&name=${encodeURIComponent(name)}`;
-  const brief = row.querySelectorAll("a").find((node) => node.textContent === "brief" && node.href === href);
+  const brief = row.querySelectorAll("a").find((node: Json) => node.textContent === "brief" && node.href === href);
   assert.ok(brief, "The brief keeps a real href.");
 
   const click = await brief.fire("click");
@@ -2956,7 +2968,7 @@ test("the brief link opens the popup with the brief rendered as sanitized Markdo
   assert.match(body.textContent, /<script>alert\(1\)<\/script>/);
 
   // The page hands the sanitizer a DOM fragment request that admits only http(s) URLs, and never raw HTML.
-  const { markup, config } = ui.sanitized.at(-1);
+  const { markup, config } = ui.sanitized.at(-1)!;
   assert.equal(config.RETURN_DOM_FRAGMENT, true);
   assert.equal(config.ALLOWED_URI_REGEXP.test("https://example.com"), true);
   for (const url of ["javascript:alert(1)", "data:text/html,x", "mailto:a@b.c", "/relative"]) assert.equal(config.ALLOWED_URI_REGEXP.test(url), false, url);
@@ -2978,9 +2990,9 @@ test("the Markdown popup renders the GitHub constructs", async (t) => {
   assert.equal(body.querySelector("blockquote").textContent.trim(), "quoted");
   const [parent] = body.querySelectorAll("li");
   assert.equal(parent.querySelector("ul").querySelectorAll("li").length, 1, "A nested list stays inside its item.");
-  assert.deepEqual(body.querySelectorAll("input").map((box) => [box.type, "checked" in box]), [["checkbox", true], ["checkbox", false]]);
-  assert.deepEqual(body.querySelectorAll("th").map((cell) => [cell.textContent, cell.align]), [["Name", "left"], ["Count", "right"]]);
-  assert.deepEqual(body.querySelectorAll("td").map((cell) => cell.textContent), ["a | b", "1"]);
+  assert.deepEqual(body.querySelectorAll("input").map((box: Json) => [box.type, "checked" in box]), [["checkbox", true], ["checkbox", false]]);
+  assert.deepEqual(body.querySelectorAll("th").map((cell: Json) => [cell.textContent, cell.align]), [["Name", "left"], ["Count", "right"]]);
+  assert.deepEqual(body.querySelectorAll("td").map((cell: Json) => cell.textContent), ["a | b", "1"]);
   assert.equal(body.querySelectorAll("hr").length, 1);
   const pre = body.querySelector("pre");
   assert.equal(pre.dataset.lang, "js");
@@ -2997,7 +3009,7 @@ test("the Markdown popup links GitHub references in text but not in code or link
     "| ref |", "|-----|", "| #5 |", "", "`code #6`", "", "```", "fence #7", "```", "", "[label #8](https://example.com)", "",
     "Plain https://example.com/p and https://github.com/o/r/pull/9.",
   ].join("\n"))})`);
-  const links = body.querySelectorAll("a").map((anchor) => [anchor.textContent, anchor.href]);
+  const links = body.querySelectorAll("a").map((anchor: Json) => [anchor.textContent, anchor.href]);
   assert.deepEqual(links, [
     ["#1", "https://github.com/owner/repo/issues/1"],
     ["other/repo#2", "https://github.com/other/repo/issues/2"],
@@ -3016,17 +3028,17 @@ test("copy links fall back to the selection when the clipboard API is missing", 
   const ui = await dashboard(t);
   ui.run("choose('implementation')");
   const row = ui.get("task-list").children.find((node) => /Retry loop never stops/.test(node.textContent));
-  const button = row.querySelectorAll("button").find((node) => node.textContent === "Copy worktree path");
+  const button = row.querySelectorAll("button").find((node: Json) => node.textContent === "Copy worktree path");
 
-  const copied = [];
+  const copied: unknown[][] = [];
   const create = ui.document.createElement;
-  ui.document.createElement = (tag) => {
+  ui.document.createElement = (tag: string) => {
     const node = create(tag);
     node.select = () => { node.selected = true; };
     return node;
   };
-  ui.document.body.append = (node) => { ui.document.body.area = node; };
-  ui.document.execCommand = (command) => {
+  ui.document.body.append = (node: Json) => { ui.document.body.area = node; };
+  ui.document.execCommand = (command: string) => {
     copied.push([command, ui.document.body.area.value, ui.document.body.area.selected]);
     return true;
   };
@@ -3043,8 +3055,8 @@ test("copy links fall back to the selection when the clipboard API is missing", 
 test("cards show usage chips in the header and per worker on history steps, and nothing for unknown values", async (t) => {
   const state = await mkdtemp(join(tmpdir(), "factory-dashboard-sessions-"));
   t.after(() => rm(state, { recursive: true, force: true }));
-  const line = (minute, type, data) => JSON.stringify({ type, timestamp: new Date(Date.UTC(2026, 4, 1, 10, minute)).toISOString(), data });
-  const log = async (id, lines) => {
+  const line = (minute: number, type: string, data: Json) => JSON.stringify({ type, timestamp: new Date(Date.UTC(2026, 4, 1, 10, minute)).toISOString(), data });
+  const log = async (id: string, lines: string[]) => {
     await mkdir(join(state, id));
     await writeFile(join(state, id, "events.jsonl"), `${lines.join("\n")}\n`);
   };
@@ -3066,7 +3078,7 @@ test("cards show usage chips in the header and per worker on history steps, and 
   const chips = row.querySelector(".chips").textContent;
   assert.match(chips, /Elapsed: 2h 5m/);
   assert.match(chips, /Cost: \$0\.41/);
-  assert.match(row.querySelector(".chips").children.find((chip) => chip.textContent.startsWith("Cost")).title, /^41\.38 AIC\n/);
+  assert.match(row.querySelector(".chips").children.find((chip: Json) => chip.textContent.startsWith("Cost")).title, /^41\.38 AIC\n/);
   assert.match(chips, /m1 <b>/);
   assert.match(chips, /Active: 5m/);
   assert.equal(row.querySelector("details"), null);

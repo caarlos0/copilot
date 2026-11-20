@@ -1,27 +1,27 @@
-const assert = require("node:assert/strict");
-const { mkdtemp, mkdir, readFile, readdir, rm, writeFile } = require("node:fs/promises");
-const { spawnSync } = require("node:child_process");
-const { join } = require("node:path");
-const { tmpdir } = require("node:os");
-const { test } = require("node:test");
+import assert from "node:assert/strict";
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { test, type TestContext } from "node:test";
 
-const script = join(__dirname, "migrate.mjs");
+const script = join(import.meta.dirname, "migrate.mjs");
 const at = "2026-05-01T10:00:00Z";
 const later = "2026-05-01T11:00:00Z";
-const pull = (n) => `https://github.com/owner/repo/pull/${n}`;
+const pull = (n: number) => `https://github.com/owner/repo/pull/${n}`;
 const sha = "a".repeat(40);
 
-const handoff = (role, tasks) => ({
+const handoff = (role: string, tasks: unknown[]) => ({
   id: `owner.repo-${role}`, project: "owner/repo", role, goal: "Old goal", status: "active", updated_at: at, tasks,
 });
-const old = (id, status, extra = {}) => ({
+const old = (id: string, status: string, extra: Record<string, unknown> = {}) => ({
   id, goal: `Goal of ${id}`, status, updated_at: at, next_action: "Do it", ...extra,
 });
 
-async function fixture(t) {
+async function fixture(t: TestContext) {
   const directory = await mkdtemp(join(tmpdir(), "factory-migrate-test-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
-  const save = (name, data) => writeFile(join(directory, name), JSON.stringify(data));
+  const save = (name: string, data: unknown) => writeFile(join(directory, name), JSON.stringify(data));
   await save("owner.repo-implementer.json", handoff("implementer", [
     old("issue-1", "running", { pr: pull(10), details: { pane_id: "p1", session_id: "s1", worktree_path: "/w/1" } }),
     old("issue-2", "pending"),
@@ -39,7 +39,7 @@ async function fixture(t) {
   ]));
   return {
     directory,
-    run: (...args) => spawnSync(process.execPath, [script, "--project", "owner/repo", "--directory", directory, ...args], { encoding: "utf8" }),
+    run: (...args: string[]) => spawnSync(process.execPath, [script, "--project", "owner/repo", "--directory", directory, ...args], { encoding: "utf8" }),
     read: async () => JSON.parse(await readFile(join(directory, "owner.repo-factory.json"), "utf8")),
   };
 }
@@ -59,7 +59,7 @@ test("maps, joins, renames, and attaches reviews from the legacy handoffs", asyn
   validate(data);
   assert.equal(data.id, "owner.repo-factory");
   assert.deepEqual(data.budget, { max_parallel_workers: 10 });
-  const byId = Object.fromEntries(data.tasks.map((task) => [task.id, task]));
+  const byId = Object.fromEntries(data.tasks.map((task: { id: string }) => [task.id, task]));
 
   assert.deepEqual(Object.keys(byId).sort(),
     ["coordinator-task-a", "fix-login", "issue-2", "issue-3", "issue-4", "task-a"]);

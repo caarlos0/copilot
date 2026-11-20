@@ -1,31 +1,34 @@
-const assert = require("node:assert/strict");
-const { spawn, spawnSync } = require("node:child_process");
-const { closeSync, openSync, writeFileSync } = require("node:fs");
-const { mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } = require("node:fs/promises");
-const { tmpdir } = require("node:os");
-const { basename, dirname, join } = require("node:path");
-const { test } = require("node:test");
+import assert from "node:assert/strict";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { closeSync, openSync, writeFileSync } from "node:fs";
+import { mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { basename, dirname, join } from "node:path";
+import { test, type TestContext } from "node:test";
 
-const script = join(__dirname, "broker.mjs");
-const factoryScript = join(__dirname, "factory.mjs");
+type BrokerEvent = { id: string; type: string; task: string | null; source: string; data: any };
+type WaitOutput = { events: BrokerEvent[]; cursor: string; timeout?: boolean };
+
+const script = join(import.meta.dirname, "broker.mjs");
+const factoryScript = join(import.meta.dirname, "factory.mjs");
 const result = { task: "t1", data: JSON.stringify({ role: "implementation", outcome: "complete" }) };
 
-function withResult(directory, task, data) {
+function withResult(directory: string, task: string, data: Record<string, unknown>) {
   const name = `${task}-result.json`;
   writeFileSync(join(directory, name), JSON.stringify({ task, role: data.role, outcome: data.outcome }));
   return { ...data, result: name };
 }
 
 // A plain writeFile truncates first, so a waiter can read an empty file; factory.mjs renames too.
-async function writeAtomic(path, content) {
+async function writeAtomic(path: string, content: string) {
   const temp = join(dirname(path), `.${basename(path)}.${process.pid}.tmp`);
   await writeFile(temp, content);
   await rename(temp, path);
 }
 
-async function fixture(t) {
+async function fixture(t: TestContext) {
   const directory = await mkdtemp(join(tmpdir(), "broker-test-"));
-  const children = [];
+  const children: { child: ChildProcess; finished: Promise<unknown> }[] = [];
   t.after(async () => {
     for (const { child } of children) child.kill();
     await Promise.all(children.map(({ finished }) => finished));
@@ -33,26 +36,26 @@ async function fixture(t) {
   });
   const factory = join(directory, "owner.repo-factory.json");
   const log = join(directory, "owner.repo-factory-events.jsonl");
-  const run = (...args) => spawnSync(process.execPath, [script, ...args], { encoding: "utf8" });
+  const run = (...args: string[]) => spawnSync(process.execPath, [script, ...args], { encoding: "utf8" });
   // A worker.result needs the saved file it names, so the helper writes a matching one.
-  const emit = (type, { source, task = "t1", data = result.data } = {}) => {
+  const emit = (type: string, { source, task = "t1", data = result.data }: { source?: string; task?: string; data?: string } = {}): BrokerEvent => {
     if (type === "worker.result") data = JSON.stringify(withResult(directory, task, JSON.parse(data)));
     const out = run("emit", factory, type, "--task", task, "--data", data, ...(source ? ["--source", source] : []));
     assert.equal(out.status, 0, out.stderr);
     return JSON.parse(out.stdout);
   };
   // Resolves with a function that returns the parsed output once the waiter is armed and exits.
-  async function wait(...args) {
+  async function wait(...args: string[]): Promise<() => Promise<WaitOutput>> {
     const child = spawn(process.execPath, [script, "wait", factory, ...args], { stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
-    const finished = new Promise((resolve, reject) => {
+    const finished = new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
       child.once("error", reject);
       child.once("close", (code) => resolve({ code, stdout, stderr }));
     });
     children.push({ child, finished });
     child.stdout.on("data", (chunk) => { stdout += chunk; });
-    await new Promise((resolve, reject) => {
+    await new Promise<void>((resolve, reject) => {
       child.stderr.on("data", (chunk) => {
         stderr += chunk;
         if (stderr.includes("Watching events.\n")) resolve();
@@ -133,7 +136,7 @@ test("--timeout exits 0 with no events and the unchanged cursor", async (t) => {
 test("concurrent emitters never interleave or drop lines", async (t) => {
   const f = await fixture(t);
   const count = 24;
-  const runs = Array.from({ length: count }, (_, index) => new Promise((resolve, reject) => {
+  const runs = Array.from({ length: count }, (_, index) => new Promise<void>((resolve, reject) => {
     const child = spawn(process.execPath, [
       script, "emit", f.factory, "worker.result", "--task", `t${index}`,
       "--data", JSON.stringify(withResult(f.directory, `t${index}`, { role: "implementation", outcome: "working", pad: "x".repeat(2000) })),
@@ -162,7 +165,7 @@ test("emit rejects unknown types and missing data", async (t) => {
 test("worker.result is refused unless its result file exists and matches the event", async (t) => {
   const f = await fixture(t);
   const data = { role: "implementation", outcome: "complete", result: "t1-result.json" };
-  const refuse = (event, pattern) => {
+  const refuse = (event: unknown, pattern: RegExp) => {
     const out = f.run("emit", f.factory, "worker.result", "--task", "t1", "--data", JSON.stringify(event));
     assert.equal(out.status, 1, out.stdout);
     assert.match(out.stderr, pattern);
@@ -176,7 +179,7 @@ test("worker.result is refused unless its result file exists and matches the eve
     [{ task: "t2", role: "implementation", outcome: "complete" }, /task "t2"/],
     [{ task: "t1", role: "review", outcome: "complete" }, /role "review"/],
     [{ task: "t1", role: "implementation", outcome: "working" }, /outcome "working"/],
-  ]) {
+  ] as [object, RegExp][]) {
     writeFileSync(join(f.directory, "t1-result.json"), JSON.stringify(saved));
     refuse(data, pattern);
   }
@@ -189,7 +192,7 @@ test("worker.result is refused unless its result file exists and matches the eve
 test("worker.blocked checks a named result for outcome blocked, and pr.merged needs a full SHA", async (t) => {
   const f = await fixture(t);
   const blocked = { role: "implementation", reason: "needs a decision" };
-  const emitBlocked = (data) => f.run("emit", f.factory, "worker.blocked", "--task", "t1", "--data", JSON.stringify(data));
+  const emitBlocked = (data: unknown) => f.run("emit", f.factory, "worker.blocked", "--task", "t1", "--data", JSON.stringify(data));
   assert.equal(emitBlocked(blocked).status, 0);
   writeFileSync(join(f.directory, "t1-result.json"), JSON.stringify({ task: "t1", role: "implementation", outcome: "complete" }));
   const wrong = emitBlocked({ ...blocked, result: "t1-result.json" });
@@ -206,7 +209,7 @@ test("worker.blocked checks a named result for outcome blocked, and pr.merged ne
 
 test("a complete implementation result must report the worktree head, rebased on main unless the task has a PR", async (t) => {
   const f = await fixture(t);
-  const git = (cwd, ...args) => {
+  const git = (cwd: string, ...args: string[]) => {
     const out = spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8", env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" } });
     assert.equal(out.status, 0, out.stderr);
     return out.stdout.trim();
@@ -214,15 +217,15 @@ test("a complete implementation result must report the worktree head, rebased on
   const repo = join(f.directory, "repo");
   const tree = join(f.directory, "tree");
   const identity = ["-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false"];
-  const commit = (cwd, message) => git(cwd, ...identity, "commit", "--allow-empty", "-m", message);
+  const commit = (cwd: string, message: string) => git(cwd, ...identity, "commit", "--allow-empty", "-m", message);
   git(f.directory, "init", "-b", "main", repo);
   commit(repo, "base");
   git(repo, "worktree", "add", "-b", "task", tree);
   commit(tree, "work");
   const head = git(tree, "rev-parse", "HEAD");
-  const tasks = (worktree, pr) => writeFileSync(f.factory, JSON.stringify({ tasks: [{ id: "t1", pr, worktree }] }));
-  const data = (head) => JSON.stringify(withResult(f.directory, "t1", { role: "implementation", outcome: "complete", head }));
-  const emit = (head) => f.run("emit", f.factory, "worker.result", "--task", "t1", "--data", data(head));
+  const tasks = (worktree: object | null, pr: string | null) => writeFileSync(f.factory, JSON.stringify({ tasks: [{ id: "t1", pr, worktree }] }));
+  const data = (head: string) => JSON.stringify(withResult(f.directory, "t1", { role: "implementation", outcome: "complete", head }));
+  const emit = (head: string) => f.run("emit", f.factory, "worker.result", "--task", "t1", "--data", data(head));
 
   tasks({ path: tree, created_by_run: true }, null);
   assert.equal(emit(head).status, 0);
@@ -251,7 +254,7 @@ test("a complete implementation result must report the worktree head, rebased on
 
 test("the head check uses the repository default branch when it is master", async (t) => {
   const f = await fixture(t);
-  const git = (cwd, ...args) => {
+  const git = (cwd: string, ...args: string[]) => {
     const out = spawnSync("git", ["-C", cwd, "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", ...args], { encoding: "utf8", env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" } });
     assert.equal(out.status, 0, out.stderr);
     return out.stdout.trim();
@@ -276,7 +279,7 @@ test("the head check uses the repository default branch when it is master", asyn
 
 test("a complete implementation result is refused while the worktree has uncommitted changes", async (t) => {
   const f = await fixture(t);
-  const git = (cwd, ...args) => {
+  const git = (cwd: string, ...args: string[]) => {
     const out = spawnSync("git", ["-C", cwd, "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false", ...args], { encoding: "utf8" });
     assert.equal(out.status, 0, out.stderr);
     return out.stdout.trim();
@@ -328,7 +331,7 @@ test("wait returns pr.merged like any other event", async (t) => {
 
 test("factory.mjs writes emit task.moved, task.updated, and dashboard feedback events", async (t) => {
   const f = await fixture(t);
-  const factory = (...args) => {
+  const factory = (...args: string[]) => {
     const out = spawnSync(process.execPath, [factoryScript, f.factory, ...args], { encoding: "utf8" });
     assert.equal(out.status, 0, out.stderr);
   };
@@ -372,7 +375,7 @@ test("budget.updated emits without a task, needs its data key, and wakes a waite
 test("attention events need no task and validate their data", async (t) => {
   const f = await fixture(t);
   const data = { session: "s1", kind: "permission", text: "Run rm -rf build?" };
-  const emit = (type, body, ...args) => f.run("emit", f.factory, type, "--source", "attention", "--data", JSON.stringify(body), ...args);
+  const emit = (type: string, body: unknown, ...args: string[]) => f.run("emit", f.factory, type, "--source", "attention", "--data", JSON.stringify(body), ...args);
 
   const requested = emit("attention.requested", { ...data, role: "implementation", pane: "block:1", options: ["Allow", "Deny"] });
   assert.equal(requested.status, 0, requested.stderr);
@@ -396,7 +399,7 @@ test("attention events need no task and validate their data", async (t) => {
 
 test("attention events never wake a waiter that skips their source, and other readers ignore them", async (t) => {
   const f = await fixture(t);
-  const attention = (type, data) => {
+  const attention = (type: string, data: unknown) => {
     const out = f.run("emit", f.factory, type, "--source", "attention", "--data", JSON.stringify(data));
     assert.equal(out.status, 0, out.stderr);
     return JSON.parse(out.stdout);
@@ -415,19 +418,19 @@ test("attention events never wake a waiter that skips their source, and other re
 
   // reconcile.mjs and the sweep around the log must not trip over a task-less event.
   await writeFile(f.factory, JSON.stringify({ status: "finished", tasks: [] }));
-  const swept = spawnSync(process.execPath, [join(__dirname, "reconcile.mjs"), f.factory], { encoding: "utf8" });
+  const swept = spawnSync(process.execPath, [join(import.meta.dirname, "reconcile.mjs"), f.factory], { encoding: "utf8" });
   assert.equal(swept.status, 0, swept.stderr);
   assert.deepEqual(JSON.parse(swept.stdout), { findings: [], errors: [] });
 });
 
 test("--due follows run-status and rule edits made while the waiter is armed", async (t) => {
   const f = await fixture(t);
-  const factory = (...args) => {
+  const factory = (...args: string[]) => {
     const out = spawnSync(process.execPath, [factoryScript, f.factory, ...args], { encoding: "utf8" });
     assert.equal(out.status, 0, out.stderr);
   };
   const lastRun = new Date(Date.now() - 2 * 60 * 1000).toISOString();
-  const rules = (every) => JSON.stringify([{ id: "backlog", description: "Find work", enabled: true, kind: "backlog", every, last_run_at: lastRun }]);
+  const rules = (every: string) => JSON.stringify([{ id: "backlog", description: "Find work", enabled: true, kind: "backlog", every, last_run_at: lastRun }]);
   factory("--project", "owner/repo", "--run-goal", "Run it", "--run-status", "paused", "--rules", rules("1m"));
 
   let done = await f.wait("--due", "--exclude-source", "coordinator", "--timeout", "10");
@@ -446,11 +449,11 @@ test("--due follows run-status and rule edits made while the waiter is armed", a
 
 test("--due re-arms its timer when a rule edit moves the due time", async (t) => {
   const f = await fixture(t);
-  const factory = (...args) => {
+  const factory = (...args: string[]) => {
     const out = spawnSync(process.execPath, [factoryScript, f.factory, ...args], { encoding: "utf8" });
     assert.equal(out.status, 0, out.stderr);
   };
-  const rules = (every, lastRun) => JSON.stringify([{ id: "backlog", description: "Find work", enabled: true, kind: "backlog", every, last_run_at: lastRun }]);
+  const rules = (every: string, lastRun: string) => JSON.stringify([{ id: "backlog", description: "Find work", enabled: true, kind: "backlog", every, last_run_at: lastRun }]);
   factory("--project", "owner/repo", "--run-goal", "Run it", "--rules", rules("1d", new Date().toISOString()));
 
   const done = await f.wait("--due", "--exclude-source", "coordinator", "--timeout", "10");
@@ -562,7 +565,7 @@ test("a waiter whose parent is gone (ppid 1) counts as no waiter", async (t) => 
   await mkdir(bin);
   // A fake ps reports the parent PID from $FAKE_PPID, so the test needs no real ps or orphan.
   await writeFile(join(bin, "ps"), `#!/bin/sh\necho "  $FAKE_PPID node broker.mjs wait /f.json"\n`, { mode: 0o755 });
-  const armed = (ppid) => spawnSync(process.execPath, [script, "armed", f.factory], {
+  const armed = (ppid: number) => spawnSync(process.execPath, [script, "armed", f.factory], {
     encoding: "utf8",
     env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, FAKE_PPID: String(ppid) },
   });
@@ -583,7 +586,7 @@ test("wait refuses to start when stdout goes to a file or /dev/null", async (t) 
   const file = join(f.directory, "out.txt");
   const fd = openSync(file, "w");
   t.after(() => closeSync(fd));
-  for (const stdout of ["ignore", fd]) {
+  for (const stdout of ["ignore", fd] as const) {
     const out = spawnSync(process.execPath, [script, "wait", f.factory, "--timeout", "1"], { encoding: "utf8", stdio: ["ignore", stdout, "pipe"] });
     assert.equal(out.status, 2, `stdout ${stdout}`);
     assert.match(String(out.stderr), /Never run it in the background/);
@@ -598,7 +601,7 @@ test("--due returns reconcile.due after the injected interval while the run is a
   const started = Date.now();
   const out = await waitForEvents(f.factory, { due: true, reconcile: 150, timeout: 10 });
   assert.ok(Date.now() - started >= 140, "the tick must wait for its window");
-  assert.deepEqual(out.events.map(({ id, type, task, source, data }) => [id, type, task, source, data]),
+  assert.deepEqual(out.events.map(({ id, type, task, source, data }: BrokerEvent) => [id, type, task, source, data]),
     [[null, "reconcile.due", null, "broker", { every: "5m" }]]);
   assert.equal(await stat(f.log).catch(() => null), null, "the tick is never stored");
 
@@ -625,13 +628,13 @@ test("reconcile.due does not fire while paused or without --due, and resumes whe
   await new Promise((resolve) => setTimeout(resolve, 250));
   await writeAtomic(f.factory, JSON.stringify({ status: "active", rules: [] }));
   out = await pending;
-  assert.deepEqual(out.events.map(({ type }) => type), ["reconcile.due"]);
+  assert.deepEqual(out.events.map(({ type }: BrokerEvent) => type), ["reconcile.due"]);
 });
 
 test("improve events need no task, validate their data, and a waiter that skips improve still wakes for the decision", async (t) => {
   const f = await fixture(t);
   const proposed = { rule: "self-improve", change: "limit", title: "Lower the cap", evidence: "idle", recommended: "accept", proposal_id: "p1", result: "r.json" };
-  const emit = (type, body, source) => f.run("emit", f.factory, type, "--source", source, "--data", JSON.stringify(body));
+  const emit = (type: string, body: unknown, source: string) => f.run("emit", f.factory, type, "--source", source, "--data", JSON.stringify(body));
   const done = await f.wait("--exclude-source", "improve");
   assert.equal(emit("improve.proposed", proposed, "improve").status, 0);
   assert.equal(emit("improve.decided", { proposal_id: "p1", decision: "accepted", note: "ok" }, "dashboard").status, 0);

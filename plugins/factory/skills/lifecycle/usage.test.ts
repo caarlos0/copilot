@@ -1,8 +1,8 @@
-const assert = require("node:assert/strict");
-const { mkdir, mkdtemp, rm, utimes, writeFile } = require("node:fs/promises");
-const { join } = require("node:path");
-const { tmpdir } = require("node:os");
-const { test } = require("node:test");
+import assert from "node:assert/strict";
+import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { test, type TestContext } from "node:test";
 
 const ids = {
   a: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
@@ -11,13 +11,13 @@ const ids = {
   gone: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
 };
 
-const event = (minute, type, data = {}) =>
+const event = (minute: number, type: string, data: Record<string, unknown> = {}) =>
   JSON.stringify({ type, timestamp: new Date(Date.UTC(2026, 4, 1, 12, minute)).toISOString(), data });
-const record = (model, nano, input, output) => event(1, "session.usage_record", {
+const record = (model: string, nano: number | null, input: number, output: number) => event(1, "session.usage_record", {
   usage: { model, inputTokens: input, outputTokens: output, ...(nano === null ? {} : { copilotUsage: { totalNanoAiu: nano } }) },
 });
 
-async function sessions(t, logs) {
+async function sessions(t: TestContext, logs: Record<string, string[]>) {
   const directory = await mkdtemp(join(tmpdir(), "factory-usage-test-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   for (const [id, lines] of Object.entries(logs)) {
@@ -27,13 +27,13 @@ async function sessions(t, logs) {
   return directory;
 }
 
-const task = (workers, state = "implementation", history = [
+const task = (workers: Record<string, { session?: unknown } | null>, state = "implementation", history = [
   { state: "initial", at: "2026-05-01T10:00:00Z" },
   { state: state, at: "2026-05-01T10:30:00Z" },
 ]) => ({ id: "issue-1", state, workers, history });
 
 test("sums models, credits, tokens and active time per worker and per task", async (t) => {
-  const { taskUsage } = await import("./usage.mjs");
+  const { taskUsage } = (await import("./usage.mjs")) as typeof import("./usage.ts");
   const directory = await sessions(t, {
     [ids.a]: [event(0, "session.start"), record("m1", 1_500_000_000, 100, 10), record("m2", 2_250_000_000, 200, 20), event(5, "assistant.turn_end")],
     [ids.b]: [event(0, "session.start"), record("m2", 500_000_000, 50, 5), event(2, "assistant.turn_end")],
@@ -46,7 +46,7 @@ test("sums models, credits, tokens and active time per worker and per task", asy
   assert.deepEqual(usage.workers.investigation, {
     models: ["m1", "m2"], credits: 3.75, usd: 0.0375, input_tokens: 300, output_tokens: 30, active_minutes: 5,
   });
-  assert.equal(usage.workers.implementation.credits, 0.5);
+  assert.equal(usage.workers.implementation!.credits, 0.5);
   assert.deepEqual(usage.workers.review, usage.workers.investigation);
   assert.deepEqual(usage.total, {
     models: ["m1", "m2"], credits: 4.25, usd: 0.0425, input_tokens: 350, output_tokens: 35, active_minutes: 7,
@@ -56,21 +56,21 @@ test("sums models, credits, tokens and active time per worker and per task", asy
 });
 
 test("falls back to tokens when a log has no credits, and the total follows", async (t) => {
-  const { taskUsage } = await import("./usage.mjs");
+  const { taskUsage } = (await import("./usage.mjs")) as typeof import("./usage.ts");
   const directory = await sessions(t, {
     [ids.a]: [event(0, "session.start"), record("m1", 1_000_000_000, 10, 1)],
     [ids.b]: [event(0, "session.start"), record("m1", null, 20, 2)],
   });
   const usage = await taskUsage(task({ investigation: { session: ids.a }, implementation: { session: ids.b } }), directory);
-  assert.equal(usage.workers.investigation.credits, 1);
-  assert.equal(usage.workers.implementation.credits, null);
-  assert.equal(usage.workers.implementation.usd, null);
-  assert.equal(usage.total.credits, null);
-  assert.deepEqual([usage.total.input_tokens, usage.total.output_tokens], [30, 3]);
+  assert.equal(usage.workers.investigation!.credits, 1);
+  assert.equal(usage.workers.implementation!.credits, null);
+  assert.equal(usage.workers.implementation!.usd, null);
+  assert.equal(usage.total!.credits, null);
+  assert.deepEqual([usage.total!.input_tokens, usage.total!.output_tokens], [30, 3]);
 });
 
 test("a missing, unnamed, empty or foreign session is n/a, never an error", async (t) => {
-  const { taskUsage } = await import("./usage.mjs");
+  const { taskUsage } = (await import("./usage.mjs")) as typeof import("./usage.ts");
   const directory = await sessions(t, { [ids.c]: [""] });
   const usage = await taskUsage(task({
     investigation: { session: ids.gone },
@@ -98,13 +98,13 @@ test("a log that did not change is not read again", async (t) => {
   assert.deepEqual(await sessionUsage(ids.a, directory), before);
 });
 
-const uuid = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
-const worker = (n) => ({ session: uuid(n) });
+const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+const worker = (n: number) => ({ session: uuid(n) });
 const history = [{ state: "initial", at: "2026-05-01T10:00:00Z" }, { state: "implementation", at: "2026-05-01T10:30:00Z" }];
 
 test("factoryUsage keeps task order and matches taskUsage for shared and missing sessions", async (t) => {
-  const { factoryUsage, taskUsage } = await import("./usage.mjs");
-  const logs = {};
+  const { factoryUsage, taskUsage } = (await import("./usage.mjs")) as typeof import("./usage.ts");
+  const logs: Record<string, string[]> = {};
   for (let n = 1; n <= 9; n++) logs[uuid(n)] = [event(0, "session.start"), record("m", n * 1_000_000_000, n, 1), event(n, "assistant.turn_end")];
   const directory = await sessions(t, logs);
   const data = { tasks: [
@@ -116,13 +116,13 @@ test("factoryUsage keeps task order and matches taskUsage for shared and missing
   const usage = await factoryUsage(data, directory);
   assert.deepEqual(Object.keys(usage), ["t-9", "t-1", "t-x", "t-5"]);
   for (const item of data.tasks) assert.deepEqual(usage[item.id], await taskUsage(item, directory));
-  assert.equal(usage["t-9"].workers.implementation.credits, 9);
+  assert.equal(usage["t-9"].workers.implementation!.credits, 9);
   assert.equal(usage["t-x"].workers.implementation, null);
-  assert.equal(usage["t-5"].total.credits, 15);
+  assert.equal(usage["t-5"].total!.credits, 15);
 });
 
 test("the usage cache is capped and a large run still returns every result", async (t) => {
-  const { cacheSize, factoryUsage } = await import("./usage.mjs");
+  const { cacheSize, factoryUsage } = (await import("./usage.mjs")) as typeof import("./usage.ts");
   const count = 1100;
   const directory = await sessions(t, {});
   for (let n = 1; n <= count; n++) {
@@ -134,6 +134,6 @@ test("the usage cache is capped and a large run still returns every result", asy
   }));
   const usage = await factoryUsage({ tasks }, directory);
   assert.equal(Object.keys(usage).length, count, "Eviction never drops a result of the current call.");
-  assert.ok(Object.values(usage).every((item) => item.workers.implementation.credits === 1));
+  assert.ok(Object.values(usage).every((item) => item.workers.implementation!.credits === 1));
   assert.ok(cacheSize() <= 1024, `cache holds ${cacheSize()} entries`);
 });

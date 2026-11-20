@@ -1,18 +1,18 @@
-const assert = require("node:assert/strict");
-const { readFileSync } = require("node:fs");
-const { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } = require("node:fs/promises");
-const { spawnSync } = require("node:child_process");
-const { join } = require("node:path");
-const { tmpdir } = require("node:os");
-const { test } = require("node:test");
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { test, type TestContext } from "node:test";
 
-const script = join(__dirname, "factory.mjs");
-const example = JSON.parse(readFileSync(join(__dirname, "factory.example.json"), "utf8"));
-const issue = (n) => `https://github.com/owner/repo/issues/${n}`;
-const pull = (n) => `https://github.com/owner/repo/pull/${n}`;
-const sha = (char) => char.repeat(40);
+const script = join(import.meta.dirname, "factory.mjs");
+const example = JSON.parse(readFileSync(join(import.meta.dirname, "factory.example.json"), "utf8"));
+const issue = (n: number) => `https://github.com/owner/repo/issues/${n}`;
+const pull = (n: number) => `https://github.com/owner/repo/pull/${n}`;
+const sha = (char: string) => char.repeat(40);
 
-async function fixture(t, data) {
+async function fixture(t: TestContext, data?: unknown) {
   const directory = await mkdtemp(join(tmpdir(), "factory-test-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const file = join(directory, "owner.repo-factory.json");
@@ -20,15 +20,15 @@ async function fixture(t, data) {
   return {
     directory,
     file,
-    read: async () => JSON.parse(await readFile(file, "utf8")),
-    run: (...args) => spawnSync(process.execPath, [script, file, ...args], { encoding: "utf8" }),
-    ok(...args) {
+    read: async (): Promise<any> => JSON.parse(await readFile(file, "utf8")),
+    run: (...args: string[]) => spawnSync(process.execPath, [script, file, ...args], { encoding: "utf8" }),
+    ok(...args: string[]) {
       const result = this.run(...args);
       assert.equal(result.status, 0, result.stderr);
       assert.equal(result.stdout, "");
       assert.equal(result.stderr, "");
     },
-    fails(message, ...args) {
+    fails(message: RegExp, ...args: string[]) {
       const result = this.run(...args);
       assert.equal(result.status, 1, `${result.stdout}${result.stderr}`);
       assert.match(result.stderr, message);
@@ -36,7 +36,7 @@ async function fixture(t, data) {
   };
 }
 
-async function started(t) {
+async function started(t: TestContext) {
   const f = await fixture(t);
   f.ok("--project", "owner/repo", "--run-goal", "Run it", "--rex-session", "work");
   f.ok("--task", "issue-1", "--title", "Fix it", "--issue", issue(1), "--next-action", "Start");
@@ -52,7 +52,7 @@ test("creates a private factory with defaults and a new task in initial", async 
   assert.deepEqual(data.limits, { investigation: 3, implementation: 3 });
   assert.deepEqual(data.budget, { max_parallel_workers: 10 });
   assert.equal(data.tasks[0].state, "initial");
-  assert.deepEqual(data.tasks[0].history.map((item) => item.state), ["initial"]);
+  assert.deepEqual(data.tasks[0].history.map((item: any) => item.state), ["initial"]);
   assert.equal((await stat(f.file)).mode & 0o777, 0o600);
   assert.deepEqual(await readdir(f.directory), ["owner.repo-factory-events.jsonl", "owner.repo-factory.json"]);
 });
@@ -62,7 +62,7 @@ test("a relaunch drops the old session and summary, and keeps the planned result
   const f = await started(t);
   const old = "11111111-1111-4111-8111-111111111111";
   const at = "2026-01-01T00:00:00Z";
-  const worker = (extra) => JSON.stringify({ implementation: { status: "running", ...extra } });
+  const worker = (extra: Record<string, unknown>) => JSON.stringify({ implementation: { status: "running", ...extra } });
   const record = async () => {
     const { launched_at, ...rest } = (await f.read()).tasks[0].workers.implementation;
     return rest;
@@ -106,8 +106,8 @@ test("the shipped example is a valid factory", async () => {
 
 test("rankTasks matches identifying fields only and ranks id, then title, then other fields", async () => {
   const { rankTasks } = await import("./factory-data.mjs");
-  const ids = (query, limit) => rankTasks(example.tasks, query, limit).map((task) => task.id);
-  const at = (id, updated, last) => ({
+  const ids = (query: string, limit?: number) => rankTasks(example.tasks, query, limit).map((task) => task.id);
+  const at = (id: string, updated: string | null, last: string | null) => ({
     id,
     ...(updated && { updated_at: updated }),
     history: last ? [{ at: "2020-01-01T00:00:00Z" }, { at: last }] : [],
@@ -150,7 +150,7 @@ const withoutBudget = () => {
 
 test("compareFactories sorts by state group, then by name ignoring case, then by file", async () => {
   const { compareFactories } = await import("./factory-data.mjs");
-  const item = (file, project, status, open, resolved = 0) => ({
+  const item = (file: string, project: string, status: string, open: number, resolved = 0) => ({
     file, project, status, task_count: open + resolved, counts: { resolved },
   });
   const items = [
@@ -165,7 +165,7 @@ test("compareFactories sorts by state group, then by name ignoring case, then by
     item("9.json", "aaa/finished-open", "finished", 1),
     item("a.json", "delta/paused-empty", "paused", 0, 1),
   ];
-  const order = (list) => list.sort(compareFactories).map((entry) => entry.file);
+  const order = (list: { file: string }[]) => list.sort(compareFactories).map((entry) => entry.file);
   const expected = ["3.json", "8.json", "4.json", "6.json", "5.json", "7.json", "2.json", "a.json", "9.json", "1.json"];
   assert.deepEqual(order([...items]), expected);
   assert.deepEqual(order([...items].reverse()), expected);
@@ -173,7 +173,7 @@ test("compareFactories sorts by state group, then by name ignoring case, then by
 
 test("factorySection groups factories by run state", async () => {
   const { factorySection } = await import("./factory-data.mjs");
-  const counts = (resolved) => ({ resolved });
+  const counts = (resolved: number) => ({ resolved });
   assert.equal(factorySection({ status: "active", task_count: 3, counts: counts(1) }), "active");
   assert.equal(factorySection({ status: "paused", task_count: 3, counts: counts(1) }), "active");
   assert.equal(factorySection({ status: "active", task_count: 3, counts: counts(3) }), "idle");
@@ -183,7 +183,7 @@ test("factorySection groups factories by run state", async () => {
 
 test("fitProjectLabel shortens the owner first and cuts the repo from the start last", async () => {
   const { fitProjectLabel } = await import("./factory-data.mjs");
-  const fit = (label, width) => fitProjectLabel(label, width, (text) => text.length);
+  const fit = (label: string, width: number) => fitProjectLabel(label, width, (text: string) => text.length);
   const label = "github/copilot-agent-runtime";
   assert.equal(fit(label, 28), label);
   assert.equal(fit(label, 23), "g/copilot-agent-runtime");
@@ -259,7 +259,7 @@ test("an operator write needs the seen budget and can set nothing else", async (
   const data = await update(f.file, { budget, "expected-budget": "10" }, { operator: true });
   assert.deepEqual(data.budget, { max_parallel_workers: 2 });
   const events = (await readFile(join(f.directory, "owner.repo-factory-events.jsonl"), "utf8")).trim().split("\n");
-  assert.equal(JSON.parse(events.at(-1)).source, "dashboard");
+  assert.equal(JSON.parse(events.at(-1)!).source, "dashboard");
 });
 
 test("lever validation accepts an absent lever and ceilings, and rejects everything else", async (t) => {
@@ -366,8 +366,8 @@ test("a task without an issue moves through every state and merges without a pr"
   f.ok("--task", "favicon", "--merge", JSON.stringify(merge));
   f.ok("--task", "favicon", "--state", "resolved", "--resolution", "merged",
     "--details", JSON.stringify({ merge_commit: sha("b") }));
-  const task = (await f.read()).tasks.find((item) => item.id === "favicon");
-  assert.deepEqual(task.history.map((item) => item.state),
+  const task = (await f.read()).tasks.find((item: any) => item.id === "favicon");
+  assert.deepEqual(task.history.map((item: any) => item.state),
     ["initial", "investigation", "implementation", "review", "resolved"]);
   assert.equal(task.pr, null);
   assert.equal(task.details.merge_commit, sha("b"));
@@ -386,7 +386,7 @@ test("moves follow the flow and each move adds history", async (t) => {
   f.ok("--task", "issue-1", "--state", "implementation", "--note", "findings");
   f.ok("--task", "issue-1", "--state", "review");
   const task = (await f.read()).tasks[0];
-  assert.deepEqual(task.history.map((item) => item.state),
+  assert.deepEqual(task.history.map((item: any) => item.state),
     ["initial", "investigation", "implementation", "review", "implementation", "review"]);
   assert.equal(task.history[1].note, "go");
   const { cyclesOf, entered } = await import("./factory-data.mjs");
@@ -404,19 +404,19 @@ test("a task with a PR can skip initial: created in review, or moved from initia
     "--next-action", "Review", "--state", "implementation", "--pr", pull(5));
   f.ok("--task", "pr-5", "--title", "Review it", "--issue", issue(5), "--next-action", "Review",
     "--state", "review", "--pr", pull(5), "--head", sha("a"));
-  const created = (await f.read()).tasks.find((item) => item.id === "pr-5");
+  const created = (await f.read()).tasks.find((item: any) => item.id === "pr-5");
   assert.equal(created.state, "review");
   assert.equal(created.pr, pull(5));
-  assert.deepEqual(created.history.map((item) => item.state), ["review"]);
+  assert.deepEqual(created.history.map((item: any) => item.state), ["review"]);
 
   f.ok("--task", "pr-6", "--title", "Review too", "--issue", "null", "--next-action", "Review", "--pr", pull(6));
   f.ok("--task", "pr-6", "--state", "review", "--note", "User gave the PR for review");
-  const moved = (await f.read()).tasks.find((item) => item.id === "pr-6");
-  assert.deepEqual(moved.history.map((item) => item.state), ["initial", "review"]);
+  const moved = (await f.read()).tasks.find((item: any) => item.id === "pr-6");
+  assert.deepEqual(moved.history.map((item: any) => item.state), ["initial", "review"]);
 
   f.ok("--task", "pr-7", "--title", "And this", "--issue", issue(7), "--next-action", "Review");
   f.ok("--task", "pr-7", "--state", "review", "--pr", pull(7));
-  assert.equal((await f.read()).tasks.find((item) => item.id === "pr-7").state, "review");
+  assert.equal((await f.read()).tasks.find((item: any) => item.id === "pr-7").state, "review");
   f.ok("--task", "issue-1", "--state", "investigation");
   f.fails(/cannot move from investigation to review/, "--task", "issue-1", "--state", "review",
     "--pr", pull(8));
@@ -482,7 +482,7 @@ test("a blocker may carry validated options; plain text and old blockers stay va
   assert.equal((await f.read()).tasks[0].blocker, null);
 
   const before = await readFile(f.file, "utf8");
-  const bad = (reason, blockerValue) => {
+  const bad = (reason: RegExp, blockerValue: unknown) => {
     f.fails(reason, "--task", "issue-1", "--state", "blocked", "--blocker", JSON.stringify(blockerValue));
   };
   bad(/reason must be a non-empty string/, { options });
@@ -499,7 +499,7 @@ test("a blocker may carry validated options; plain text and old blockers stay va
     reason: "Pick one",
     options: [{ label: "Use token A (Recommended)", recommended: true }, { label: "Cancel [recommended]" }],
   }));
-  assert.deepEqual((await f.read()).tasks[0].blocker.options.map((option) => option.label), ["Use token A", "Cancel"]);
+  assert.deepEqual((await f.read()).tasks[0].blocker.options.map((option: any) => option.label), ["Use token A", "Cancel"]);
   bad(/label must be a non-empty string/, { reason: "R", options: [{ label: "(recommended)" }] });
   f.ok("--task", "issue-1", "--state", "blocked", "--blocker", "{not json");
   assert.equal((await f.read()).tasks[0].blocker.reason, "{not json");
@@ -521,7 +521,7 @@ test("a blocker may carry a validated class and owner; old blockers stay valid",
   assert.equal(blocker.owner, undefined);
 
   const before = await readFile(f.file, "utf8");
-  const bad = (reason, blockerValue) => {
+  const bad = (reason: RegExp, blockerValue: unknown) => {
     f.fails(reason, "--task", "issue-1", "--blocker", JSON.stringify(blockerValue));
   };
   bad(/class must be one of: user-decision, outside-action, external-wait, ci-infra, approval/, { reason: "R", class: "soon" });
@@ -532,7 +532,7 @@ test("a blocker may carry a validated class and owner; old blockers stay valid",
   const { validate } = await import("./factory-data.mjs");
   const data = structuredClone(example);
   validate(data);
-  const task = data.tasks.find((item) => item.state === "blocked");
+  const task = data.tasks.find((item: any) => item.state === "blocked");
   task.blocker.class = "whenever";
   assert.throws(() => validate(data), /blocker\.class must be one of/);
   task.blocker.class = "ci-infra";
@@ -573,11 +573,11 @@ test("--expected-revision on a new task is a usage error, not a conflict", async
 test("dashboard directions must be acknowledged and old worker generations stay fenced", async (t) => {
   const f = await fixture(t, example);
   const { update } = await import("./factory.mjs");
-  const task = async () => (await f.read()).tasks.find((item) => item.id === "issue-7");
+  const task = async () => (await f.read()).tasks.find((item: any) => item.id === "issue-7");
   const data = await update(f.file, {
     task: "issue-7", state: "implementation", note: "Check the edge case again", "expected-revision": "0",
   }, { operator: true });
-  const first = data.tasks.find((item) => item.id === "issue-7");
+  const first = data.tasks.find((item: any) => item.id === "issue-7");
   f.fails(/needs --expected-revision/, "--task", first.id, "--state", "review");
   f.fails(/feedback is pending/, "--task", first.id, "--expected-revision", "1",
     "--feedback-id", first.feedback.id, "--state", "review");
@@ -603,30 +603,30 @@ test("dashboard directions must be acknowledged and old worker generations stay 
   f.ok("--task", first.id, "--expected-revision", "5", "--feedback-id", second.feedback.id,
     "--state", "investigation");
   const final = await task();
-  assert.deepEqual(final.history.filter((item) => item.source === "dashboard").map((item) => item.note),
+  assert.deepEqual(final.history.filter((item: any) => item.source === "dashboard").map((item: any) => item.note),
     ["Check the edge case again", "Start over with the new context"]);
   assert.deepEqual(final.workers, first.workers);
 });
 
 test("operator moves do not broaden worker transitions or bypass prerequisites", async () => {
   const { checkTransition, operatorStates } = await import("./factory-data.mjs");
-  const review = example.tasks.find((item) => item.state === "review");
+  const review = example.tasks.find((item: any) => item.state === "review");
   assert.deepEqual(operatorStates(review), ["initial", "investigation", "implementation", "resolved"]);
   assert.throws(() => checkTransition(review, "initial"), /cannot move/);
   checkTransition(review, "initial", true);
-  const blocked = example.tasks.find((item) => item.state === "blocked");
+  const blocked = example.tasks.find((item: any) => item.state === "blocked");
   assert.deepEqual(operatorStates(blocked), ["initial", "investigation", "implementation", "resolved"]);
   assert.deepEqual(operatorStates({ ...blocked, issue: null }),
     ["initial", "investigation", "implementation", "review", "resolved"]);
   assert.deepEqual(operatorStates({ ...blocked, pr: pull(99) }),
     ["initial", "investigation", "implementation", "review", "resolved"]);
-  assert.deepEqual(operatorStates(example.tasks.find((item) => item.state === "resolved")), []);
+  assert.deepEqual(operatorStates(example.tasks.find((item: any) => item.state === "resolved")), []);
 });
 
 test("the Unblock popup preselects the blocked-from state and fills option text verbatim", async () => {
   const { unblockState, unblockChoice, validate } = await import("./factory-data.mjs");
-  const blocked = example.tasks.find((item) => item.state === "blocked");
-  assert.deepEqual(blocked.blocker.options.map((option) => option.label),
+  const blocked = example.tasks.find((item: any) => item.state === "blocked");
+  assert.deepEqual(blocked.blocker.options.map((option: any) => option.label),
     ["Add the docs token to the CI secrets", "Skip the docs build in CI"]);
   assert.equal(unblockState(blocked), "investigation");
   const review = { ...blocked, blocker: { ...blocked.blocker, from: "review" } };
@@ -640,7 +640,7 @@ test("the Unblock popup preselects the blocked-from state and fills option text 
   assert.equal(unblockChoice(review, { label: "Go to review", state: "review" }).state, "initial",
     "a state that the task cannot move to is ignored");
   const old = structuredClone(example);
-  delete old.tasks.find((item) => item.state === "blocked").blocker.options;
+  delete old.tasks.find((item: any) => item.state === "blocked").blocker.options;
   validate(old);
 });
 
@@ -727,12 +727,12 @@ test("issue and PR identity ignores query and fragment without changing evidence
     "--links", JSON.stringify([evidence]));
   f.fails(/Duplicate pr URL/, "--task", "issue-3", "--title", "x", "--next-action", "y",
     "--issue", issue(3), "--pr", `${pull(99)}?diff=split`);
-  assert.deepEqual((await f.read()).tasks.find((task) => task.id === "issue-2").links, [evidence]);
+  assert.deepEqual((await f.read()).tasks.find((task: any) => task.id === "issue-2").links, [evidence]);
 });
 
-const archiveFile = (f, day) => join(f.directory, "owner.repo-factory-archive", `${day}.json`);
+const archiveFile = (f: { directory: string }, day: string) => join(f.directory, "owner.repo-factory-archive", `${day}.json`);
 
-async function withArchived(t) {
+async function withArchived(t: TestContext) {
   const f = await started(t);
   const old = "2020-01-01T00:00:00Z";
   f.ok("--task", "old", "--title", "Old", "--issue", issue(7), "--pr", pull(70), "--next-action", "none", "--task-updated-at", old);
@@ -743,10 +743,10 @@ async function withArchived(t) {
 
 test("adding a task archives resolved tasks older than seven days by day", async (t) => {
   const f = await withArchived(t);
-  assert.deepEqual((await f.read()).tasks.map((task) => task.id), ["issue-1", "issue-3"]);
+  assert.deepEqual((await f.read()).tasks.map((task: any) => task.id), ["issue-1", "issue-3"]);
   const day = JSON.parse(await readFile(archiveFile(f, "2020-01-01"), "utf8"));
   assert.deepEqual([day.format, day.project, day.day], ["factory-archive/v1", "owner/repo", "2020-01-01"]);
-  assert.deepEqual(day.tasks.map((task) => task.id), ["old"]);
+  assert.deepEqual(day.tasks.map((task: any) => task.id), ["old"]);
   assert.equal((await stat(archiveFile(f, "2020-01-01"))).mode & 0o777, 0o600);
 });
 
@@ -757,7 +757,7 @@ test("saving an archived task twice keeps one copy", async (t) => {
   const [{ tasks }] = await readArchive(directory, "owner/repo");
   await saveArchive(directory, "owner/repo", tasks);
   const days = await readArchive(directory, "owner/repo");
-  assert.deepEqual(days.map((day) => day.tasks.map((task) => task.id)), [["old"]]);
+  assert.deepEqual(days.map((day) => day.tasks.map((task: any) => task.id)), [["old"]]);
 });
 
 test("a new task that matches archived work is refused until the user decides", async (t) => {
@@ -783,7 +783,7 @@ test("restore brings an archived task back to initial and removes its archive co
     "--expected-revision", String(archived.revision + 1));
   f.ok("--task", "old", "--restore", "--state", "initial", "--note", "User wants it again",
     "--expected-revision", String(archived.revision));
-  const task = (await f.read()).tasks.find((item) => item.id === "old");
+  const task = (await f.read()).tasks.find((item: any) => item.id === "old");
   assert.equal(task.state, "initial");
   assert.equal(task.resolution, null);
   assert.equal(task.revision, archived.revision + 1);
@@ -794,13 +794,13 @@ test("restore brings an archived task back to initial and removes its archive co
 test("a merged archived task is not restored", async (t) => {
   const f = await fixture(t, {
     ...example,
-    tasks: example.tasks.map((task) => task.id === "issue-3" ? { ...task, updated_at: "2020-01-01T00:00:00Z" } : task),
+    tasks: example.tasks.map((task: any) => task.id === "issue-3" ? { ...task, updated_at: "2020-01-01T00:00:00Z" } : task),
   });
   f.ok("--task", "issue-20", "--title", "Next", "--issue", issue(20), "--next-action", "go");
   f.fails(/Do not reopen it/, "--task", "again", "--title", "Again", "--issue", issue(3), "--next-action", "x");
   f.fails(/was merged/, "--task", "issue-3", "--restore", "--state", "initial", "--note", "x");
   assert.equal(JSON.parse(await readFile(archiveFile(f, "2020-01-01"), "utf8")).tasks[0].id, "issue-3");
-  assert.equal((await f.read()).tasks.some((task) => task.id === "issue-3"), false);
+  assert.equal((await f.read()).tasks.some((task: any) => task.id === "issue-3"), false);
 });
 
 test("archive write failures never lose a task or half-apply a restore", async (t) => {
@@ -822,7 +822,7 @@ test("archive write failures never lose a task or half-apply a restore", async (
     f.ok("--task", "issue-3", "--title", "New", "--issue", issue(3), "--next-action", "go");
     await chmod(directory, 0o500);
     f.fails(/restored, but its archive copy was not removed/, "--task", "old", "--restore", "--state", "initial", "--note", "again");
-    assert.equal((await f.read()).tasks.find((task) => task.id === "old").state, "initial");
+    assert.equal((await f.read()).tasks.find((task: any) => task.id === "old").state, "initial");
   } finally {
     await chmod(directory, 0o700);
   }
@@ -838,14 +838,14 @@ test("pending dashboard resolution comments survive pruning until acknowledged",
     "expected-revision": String(before.revision), "task-updated-at": old,
   }, { operator: true });
   f.ok("--task", "issue-2", "--title", "Next", "--issue", issue(2), "--next-action", "go");
-  const pending = (await f.read()).tasks.find((task) => task.id === before.id);
+  const pending = (await f.read()).tasks.find((task: any) => task.id === before.id);
   assert.ok(pending, "An unread operator comment must not be pruned.");
   assert.equal(pending.history.at(-1).note, "Handled outside the factory.");
   f.ok("--task", pending.id, "--expected-revision", String(pending.revision), "--ack-feedback", pending.feedback.id);
   f.ok("--task", pending.id, "--expected-revision", String(pending.revision + 1),
     "--feedback-id", pending.feedback.id, "--task-updated-at", old);
   f.ok("--task", "issue-3", "--title", "More", "--issue", issue(3), "--next-action", "go");
-  assert.deepEqual((await f.read()).tasks.map((task) => task.id), ["issue-2", "issue-3"]);
+  assert.deepEqual((await f.read()).tasks.map((task: any) => task.id), ["issue-2", "issue-3"]);
 });
 
 test("usage errors exit 2 and malformed JSON flags exit 1", async (t) => {
@@ -860,7 +860,7 @@ const search = { id: "bugs", description: "Open bugs.", kind: "search", query: "
 
 test("rules need a known kind, a query for search, and a valid interval", async (t) => {
   const f = await started(t);
-  const rules = (rule) => ["--rules", JSON.stringify([{ ...search, ...rule }])];
+  const rules = (rule: Record<string, unknown>) => ["--rules", JSON.stringify([{ ...search, ...rule }])];
   f.fails(/Rule bugs query/, ...rules({ query: null }));
   f.fails(/Rule bugs kind/, ...rules({ kind: "other" }));
   for (const every of ["", "30 minutes", "0m", "5", "5s", "10000m", "1.5h", " 5m"]) {
@@ -886,7 +886,7 @@ test("--rule stamps the run time and records or clears the rule worker", async (
   f.ok("--rule", "bugs", "--ran", "--updated-at", "2026-05-01T12:00:00Z");
   let data = await f.read();
   assert.equal(data.updated_at, "2026-05-01T12:00:00Z");
-  assert.deepEqual(data.rules.map((rule) => rule.last_run_at), ["2026-05-01T12:00:00Z", null]);
+  assert.deepEqual(data.rules.map((rule: any) => rule.last_run_at), ["2026-05-01T12:00:00Z", null]);
 
   const worker = { status: "running", mode: "one-shot", session: "7f4c2a90-1d3e-4b5a-9c8d-2e6f0a1b3c4d" };
   f.ok("--rule", "bugs", "--rule-worker", JSON.stringify(worker));
@@ -911,11 +911,11 @@ test("--ignored replaces the skipped list and accepts only GitHub links", async 
 
 test("schedule helpers say what is due, only for an active factory", async () => {
   const { nextRun, dueRules, nextDue } = await import("./factory-data.mjs");
-  const interval = (every) => nextRun({ enabled: true, every, last_run_at: "1970-01-01T00:00:00Z" });
+  const interval = (every: string) => nextRun({ enabled: true, every, last_run_at: "1970-01-01T00:00:00Z" });
   assert.deepEqual(["30m", "6h", "1d", "9999m"].map(interval), [1_800_000, 21_600_000, 86_400_000, 599_940_000]);
 
   const at = Date.parse("2026-05-01T12:00:00Z");
-  const rule = (id, extra) => ({ id, enabled: true, last_run_at: null, ...extra });
+  const rule = (id: string, extra: Record<string, unknown>) => ({ id, enabled: true, last_run_at: null, ...extra });
   const rules = [
     rule("never", { every: "1h" }),
     rule("ran", { every: "1h", last_run_at: "2026-05-01T11:30:00Z" }),
@@ -924,7 +924,7 @@ test("schedule helpers say what is due, only for an active factory", async () =>
     rule("manual", {}),
   ];
   assert.deepEqual(rules.map(nextRun), [0, at + 1_800_000, Date.parse("2026-05-01T11:10:00Z"), null, null]);
-  const data = (status) => ({ status, rules });
+  const data = (status: string) => ({ status, rules });
   assert.deepEqual(dueRules(data("active"), at), ["never", "overdue"]);
   assert.equal(nextDue(data("active")), 0);
   assert.deepEqual(dueRules({ status: "active", rules: rules.slice(1, 2) }, at), []);
@@ -936,7 +936,7 @@ test("schedule helpers say what is due, only for an active factory", async () =>
   }
 });
 
-const uuid = (n) => `${String(n).repeat(8)}-${String(n).repeat(4)}-4${String(n).repeat(3)}-8${String(n).repeat(3)}-${String(n).repeat(12)}`;
+const uuid = (n: number) => `${String(n).repeat(8)}-${String(n).repeat(4)}-4${String(n).repeat(3)}-8${String(n).repeat(3)}-${String(n).repeat(12)}`;
 
 test("the sessions registry records each factory and worker session once, privately", async (t) => {
   const f = await started(t);
@@ -969,7 +969,7 @@ test("the sessions registry records each factory and worker session once, privat
   assert.equal((await lines()).length, 4, "A refused write must not record a session.");
 });
 
-async function sessionState(t) {
+async function sessionState(t: TestContext) {
   const directory = await mkdtemp(join(tmpdir(), "session-state-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const previous = process.env.FACTORY_SESSION_STATE;
@@ -980,7 +980,7 @@ async function sessionState(t) {
   });
   return {
     directory,
-    add: async (id, cwd, created) => {
+    add: async (id: string, cwd: string, created: number) => {
       await mkdir(join(directory, id));
       await writeFile(join(directory, id, "workspace.yaml"), `id: ${id}\ncwd: ${cwd}\ncreated_at: ${new Date(created).toISOString()}\n`);
     },
@@ -1010,9 +1010,9 @@ test("a running worker without a session gets the one session created in its wor
   const registry = join(f.directory, "owner.repo-factory-sessions.jsonl");
   assert.deepEqual((await readFile(registry, "utf8")).split("\n").filter(Boolean).map((line) => JSON.parse(line).id), [uuid(3)]);
 
-  const metrics = spawnSync(process.execPath, [join(__dirname, "session-metrics.mjs"), "--registry", registry, "--directory", state.directory], { encoding: "utf8" });
+  const metrics = spawnSync(process.execPath, [join(import.meta.dirname, "session-metrics.mjs"), "--registry", registry, "--directory", state.directory], { encoding: "utf8" });
   assert.equal(metrics.status, 0, metrics.stderr);
-  assert.deepEqual(JSON.parse(metrics.stdout).sessions.map((item) => [item.id, item.role, item.task]), [[uuid(3), "implementation", "issue-1"]]);
+  assert.deepEqual(JSON.parse(metrics.stdout).sessions.map((item: any) => [item.id, item.role, item.task]), [[uuid(3), "implementation", "issue-1"]]);
 });
 
 test("a one-shot rule worker is matched by the factory's directory; no or many matches leave it unset", async (t) => {
@@ -1021,7 +1021,7 @@ test("a one-shot rule worker is matched by the factory's directory; no or many m
   const repo = await mkdtemp(join(tmpdir(), "repo-"));
   t.after(() => rm(repo, { recursive: true, force: true }));
   const launch = Date.now() - 60_000;
-  const run = (...args) => {
+  const run = (...args: string[]) => {
     const result = spawnSync(process.execPath, [script, f.file, ...args], { encoding: "utf8", cwd: repo });
     assert.equal(result.status, 0, result.stderr);
   };
@@ -1082,7 +1082,7 @@ test("resolving a task closes its workers unless the write sets a status", async
   assert.equal(workers.review.status, "unknown");
 });
 
-async function twoTasks(t) {
+async function twoTasks(t: TestContext) {
   const f = await started(t);
   f.ok("--task", "pr-5", "--title", "Fix it", "--issue", "null", "--pr", pull(5), "--state", "review",
     "--next-action", "Review", "--links", JSON.stringify([issue(1), issue(2)]));
@@ -1105,7 +1105,7 @@ test("--merge-task keeps the furthest-along task, unions the links, and resolves
   assert.equal(other.issue, null);
   assert.deepEqual(other.details, { merged_into: "pr-5", merged_issue: issue(1), merged_pr: null });
   const events = readFileSync(join(f.directory, "owner.repo-factory-events.jsonl"), "utf8");
-  assert.equal(events.match(/"type":"task.updated"/g).length, 3);
+  assert.equal(events.match(/"type":"task.updated"/g)!.length, 3);
 });
 
 test("--merge-task refuses two running workers and a merged task", async (t) => {

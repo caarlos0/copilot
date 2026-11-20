@@ -1,18 +1,18 @@
-const assert = require("node:assert/strict");
-const { spawnSync } = require("node:child_process");
-const { mkdir, mkdtemp, readdir, readFile, rm, writeFile } = require("node:fs/promises");
-const { tmpdir } = require("node:os");
-const { join } = require("node:path");
-const { test } = require("node:test");
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { test, type TestContext } from "node:test";
+import hooks from "../hooks.json" with { type: "json" };
 
-const hooks = require("../hooks.json");
-const script = join(__dirname, "attention.mjs");
-const pluginRoot = join(__dirname, "..");
-const fixtures = join(__dirname, "fixtures");
-const load = async (name) => JSON.parse(await readFile(join(fixtures, name), "utf8"));
+const script = join(import.meta.dirname, "attention.mjs");
+const pluginRoot = join(import.meta.dirname, "..");
+const fixtures = join(import.meta.dirname, "fixtures");
+const load = async (name: string) => JSON.parse(await readFile(join(fixtures, name), "utf8"));
 const PERMISSION_SESSION = "00000000-0000-4000-8000-000000000001";
 
-async function setup(t) {
+async function setup(t: TestContext) {
   const directory = await mkdtemp(join(tmpdir(), "attention-test-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const state = join(directory, "state");
@@ -26,11 +26,11 @@ async function setup(t) {
       const text = await readFile(join(state, "owner.repo-factory-events.jsonl"), "utf8");
       return text.trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
     } catch (error) {
-      if (error.code === "ENOENT") return [];
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
       throw error;
     }
   };
-  const run = (payload, env = {}) =>
+  const run = (payload: string | Record<string, unknown>, env: Record<string, string> = {}) =>
     spawnSync(process.execPath, [script], {
       encoding: "utf8",
       input: typeof payload === "string" ? payload : JSON.stringify({ ...payload, cwd: directory }),
@@ -201,7 +201,7 @@ test("exits 0 when the state directory is missing", async (t) => {
 test("the preToolUse entry runs the hook only for ask_user", async (t) => {
   const { directory, scratch, worker } = await setup(t);
   const entry = hooks.hooks.preToolUse[1];
-  const run = async (name) => {
+  const run = async (name: string) => {
     const payload = JSON.stringify({ ...(await load(name)), cwd: directory });
     return spawnSync("/bin/bash", ["-c", entry.bash], {
       encoding: "utf8",

@@ -1,11 +1,11 @@
-const assert = require("node:assert/strict");
-const { spawnSync } = require("node:child_process");
-const { chmod, mkdir, mkdtemp, readFile, rm, writeFile } = require("node:fs/promises");
-const { tmpdir } = require("node:os");
-const { delimiter, join } = require("node:path");
-const { test } = require("node:test");
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { delimiter, join } from "node:path";
+import { test, type TestContext } from "node:test";
 
-const script = join(__dirname, "pr-watch.mjs");
+const script = join(import.meta.dirname, "pr-watch.mjs");
 
 // A fake gh that answers `pr view` and replays queued `api graphql` responses.
 // With FAKE_GH_PAGE_SIZE it pages both connections like GitHub: the first call
@@ -79,11 +79,11 @@ if (rollup) page(rollup.contexts, contextsAfter);
 process.stdout.write(JSON.stringify(response));
 `;
 
-const required = (name, conclusion, status = "COMPLETED") => ({
+const required = (name: string, conclusion: string | null, status = "COMPLETED") => ({
   __typename: "CheckRun", name, status, conclusion, isRequired: true,
 });
 
-function pr(overrides = {}) {
+function pr(overrides: { contexts?: unknown[]; remaining?: number; [key: string]: unknown } = {}) {
   const { contexts = [], remaining = 4000, ...rest } = overrides;
   return {
     data: {
@@ -101,7 +101,7 @@ function pr(overrides = {}) {
   };
 }
 
-async function fixture(t, responses, extraEnv = {}) {
+async function fixture(t: TestContext, responses: unknown[], extraEnv: Record<string, string> = {}) {
   const directory = await mkdtemp(join(tmpdir(), "pr-watch-test-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   await mkdir(join(directory, "bin"));
@@ -111,7 +111,7 @@ async function fixture(t, responses, extraEnv = {}) {
   await writeFile(gh, `#!/bin/sh\nexec "${process.execPath}" "${join(directory, "gh.js")}" "$@"\n`);
   await chmod(gh, 0o755);
   await Promise.all(responses.map((response, i) => writeFile(join(directory, "responses", `${i + 1}.json`), JSON.stringify(response))));
-  const watch = (...args) => {
+  const watch = (...args: string[]) => {
     const out = spawnSync(process.execPath, [script, "--interval", "0.01", ...args], {
       encoding: "utf8",
       timeout: 30000,
@@ -150,11 +150,12 @@ test("--merge ignores head and review changes and reports a close without a merg
 });
 
 test("a new head, a new review, and a conflict are typed events", async (t) => {
-  for (const [change, event] of [
+  const cases: [Record<string, unknown>, string][] = [
     [{ headRefOid: "h2" }, "head"],
     [{ reviews: { nodes: [{ id: "r1", state: "APPROVED" }] } }, "review"],
     [{ mergeable: "CONFLICTING" }, "conflict"],
-  ]) {
+  ];
+  for (const [change, event] of cases) {
     const { watch } = await fixture(t, [pr(), pr(), pr(change)]);
     const out = watch("7");
     assert.equal(out.status, 0, out.stderr);
@@ -299,7 +300,7 @@ test("--timeout exits 0 with a timeout event", async (t) => {
 test("--help needs no gh, a bad flag exits 2, and the default interval minimum is enforced", () => {
   const env = { ...process.env, PATH: "/nonexistent", PR_WATCH_MIN_INTERVAL: undefined };
   delete env.PR_WATCH_MIN_INTERVAL;
-  const run = (...args) => spawnSync(process.execPath, [script, ...args], { encoding: "utf8", env });
+  const run = (...args: string[]) => spawnSync(process.execPath, [script, ...args], { encoding: "utf8", env });
   assert.equal(run("--help").status, 0);
   assert.equal(run("--bogus").status, 2);
   assert.equal(run("7", "--interval", "5").status, 2);
@@ -318,6 +319,6 @@ test("when gh event listen is unavailable it polls once and says so", async (t) 
   const out = watch("7");
   assert.equal(out.status, 0, out.stderr);
   assert.equal(out.json.event, "merged");
-  assert.equal(out.stderr.match(/gh event listen is unavailable, polling: gh: event streams are not enabled/g).length, 1);
+  assert.equal(out.stderr.match(/gh event listen is unavailable, polling: gh: event streams are not enabled/g)!.length, 1);
   assert.deepEqual((await calls()).map((call) => call.split(" ")[0]), ["pr", "api", "api", "api"]);
 });

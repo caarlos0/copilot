@@ -1,21 +1,20 @@
-const assert = require("node:assert/strict");
-const { spawn, spawnSync } = require("node:child_process");
-const { mkdir, mkdtemp, rm, writeFile } = require("node:fs/promises");
-const { tmpdir } = require("node:os");
-const { join } = require("node:path");
-const { test } = require("node:test");
-
-const hooks = require("../hooks.json");
+import assert from "node:assert/strict";
+import { spawn, spawnSync } from "node:child_process";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { test, type TestContext } from "node:test";
+import hooks from "../hooks.json" with { type: "json" };
 const [entry] = hooks.hooks.agentStop;
 
 // The waiter check reads the PID's command line, so the PID must belong to a "broker.mjs wait" process.
-function fakeWaiter(t) {
+function fakeWaiter(t: TestContext) {
   const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)", "broker.mjs", "wait"], { stdio: "ignore" });
   t.after(() => child.kill());
   return child.pid;
 }
 
-async function fixture(t) {
+async function fixture(t: TestContext) {
   const directory = await mkdtemp(join(tmpdir(), "stop-hook-test-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const file = join(directory, "owner.repo-factory.json");
@@ -23,15 +22,15 @@ async function fixture(t) {
   return {
     directory,
     file,
-    async write({ status = "active", waiter = fakeWaiter(t), tasks = [] } = {}) {
+    async write({ status = "active", waiter = fakeWaiter(t), tasks = [] }: { status?: string; waiter?: number | null; tasks?: unknown[] } = {}) {
       await writeFile(file, JSON.stringify({ status, tasks }));
       if (waiter !== null) await writeFile(pidFile, `${waiter}\n`);
     },
-    run({ input = {}, env = {} } = {}) {
+    run({ input = {}, env = {} }: { input?: unknown; env?: Record<string, string> } = {}) {
       const result = spawnSync("/bin/bash", ["-c", entry.bash], {
         encoding: "utf8",
         input: JSON.stringify(input),
-        env: { PATH: process.env.PATH, PLUGIN_ROOT: join(__dirname, ".."), FACTORY_COORDINATOR: "1", FACTORY_FILE: file, ...env },
+        env: { PATH: process.env.PATH, PLUGIN_ROOT: join(import.meta.dirname, ".."), FACTORY_COORDINATOR: "1", FACTORY_FILE: file, ...env },
       });
       assert.equal(result.status, 0, result.stderr);
       return result.stdout.trim() === "" ? null : JSON.parse(result.stdout);
@@ -39,7 +38,7 @@ async function fixture(t) {
   };
 }
 
-const task = (extra) => ({
+const task = (extra: Record<string, unknown>) => ({
   id: "t", title: "t", state: "implementation", updated_at: "2026-05-01T12:00:00Z", next_action: "Next",
   issue: null, pr: null, head: null, reviewed_head: null, links: [], blocker: null, resolution: null,
   merge: null, workers: {}, worktree: null, history: [], details: null, ...extra,

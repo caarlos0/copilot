@@ -1,26 +1,26 @@
-const assert = require("node:assert/strict");
-const { spawn, spawnSync } = require("node:child_process");
-const { chmod, mkdir, mkdtemp, readFile, rm, writeFile } = require("node:fs/promises");
-const { tmpdir } = require("node:os");
-const { delimiter, join } = require("node:path");
-const { test } = require("node:test");
+import assert from "node:assert/strict";
+import { spawn, spawnSync } from "node:child_process";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { delimiter, join } from "node:path";
+import { test, type TestContext } from "node:test";
 
-const script = join(__dirname, "reconcile.mjs");
+const script = join(import.meta.dirname, "reconcile.mjs");
 const window = "window:01a1ea3c-952d-7bdf-a621-95363a2bc34f";
 
 // The waiter check reads the PID's command line, so the PID must belong to a "broker.mjs wait" process.
-function fakeWaiter(t) {
+function fakeWaiter(t: TestContext) {
   const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)", "broker.mjs", "wait"], { stdio: "ignore" });
   t.after(() => child.kill());
   return child.pid;
 }
 
-function git(cwd, ...args) {
+function git(cwd: string, ...args: string[]) {
   const result = spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8", env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" } });
   assert.equal(result.status, 0, result.stderr);
 }
 
-function task(id, state, extra = {}) {
+function task(id: string, state: string, extra: Record<string, unknown> = {}) {
   const at = "2026-05-01T12:00:00Z";
   return {
     id, title: id, state, updated_at: at, next_action: "Next", issue: null, pr: null,
@@ -31,7 +31,7 @@ function task(id, state, extra = {}) {
   };
 }
 
-async function fixture(t, rex, branch = "main") {
+async function fixture(t: TestContext, rex: string, branch = "main") {
   const directory = await mkdtemp(join(tmpdir(), "reconcile-test-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const repo = join(directory, "repo");
@@ -51,7 +51,12 @@ async function fixture(t, rex, branch = "main") {
   const file = join(directory, "owner.repo-factory.json");
   return {
     directory, repo, file, bin,
-    async run(tasks, { status = "active", waiter = fakeWaiter(t), rules, env, args = [] } = {}) {
+    async run(
+      tasks: object[],
+      { status = "active", waiter = fakeWaiter(t), rules, env, args = [] }: {
+        status?: string; waiter?: number | null; rules?: unknown[]; env?: Record<string, string>; args?: string[];
+      } = {},
+    ): Promise<{ findings: any[]; errors: any[] }> {
       await writeFile(file, JSON.stringify({ rex_session: "session:work", status, tasks, rules }));
       const pidFile = join(directory, "owner.repo-factory-waiter.pid");
       if (waiter === null) await rm(pidFile, { force: true });
@@ -67,7 +72,7 @@ async function fixture(t, rex, branch = "main") {
 }
 
 const session = "session:01a1e7a3-fa38-7cc9-b339-f6c5afbd626c";
-const rexScript = (sessions) => `#!/bin/sh
+const rexScript = (sessions: string[]) => `#!/bin/sh
 [ "$1" = "--autostart=false" ] && shift
 case "$1" in
   ls) echo '{"sessions":[${sessions.map((id) => `{"session_id":"${id}"}`)}]}' ;;
@@ -132,7 +137,7 @@ test("flags a clean worktree of a merged task whose HEAD is in the default branc
   git(f.repo, "worktree", "add", "-q", "-b", "clean", clean, "main");
   git(f.repo, "worktree", "add", "-q", "-b", "dirty", dirty, "main");
   await writeFile(join(dirty, "scratch.txt"), "x");
-  const at = (path) => ({ path, created_by_run: true });
+  const at = (path: string) => ({ path, created_by_run: true });
   const { findings, errors } = await f.run([
     task("clean", "resolved", { worktree: at(clean) }),
     task("dirty", "resolved", { worktree: at(dirty) }),
@@ -153,14 +158,14 @@ test("flags a finished rule worker whose window is open or whose status is still
   const f = await fixture(t, fakeRex);
   const before = "2026-05-01T10:00:00Z";
   const after = "2026-05-01T13:00:00Z";
-  const stamp = (name, updated_at, outcome = "complete") =>
+  const stamp = (name: string, updated_at: string, outcome = "complete") =>
     writeFile(join(f.directory, name), JSON.stringify({ outcome, updated_at }));
   await stamp("scan-result.json", after);
   await stamp("open-result.json", after);
   await stamp("closed-result.json", after);
   await stamp("fresh-result.json", before);
   await stamp("working-result.json", after, "working");
-  const rule = (id, worker, last_run_at = "2026-05-01T12:00:00Z") =>
+  const rule = (id: string, worker: object | null, last_run_at: string | null = "2026-05-01T12:00:00Z") =>
     ({ id, description: id, kind: "backlog", enabled: true, last_run_at, worker });
   const rules = [
     rule("scan", { status: "running", result: "scan-result.json" }),
@@ -182,15 +187,15 @@ test("flags a finished rule worker whose window is open or whose status is still
 
 test("flags a task blocked longer than the threshold, with its class and owner", async (t) => {
   const f = await fixture(t, fakeRex);
-  const hoursAgo = (hours) => new Date(Date.now() - hours * 3_600_000).toISOString();
-  const blocker = (since, extra = {}) => ({ from: "implementation", reason: "Need a token", since, ...extra });
+  const hoursAgo = (hours: number) => new Date(Date.now() - hours * 3_600_000).toISOString();
+  const blocker = (since: string, extra: Record<string, unknown> = {}) => ({ from: "implementation", reason: "Need a token", since, ...extra });
   const tasks = [
     task("old-classed", "blocked", { blocker: blocker(hoursAgo(30), { class: "outside-action", owner: "alice" }) }),
     task("old-plain", "blocked", { blocker: blocker(hoursAgo(25)) }),
     task("fresh", "blocked", { blocker: blocker(hoursAgo(2), { class: "user-decision", owner: "operator" }) }),
     task("working", "implementation"),
   ];
-  const stale = (findings) => findings.filter((finding) => finding.kind === "stale-blocked")
+  const stale = (findings: any[]) => findings.filter((finding) => finding.kind === "stale-blocked")
     .map(({ task, class: kind, owner, reason }) => ({ task, class: kind, owner, reason }));
   let { findings } = await f.run(tasks);
   assert.deepEqual(stale(findings), [
@@ -235,7 +240,7 @@ test("reports no-waiter while the run is active or a task is open, and no waiter
   const dead = spawnSync(process.execPath, ["-e", ""]).pid;
   const open = [task("busy", "implementation")];
   const done = [task("done", "resolved")];
-  const kinds = async (...args) => (await f.run(...args)).findings.map(({ kind }) => kind);
+  const kinds = async (...args: Parameters<typeof f.run>) => (await f.run(...args)).findings.map(({ kind }) => kind);
 
   assert.deepEqual(await kinds(open, { waiter: null }), ["no-waiter"]);
   assert.deepEqual(await kinds(open, { waiter: dead }), ["no-waiter"]);
@@ -248,7 +253,7 @@ test("reports no-waiter while the run is active or a task is open, and no waiter
 test("reports hooks-inactive when the owner lock would not activate the hooks for this session", async (t) => {
   const f = await fixture(t, fakeRex);
   const open = [task("busy", "implementation")];
-  const inactive = async (env) => (await f.run(open, { env })).findings.filter(({ kind }) => kind === "hooks-inactive");
+  const inactive = async (env: Record<string, string>) => (await f.run(open, { env })).findings.filter(({ kind }) => kind === "hooks-inactive");
   const mine = { COPILOT_AGENT_SESSION_ID: "mine", FACTORY_COORDINATOR: "" };
 
   assert.deepEqual(await inactive(mine), [], "no lock");
@@ -265,7 +270,7 @@ test("reports hooks-inactive when the owner lock would not activate the hooks fo
 
 test("flags a running worker whose window is gone, for tasks and rules", async (t) => {
   const f = await fixture(t, fakeRex);
-  const worker = (extra) => ({
+  const worker = (extra: Record<string, unknown>) => ({
     status: "running", pane: "block:p1", brief: "b.md", result: "none.json", window: "window:gone", ...extra,
   });
   await writeFile(join(f.directory, "r.json"), JSON.stringify({ outcome: "complete", updated_at: "2026-05-01T13:00:00Z" }));
@@ -317,7 +322,7 @@ test("a merged task with a PR gets the delete command with --merged-pr, even whe
   assert.deepEqual(errors, []);
   assert.deepEqual(findings, [{
     kind: "merged-worktree", task: "squashed", path: f.repo, created_by_run: true,
-    command: `node ${join(__dirname, "worktree.mjs")} delete work --merged-pr ${pr}`,
+    command: `node ${join(import.meta.dirname, "worktree.mjs")} delete work --merged-pr ${pr}`,
   }]);
 });
 
@@ -333,7 +338,7 @@ test("reports a running worker of a resolved task with the fix command", async (
   assert.deepEqual(findings.map(({ fix, ...rest }) => rest), [
     { kind: "stale-running", task: "done", role: "implementation", window: "window:gone" },
   ]);
-  assert.equal(findings[0].fix, `node ${join(__dirname, "factory.mjs")} ${f.file} --task done --workers '{"implementation":{"status":"closed"}}'`);
+  assert.equal(findings[0].fix, `node ${join(import.meta.dirname, "factory.mjs")} ${f.file} --task done --workers '{"implementation":{"status":"closed"}}'`);
 });
 
 test("reports an attention item open longer than --attention-after, and records the ones the session log closed", async (t) => {
@@ -349,9 +354,9 @@ esac
   const f = await fixture(t, rex);
   const state = join(f.directory, "session-state");
   await mkdir(join(state, "answered"), { recursive: true });
-  const minutesAgo = (minutes) => new Date(Date.now() - minutes * 60_000).toISOString();
-  const lines = [];
-  const request = (id, session, minutes, extra = {}) => lines.push({
+  const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
+  const lines: object[] = [];
+  const request = (id: string, session: string, minutes: number, extra: Record<string, unknown> = {}) => lines.push({
     id, at: minutesAgo(minutes), type: "attention.requested", task: "busy", source: "attention",
     data: { session, kind: "sandbox-bypass", text: `text ${id}`, role: "implementation", pane: "block:live", ...extra },
   });
@@ -364,7 +369,7 @@ esac
 
   const env = { FACTORY_SESSION_STATE: state };
   const run = () => f.run([task("busy", "implementation", { title: "Busy task" })], { env });
-  const attention = ({ findings }) => findings.filter(({ kind }) => kind === "attention-stale");
+  const attention = ({ findings }: { findings: any[] }) => findings.filter(({ kind }) => kind === "attention-stale");
   let result = await run();
   assert.deepEqual(result.errors, []);
   assert.deepEqual(attention(result).map(({ since, ...rest }) => rest), [{
@@ -386,8 +391,8 @@ esac
 test("reports a running worker that ended its turn over 10 minutes ago and saved no new result", async (t) => {
   const f = await fixture(t, fakeRex);
   const state = join(f.directory, "session-state");
-  const minutesAgo = (minutes) => new Date(Date.now() - minutes * 60_000).toISOString();
-  const log = async (name, ...events) => {
+  const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
+  const log = async (name: string, ...events: [string, number][]) => {
     await mkdir(join(state, name), { recursive: true });
     await writeFile(join(state, name, "events.jsonl"), events.map(([type, minutes]) => `${JSON.stringify({ type, data: {}, timestamp: minutesAgo(minutes) })}\n`).join(""));
   };
@@ -398,7 +403,7 @@ test("reports a running worker that ended its turn over 10 minutes ago and saved
   await log("parked", ["assistant.turn_end", 20]);
   await writeFile(join(f.directory, "saved-result.json"), "{}");
 
-  const worker = (name, extra = {}) => ({ status: "running", session: name, window, launched_at: minutesAgo(60), ...extra });
+  const worker = (name: string, extra = {}) => ({ status: "running", session: name, window, launched_at: minutesAgo(60), ...extra });
   const { findings, errors } = await f.run([
     task("busy", "implementation", { workers: { implementation: worker("quiet") } }),
     task("fresh", "implementation", { workers: { implementation: worker("fresh") } }),
@@ -423,12 +428,12 @@ test("--attention-after must be a duration", async (t) => {
 
 test("an old undecided proposal is not stuck work, but a decision missing from the result file is", async (t) => {
   const f = await fixture(t, fakeRex);
-  const days = (n) => new Date(Date.now() - n * 24 * 3_600_000).toISOString();
-  const proposed = (id, result, at) => ({
+  const days = (n: number) => new Date(Date.now() - n * 24 * 3_600_000).toISOString();
+  const proposed = (id: string, result: string, at: string) => ({
     id: `p-${id}`, at, type: "improve.proposed", task: null, source: "improve",
     data: { rule: "self-improve", change: "limit", title: `Title ${id}`, evidence: "e", recommended: "accept", proposal_id: id, result },
   });
-  const decided = (id, decision, at) => ({
+  const decided = (id: string, decision: string, at: string) => ({
     id: `d-${id}`, at, type: "improve.decided", task: null, source: "dashboard", data: { proposal_id: id, decision },
   });
   await writeFile(join(f.directory, "owner.repo-factory-events.jsonl"), [
@@ -455,8 +460,8 @@ test("an old undecided proposal is not stuck work, but a decision missing from t
   }]);
 });
 
-const issue = (n) => `https://github.com/owner/repo/issues/${n}`;
-const pull = (n) => `https://github.com/owner/repo/pull/${n}`;
+const issue = (n: number) => `https://github.com/owner/repo/issues/${n}`;
+const pull = (n: number) => `https://github.com/owner/repo/pull/${n}`;
 
 test("reports tasks that share an issue or PR through links, and keeps the furthest-along one", async (t) => {
   const f = await fixture(t, fakeRex);

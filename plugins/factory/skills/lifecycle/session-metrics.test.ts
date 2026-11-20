@@ -1,18 +1,18 @@
-const assert = require("node:assert/strict");
-const { mkdir, mkdtemp, rm, writeFile } = require("node:fs/promises");
-const { spawnSync } = require("node:child_process");
-const { join } = require("node:path");
-const { tmpdir } = require("node:os");
-const { test } = require("node:test");
+import assert from "node:assert/strict";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { test, type TestContext } from "node:test";
 
-const script = join(__dirname, "session-metrics.mjs");
+const script = join(import.meta.dirname, "session-metrics.mjs");
 const first = "11111111-1111-4111-8111-111111111111";
 const second = "22222222-2222-4222-8222-222222222222";
 const start = Date.parse("2026-05-01T12:00:00Z");
 
-const event = (seconds, type, data = {}) =>
+const event = (seconds: number, type: string, data: Record<string, unknown> = {}) =>
   JSON.stringify({ type, data, timestamp: new Date(start + seconds * 1000).toISOString() });
-const bash = (seconds, id, command, success = true) => [
+const bash = (seconds: number, id: string, command: string, success = true) => [
   event(seconds, "tool.execution_start", { toolCallId: id, toolName: "bash", arguments: { command } }),
   event(seconds, "tool.execution_complete", { toolCallId: id, success }),
 ];
@@ -38,14 +38,16 @@ const events = [
   event(1275, "assistant.turn_end"),
 ];
 
-async function fixture(t, { registry = [{ id: first, role: "implementation", task: "issue-1", at: "2026-05-01T11:00:00Z" }] } = {}) {
+type RegistryEntry = { id: string; role: string; task?: string; rule?: string; at: string };
+
+async function fixture(t: TestContext, { registry = [{ id: first, role: "implementation", task: "issue-1", at: "2026-05-01T11:00:00Z" }] as RegistryEntry[] } = {}) {
   const directory = await mkdtemp(join(tmpdir(), "metrics-test-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   await mkdir(join(directory, first));
   await writeFile(join(directory, first, "events.jsonl"), `${events.join("\n")}\n`);
   const file = join(directory, "owner.repo-factory-sessions.jsonl");
   await writeFile(file, registry.map((entry) => `${JSON.stringify(entry)}\n`).join(""));
-  const run = (...args) => spawnSync(process.execPath, [script, "--directory", directory, ...args], { encoding: "utf8" });
+  const run = (...args: string[]) => spawnSync(process.execPath, [script, "--directory", directory, ...args], { encoding: "utf8" });
   return { directory, file, run };
 }
 
@@ -95,7 +97,7 @@ test("streams the log: blank lines, CRLF, and a last line without a newline", as
 
 test("--since keeps sessions registered at or after that time; IDs work without a registry", async (t) => {
   const f = await fixture(t);
-  const since = (time) => JSON.parse(f.run("--registry", f.file, "--since", time).stdout);
+  const since = (time: string) => JSON.parse(f.run("--registry", f.file, "--since", time).stdout);
   assert.equal(since("2026-05-01T11:00:00Z").sessions.length, 1);
   assert.equal(since("2026-05-01T11:00:01Z").sessions.length, 0);
   const direct = JSON.parse(f.run(first).stdout);
@@ -106,7 +108,7 @@ test("--since keeps sessions registered at or after that time; IDs work without 
 test("--since always keeps the factory session", async (t) => {
   const f = await fixture(t, { registry: [{ id: first, role: "factory", at: "2026-05-01T11:00:00Z" }] });
   const result = JSON.parse(f.run("--registry", f.file, "--since", "2026-05-02T00:00:00Z").stdout);
-  assert.deepEqual(result.sessions.map((item) => item.role), ["factory"]);
+  assert.deepEqual(result.sessions.map((item: { role: string }) => item.role), ["factory"]);
 });
 
 test("--active-since includes sessions that started earlier and counts only the window", async (t) => {
@@ -120,12 +122,12 @@ test("--active-since includes sessions that started earlier and counts only the 
   const old = [event(-7200, "user.message"), event(-7199, "assistant.turn_start"), event(-7100, "assistant.turn_end")];
   await mkdir(join(f.directory, second));
   await writeFile(join(f.directory, second, "events.jsonl"), `${old.join("\n")}\n`);
-  const run = (time) => JSON.parse(f.run("--registry", f.file, "--active-since", time).stdout);
+  const run = (time: string) => JSON.parse(f.run("--registry", f.file, "--active-since", time).stdout);
 
   const late = run("2026-05-01T12:20:06Z");
   assert.equal(late.active_since, "2026-05-01T12:20:06.000Z");
   assert.deepEqual(late.started_before_window, [first]);
-  assert.deepEqual(late.sessions.map((item) => item.id), [first]);
+  assert.deepEqual(late.sessions.map((item: { id: string }) => item.id), [first]);
   const [session] = late.sessions;
   assert.equal(session.started_before_window, true);
   assert.equal(session.started_at, "2026-05-01T12:20:06.000Z");
@@ -137,7 +139,7 @@ test("--active-since includes sessions that started earlier and counts only the 
   assert.equal(late.totals.sessions, 1);
 
   const both = run("2026-05-01T10:01:00Z");
-  assert.deepEqual(both.sessions.map((item) => [item.id, item.started_before_window]), [[first, false], [second, true]]);
+  assert.deepEqual(both.sessions.map((item: { id: string; started_before_window: boolean }) => [item.id, item.started_before_window]), [[first, false], [second, true]]);
   assert.deepEqual(both.started_before_window, [second]);
   assert.equal(both.sessions[0].usage.cost, 3);
   assert.equal(run("2026-05-01T12:30:00Z").sessions.length, 0);

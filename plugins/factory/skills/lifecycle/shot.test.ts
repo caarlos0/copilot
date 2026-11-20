@@ -1,9 +1,9 @@
-const test = require("node:test");
-const assert = require("node:assert/strict");
-const { join } = require("node:path");
-const { spawnSync } = require("node:child_process");
+import test from "node:test";
+import assert from "node:assert/strict";
+import { join } from "node:path";
+import { spawnSync } from "node:child_process";
 
-const script = join(__dirname, "shot.mjs");
+const script = join(import.meta.dirname, "shot.mjs");
 const load = () => import("./shot.mjs");
 
 test("parseShotArgs applies defaults", async () => {
@@ -27,7 +27,7 @@ test("parseShotArgs reads widths, height, and browser", async () => {
 test("parseShotArgs rejects bad numbers and unknown flags", async () => {
   const { parseShotArgs } = await load();
   for (const argv of [["--widths", "abc"], ["--widths", "1280,"], ["--widths", "0"], ["--height", "-5"], ["--port", "1"]]) {
-    assert.throws(() => parseShotArgs(argv, {}), undefined, argv.join(" "));
+    assert.throws(() => parseShotArgs(argv, {}), undefined as never, argv.join(" "));
   }
 });
 

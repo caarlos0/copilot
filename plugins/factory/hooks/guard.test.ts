@@ -1,12 +1,12 @@
-const assert = require("node:assert/strict");
-const { spawnSync } = require("node:child_process");
-const { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } = require("node:fs");
-const { tmpdir } = require("node:os");
-const { join } = require("node:path");
-const { after, test } = require("node:test");
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { after, test } from "node:test";
+import hooks from "../hooks.json" with { type: "json" };
 
-const hooks = require("../hooks.json");
-const guard = join(__dirname, "guard.mjs");
+const guard = join(import.meta.dirname, "guard.mjs");
 
 const home = mkdtempSync(join(tmpdir(), "guard-home-"));
 const scratch = mkdtempSync(join(tmpdir(), "guard-tmp-"));
@@ -20,17 +20,17 @@ symlinkSync(join(home, ".local"), join(scratch, "link-to-state"));
 
 const env = { PATH: process.env.PATH, HOME: home, TMPDIR: scratch, FACTORY_COORDINATOR: "1" };
 
-function run(payload) {
+function run(payload: unknown) {
   const input = typeof payload === "string" ? payload : JSON.stringify(payload);
   const out = spawnSync("node", [guard], { input, encoding: "utf8", env });
   assert.equal(out.status, 0, out.stderr);
   return out.stdout ? JSON.parse(out.stdout) : null;
 }
 
-const bash = (command) => run({ toolName: "bash", toolArgs: { command }, cwd: home });
-const write = (toolName, path) => run({ toolName, toolArgs: { path, file_text: "x" }, cwd: home });
+const bash = (command: string) => run({ toolName: "bash", toolArgs: { command }, cwd: home });
+const write = (toolName: string, path: string) => run({ toolName, toolArgs: { path, file_text: "x" }, cwd: home });
 
-function denied(out, rule) {
+function denied(out: any, rule: string) {
   assert.equal(out?.permissionDecision, "deny", JSON.stringify(out));
   assert.match(out.permissionDecisionReason, new RegExp(`^factory guard rule ${rule}:`));
 }
@@ -150,7 +150,7 @@ test("allows unrelated tools and fails open on bad input", () => {
 
 const [entry] = hooks.hooks.preToolUse;
 
-function hook(envOverride, payload) {
+function hook(envOverride: Record<string, string>, payload: unknown) {
   return spawnSync("/bin/bash", ["-c", entry.bash], {
     input: JSON.stringify(payload),
     encoding: "utf8",
@@ -161,7 +161,7 @@ function hook(envOverride, payload) {
 const merge = { toolName: "bash", toolArgs: { command: "gh pr merge 1" }, cwd: home };
 
 const lockDir = join(scratch, "owner.repo-factory.lock");
-const factoryEnv = { PLUGIN_ROOT: join(__dirname, ".."), FACTORY_FILE: join(scratch, "owner.repo-factory.json") };
+const factoryEnv = { PLUGIN_ROOT: join(import.meta.dirname, ".."), FACTORY_FILE: join(scratch, "owner.repo-factory.json") };
 const owned = { ...merge, sessionId: "coordinator-session" };
 
 test("hooks.json runs the guard unless FACTORY_COORDINATOR=0", () => {
@@ -175,7 +175,7 @@ test("hooks.json runs the guard unless FACTORY_COORDINATOR=0", () => {
 });
 
 test("without the variable, only the session recorded in the owner lock is guarded", () => {
-  const guarded = (payload, extra = {}) => {
+  const guarded = (payload: unknown, extra: Record<string, string> = {}) => {
     const out = hook({ ...factoryEnv, ...extra }, payload);
     assert.equal(out.status, 0, out.stderr);
     return out.stdout ? JSON.parse(out.stdout) : null;

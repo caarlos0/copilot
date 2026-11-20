@@ -1,22 +1,22 @@
-const assert = require("node:assert/strict");
-const { readFileSync } = require("node:fs");
-const { mkdtemp, mkdir, readFile, rm, writeFile } = require("node:fs/promises");
-const { spawn } = require("node:child_process");
-const { join } = require("node:path");
-const { tmpdir } = require("node:os");
-const { test } = require("node:test");
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { test, type TestContext } from "node:test";
 
-const example = readFileSync(join(__dirname, "factory.example.json"), "utf8");
+const example = readFileSync(join(import.meta.dirname, "factory.example.json"), "utf8");
 const factoryFile = "owner.repo-factory.json";
 
-async function home(t, ...dirs) {
+async function home(t: TestContext, ...dirs: string[]) {
   const directory = await mkdtemp(join(tmpdir(), "factory-state-dir-test-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   for (const dir of dirs) await mkdir(join(directory, ".local/state", dir), { recursive: true });
   return directory;
 }
 
-const state = (directory, dir) => join(directory, ".local/state", dir);
+const state = (directory: string, dir: string) => join(directory, ".local/state", dir);
 const stateDir = () => import("./state-dir.mjs");
 
 test("stateDirectories lists the existing directories, new first, defaulting to the new one", async (t) => {
@@ -50,8 +50,8 @@ test("a new file belongs in the new directory", async (t) => {
   assert.equal((await stateDir()).stateFile(factoryFile, directory), join(state(directory, "copilot-factory"), factoryFile));
 });
 
-async function dashboard(t, directory) {
-  const child = spawn(process.execPath, [join(__dirname, "serve.mjs"), "--port", "0"], {
+async function dashboard(t: TestContext, directory: string) {
+  const child = spawn(process.execPath, [join(import.meta.dirname, "serve.mjs"), "--port", "0"], {
     env: { ...process.env, HOME: directory },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -60,7 +60,7 @@ async function dashboard(t, directory) {
     child.kill();
     await closed;
   });
-  return new Promise((resolve, reject) => {
+  return new Promise<string>((resolve, reject) => {
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk) => {
@@ -73,7 +73,7 @@ async function dashboard(t, directory) {
   });
 }
 
-const withProject = (project) => JSON.stringify({ ...JSON.parse(example), project });
+const withProject = (project: string) => JSON.stringify({ ...JSON.parse(example), project });
 
 test("the dashboard lists the factories of both directories, the new one winning a clash", async (t) => {
   const directory = await home(t, "copilot-coordinator", "copilot-factory");
@@ -85,9 +85,9 @@ test("the dashboard lists the factories of both directories, the new one winning
   await writeFile(join(current, "new.repo-factory.json"), withProject("new/repo"));
   const url = await dashboard(t, directory);
   const listing = await (await fetch(new URL("/api/factories", url))).json();
-  assert.deepEqual(listing.factories.map((item) => item.file).sort(),
+  assert.deepEqual(listing.factories.map((item: { file: string }) => item.file).sort(),
     ["legacy.repo-factory.json", "new.repo-factory.json", factoryFile]);
-  assert.equal(listing.factories.find((item) => item.file === factoryFile).project, "new/clash");
+  assert.equal(listing.factories.find((item: { file: string }) => item.file === factoryFile).project, "new/clash");
   assert.equal(listing.errors.length, 0);
   const served = await (await fetch(new URL(`/api/factory?file=${factoryFile}`, url))).json();
   assert.equal(served.project, "new/clash");
@@ -111,7 +111,7 @@ test("the dashboard serves and writes a factory that lives in the legacy directo
   });
   assert.equal(moved.status, 200);
   const written = JSON.parse(await readFile(file, "utf8"));
-  assert.equal(written.tasks.find((task) => task.id === "issue-5").state, "initial");
+  assert.equal(written.tasks.find((task: { id: string }) => task.id === "issue-5").state, "initial");
   await assert.rejects(readFile(join(state(directory, "copilot-factory"), factoryFile)), { code: "ENOENT" });
 });
 
@@ -123,7 +123,7 @@ test("the cached factory follows the file when it moves between directories", as
   const url = await dashboard(t, directory);
   const path = `/api/factory?file=${factoryFile}`;
   const first = await fetch(new URL(path, url));
-  const tag = first.headers.get("etag");
+  const tag = first.headers.get("etag")!;
   assert.equal((await first.json()).project, "legacy/repo");
   assert.equal((await fetch(new URL(path, url), { headers: { "If-None-Match": tag } })).status, 304);
 
@@ -140,7 +140,7 @@ test("the cached factory follows the file when it moves between directories", as
 
 test("the dashboard exits with the checked directories when none exists", async (t) => {
   const directory = await home(t);
-  await assert.rejects(dashboard(t, directory), (error) => {
+  await assert.rejects(dashboard(t, directory), (error: Error) => {
     assert.match(error.message, /exited 1/);
     assert.match(error.message, /No state directory exists/);
     assert.ok(error.message.includes(state(directory, "copilot-factory")));
@@ -153,7 +153,7 @@ test("the dashboard lists a state directory created after it started", async (t)
   const directory = await home(t, "copilot-coordinator");
   await writeFile(join(state(directory, "copilot-coordinator"), "legacy.repo-factory.json"), withProject("legacy/repo"));
   const url = await dashboard(t, directory);
-  const list = async () => (await (await fetch(new URL("/api/factories", url))).json()).factories.map((item) => item.file);
+  const list = async () => (await (await fetch(new URL("/api/factories", url))).json()).factories.map((item: { file: string }) => item.file);
   assert.deepEqual(await list(), ["legacy.repo-factory.json"]);
 
   await mkdir(state(directory, "copilot-factory"), { recursive: true });

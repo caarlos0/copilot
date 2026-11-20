@@ -1,17 +1,16 @@
-const assert = require("node:assert/strict");
-const { appendFile, chmod, mkdir, mkdtemp, open, readFile, rm, writeFile } = require("node:fs/promises");
-const { tmpdir } = require("node:os");
-const { delimiter, join } = require("node:path");
-const { test } = require("node:test");
-
-const fixtures = require("../../hooks/fixtures/session-log-events.json");
+import assert from "node:assert/strict";
+import { appendFile, chmod, mkdir, mkdtemp, open, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { delimiter, join } from "node:path";
+import { test, type TestContext } from "node:test";
+import fixtures from "../../hooks/fixtures/session-log-events.json" with { type: "json" };
 
 const requestedAt = "2026-05-01T12:00:00.000Z";
 const after = "2026-05-01T12:00:25.000Z";
 const before = "2026-05-01T11:59:00.000Z";
 const now = Date.parse("2026-05-01T12:10:00.000Z");
 
-async function setup(t) {
+async function setup(t: TestContext) {
   const directory = await mkdtemp(join(tmpdir(), "attention-test-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const state = join(directory, "session-state");
@@ -20,21 +19,21 @@ async function setup(t) {
   t.after(() => delete process.env.FACTORY_SESSION_STATE);
   const file = join(directory, "owner.repo-factory.json");
   await writeFile(file, JSON.stringify({ tasks: [{ id: "fix-it", title: "Fix the thing" }] }));
-  const { scanAttention, openAttention, resolveAttention } = await import("./attention.mjs");
+  const { scanAttention, openAttention, resolveAttention } = (await import("./attention.mjs")) as typeof import("./attention.ts");
 
   let n = 0;
-  const log = (type, data, at = requestedAt, task = null) =>
+  const log = (type: string, data: Record<string, unknown>, at = requestedAt, task: string | null = null) =>
     appendFile(join(directory, "owner.repo-factory-events.jsonl"), `${JSON.stringify({ id: `e${++n}`, at, type, task, source: "attention", data })}\n`);
-  const request = (session, extra = {}, at = requestedAt) =>
+  const request = (session: string, extra: Record<string, unknown> = {}, at = requestedAt) =>
     log("attention.requested", { session, kind: "sandbox-bypass", text: "Run command: ls", role: "implementation", pane: "block:aaaa", ...extra }, at, "fix-it");
-  const sessionLog = async (session, ...events) => {
+  const sessionLog = async (session: string, ...events: unknown[]) => {
     await mkdir(join(state, session), { recursive: true });
     await appendFile(join(state, session, "events.jsonl"), events.map((event) => `${JSON.stringify(event)}\n`).join(""));
   };
   // A fake `rex` first on PATH. The real one fails on `block ls -A --json`.
   const originalPath = process.env.PATH;
   t.after(() => { process.env.PATH = originalPath; });
-  const fakeRex = async (script) => {
+  const fakeRex = async (script: string) => {
     const bin = join(directory, "bin");
     await mkdir(bin, { recursive: true });
     await writeFile(join(bin, "rex"), `#!/bin/sh\n[ "$1" = "--autostart=false" ] && shift\n${script}\n`);
@@ -145,7 +144,7 @@ test("a pane missing from Rex resolves; a short ID matches; null skips the check
   await f.request("live", { pane: "block:01a1-live" });
   await f.request("nopane", { pane: undefined });
 
-  const run = async (panes) => (await f.scanAttention(f.file, { now, panes })).open.map((item) => item.session);
+  const run = async (panes: string[] | null) => (await f.scanAttention(f.file, { now, panes })).open.map((item) => item.session);
   assert.deepEqual(await run(["block:01a1-live"]), ["live", "nopane"]);
   assert.deepEqual(await run(["block:00000000-01a1-live"]), ["live", "nopane"]);
   assert.deepEqual(await run(null), ["gone", "live", "nopane"]);
@@ -195,7 +194,7 @@ test("an answer is found even when the session wrote more than one tail after it
   const f = await setup(t);
   await f.request("busy");
   await f.request("still-waiting");
-  const filler = (at) => ({ type: "assistant.message", data: { content: "x".repeat(1000) }, timestamp: at });
+  const filler = (at: string) => ({ type: "assistant.message", data: { content: "x".repeat(1000) }, timestamp: at });
   const later = Array.from({ length: 700 }, (_, i) => filler(new Date(Date.parse(after) + 1000 + i).toISOString()));
   const before = Array.from({ length: 700 }, (_, i) => filler(new Date(Date.parse(requestedAt) - 3_600_000 + i).toISOString()));
   await f.sessionLog("busy", ...before, { ...fixtures.permissionRequested, timestamp: requestedAt },

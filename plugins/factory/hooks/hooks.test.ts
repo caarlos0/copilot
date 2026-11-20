@@ -1,16 +1,15 @@
-const assert = require("node:assert/strict");
-const { spawnSync } = require("node:child_process");
-const { chmod, mkdtemp, readFile, rm, stat, symlink, writeFile } = require("node:fs/promises");
-const { tmpdir } = require("node:os");
-const { join } = require("node:path");
-const { test } = require("node:test");
-
-const hooks = require("../hooks.json");
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { chmod, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { test, type TestContext } from "node:test";
+import hooks from "../hooks.json" with { type: "json" };
 const [entry] = hooks.hooks.sessionStart;
 const jq = spawnSync("sh", ["-c", "command -v jq"], { encoding: "utf8" }).stdout.trim();
 const needsJq = { skip: jq ? false : "jq is not installed" };
 
-async function fixture(t, { rex = true } = {}) {
+async function fixture(t: TestContext, { rex = true } = {}) {
   const directory = await mkdtemp(join(tmpdir(), "hooks-test-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const calls = join(directory, "calls");
@@ -20,7 +19,7 @@ async function fixture(t, { rex = true } = {}) {
     await chmod(stub, 0o755);
   }
   await symlink(jq, join(directory, "jq"));
-  const run = (env) =>
+  const run = (env: Record<string, string>) =>
     // macOS bash sources ~/.bashrc when stdin is a socket, which Node's default pipe is.
     spawnSync("/bin/bash", ["-c", entry.bash], {
       encoding: "utf8",

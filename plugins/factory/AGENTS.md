@@ -169,7 +169,7 @@ The two observers only write a note in `$TMPDIR` (valid 30 seconds, used once).
 Any other notification type (`new_inbox_message`, `shell_completed`, and so on)
 is not a wait for the user. For these types the hook records nothing, and
 `attention.mjs` skips `other` items that older logs hold. Tests
-are in `hooks/attention.test.cjs`. The payloads are in `hooks/fixtures/`.
+are in `hooks/attention.test.ts`. The payloads are in `hooks/fixtures/`.
 
 Every worker launch carries the same deny flags (the worker deny constant).
 Keep it identical to the one in the lifecycle skill's "Launch rules". The flags
@@ -200,7 +200,7 @@ rule: the `task`, `read_agent`, `write_agent` and `run_dynamic_workflow` tools;
 commands `gh pr merge`, `git merge` without `--ff-only`, `rex new`, `rex session
 new|create|rename`, a `copilot` launch with `--autopilot` or without `--model
 claude-sonnet-5.5`. `guard.mjs` holds the rules in one table.
-`hooks/guard.test.cjs` tests them. The hook matches the command text only, so it
+`hooks/guard.test.ts` tests them. The hook matches the command text only, so it
 catches model slips, not a deliberate bypass (the hook unwraps `sh -c`; it does
 not unwrap a launcher script). It allows every other call and any call it cannot
 parse. The script path comes from `PLUGIN_ROOT`. If no root variable is set, the
@@ -391,7 +391,7 @@ running worker. The result has `counts` per category (`task`, `rule`, `worker`).
 It reports files over
 100 MB that no factory file names as `stale-large` and never deletes them.
 Artifacts stay flat. Grouping them under `<project>-tasks/<task>/` is a
-documented follow-up. Tests are in `archive.test.cjs`.
+documented follow-up. Tests are in `archive.test.ts`.
 
 PR watching goes through `skills/lifecycle/pr-watch.mjs`. The factory
 ships it, and workers call it by absolute path (like `broker.mjs`). It makes one
@@ -616,7 +616,7 @@ bundles import it. The dashboard loads only `dashboard.mjs` in the browser. So
 
 ## Validation
 
-Run `node --test plugins/factory/skills/lifecycle/*.test.cjs` from the
+Run `node --test plugins/factory/skills/lifecycle/*.test.ts` from the
 repository root for factory data, writer, migration, server, dashboard, and
-result notification changes. Run `node --test plugins/factory/hooks/*.test.cjs` for
+result notification changes. Run `node --test plugins/factory/hooks/*.test.ts` for
 the session, stop, and guard hooks.

@@ -1,14 +1,14 @@
-const assert = require("node:assert/strict");
-const { spawnSync } = require("node:child_process");
-const { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } = require("node:fs/promises");
-const { existsSync } = require("node:fs");
-const { tmpdir } = require("node:os");
-const { delimiter, join } = require("node:path");
-const { test } = require("node:test");
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { delimiter, join } from "node:path";
+import { test, type TestContext } from "node:test";
 
-const script = join(__dirname, "worktree.mjs");
+const script = join(import.meta.dirname, "worktree.mjs");
 
-async function fixture(t, { template = "{repoPath}/../wts/{repo}/{branch}" } = {}) {
+async function fixture(t: TestContext, { template = "{repoPath}/../wts/{repo}/{branch}" }: { template?: string | null } = {}) {
   const root = await realpath(await mkdtemp(join(tmpdir(), "worktree-test-")));
   t.after(() => rm(root, { recursive: true, force: true }));
   const home = join(root, "home");
@@ -23,14 +23,14 @@ async function fixture(t, { template = "{repoPath}/../wts/{repo}/{branch}" } = {
     COPILOT_HOME: join(home, ".copilot"),
     GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t",
   };
-  const git = (cwd, ...args) => {
+  const git = (cwd: string, ...args: string[]) => {
     const result = spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8", env });
     assert.equal(result.status, 0, result.stderr);
     return result.stdout.trim();
   };
   git(root, "init", "-q", "-b", "main", repo);
   git(repo, "commit", "-q", "--allow-empty", "-m", "base");
-  const helper = (cwd, ...args) => {
+  const helper = (cwd: string, ...args: string[]) => {
     const result = spawnSync(process.execPath, [script, ...args], { cwd, encoding: "utf8", env });
     let json = null;
     try {
@@ -194,7 +194,7 @@ test("run from a linked worktree, {repoPath} is the main checkout", async (t) =>
   assert.equal(second.json.path, join(f.root, "wts", "proj", "second"));
 });
 
-async function stubGh(f, url) {
+async function stubGh(f: Awaited<ReturnType<typeof fixture>>, url: string) {
   const bin = join(f.root, "bin");
   const calls = join(f.root, "gh-calls.txt");
   await mkdir(bin);
@@ -228,7 +228,7 @@ test("--pr refuses a PR from another repository", async (t) => {
   assert.equal(existsSync(join(f.root, "wts", "proj", "pr-12")), false);
 });
 
-async function squashed(t, { sha = (tip) => tip, merged = true } = {}) {
+async function squashed(t: TestContext, { sha = (tip: string) => tip, merged = true } = {}) {
   const f = await fixture(t);
   f.git(f.repo, "remote", "add", "origin", "git@github.com:acme/proj.git");
   const { path } = f.helper(f.repo, "create", "squashed").json;
@@ -243,7 +243,7 @@ echo '{"merged":${merged},"head":{"sha":"${sha(tip)}"}}'
 `);
   await chmod(join(bin, "gh"), 0o755);
   const env = { ...f.env, PATH: `${bin}${delimiter}${process.env.PATH}` };
-  const del = (...args) => {
+  const del = (...args: string[]) => {
     const result = spawnSync(process.execPath, [script, "delete", "squashed", ...args], { cwd: f.repo, encoding: "utf8", env });
     return { status: result.status, json: JSON.parse(result.stdout) };
   };
