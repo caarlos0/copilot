@@ -679,7 +679,7 @@ test("unchanged refresh updates elapsed labels without replacing expanded rows o
   await ui.run("refresh()");
   ui.run("choose('review')");
   const row = ui.get("task-list").children[0];
-  assert.equal(row.querySelector(".state").textContent, "review for 15m");
+  assert.equal(row.querySelector(".state").textContent, "started 15m ago");
   assert.match(row.textContent, /20h 35m ago/);
   const details = row.querySelectorAll("details");
   details.forEach((detail) => { detail.open = true; });
@@ -688,7 +688,7 @@ test("unchanged refresh updates elapsed labels without replacing expanded rows o
   await ui.run("refresh()");
   assert.equal(ui.get("task-list").children[0], row);
   assert.deepEqual(details.map((detail) => detail.open), [true, true]);
-  assert.equal(row.querySelector(".state").textContent, "review for 20m");
+  assert.equal(row.querySelector(".state").textContent, "started 20m ago");
   assert.match(row.textContent, /20h 40m ago/);
 
   await ui.get("close-detail").fire("click");
@@ -1236,6 +1236,22 @@ test("long histories fold older steps and keep them reachable across refreshes",
   assert.equal(reopened.children.find((child) => child.className === "history-earlier").open, true);
 });
 
+test("a resolved task shows how long ago it resolved", async (t) => {
+  const ui = await dashboard(t, { now: Date.parse("2026-05-01T12:05:00Z") });
+  const data = structuredClone(example);
+  const task = data.tasks.find((task) => task.state === "resolved");
+  task.history.at(-1).at = "2026-05-01T12:02:00Z";
+  await writeFile(join(ui.directory, factoryFile), JSON.stringify(data));
+  await ui.run("refresh()");
+  ui.run("choose('resolved')");
+  const row = ui.get("task-list").children.find((node) => node.textContent.includes(task.title));
+  assert.equal(row.querySelector(".state").textContent, "resolved 3m ago");
+
+  ui.setNow(Date.parse("2026-05-01T12:07:00Z"));
+  await ui.run("refresh()");
+  assert.equal(row.querySelector(".state").textContent, "resolved 5m ago");
+});
+
 test("resolved sublists count each outcome and open only matching tasks", async (t) => {
   const ui = await dashboard(t, { reducedMotion: false });
   const data = structuredClone(example);
@@ -1419,7 +1435,7 @@ test("Unblock lists options, fills the comment verbatim and saves through the mo
   const state = form.querySelector("select");
   const comment = form.querySelector("textarea");
   const context = form.querySelector(".unblock-context");
-  assert.equal(context.children[0].textContent.startsWith("Blocked in investigation for "), true);
+  assert.equal(context.children[0].textContent.startsWith("Blocked in investigation, started "), true);
   const reason = context.querySelector(".unblock-reason");
   assert.equal(reason.textContent, "The docs build needs a token that the worker cannot read.");
   assert.equal(reason.tabIndex, 0);
@@ -1506,7 +1522,7 @@ test("Unblock without options shows only the state and the comment; other rows k
   const reason = form.querySelector(".unblock-reason");
   assert.equal(reason.textContent, "<b>Old</b> blocker");
   assert.equal(reason.querySelectorAll("b").length, 0);
-  assert.match(form.querySelector(".unblock-context").textContent, /^Blocked in implementation for /);
+  assert.match(form.querySelector(".unblock-context").textContent, /^Blocked in implementation, started .+? ago/);
   await ui.get("close-move").fire("click");
   ui.run("choose('initial')");
   assert.equal(ui.get("task-list").querySelector(".move").textContent, "Move");

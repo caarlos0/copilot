@@ -1342,8 +1342,8 @@
 
       function blockContext(task) {
         const { from, reason, since } = task.blocker;
-        const heading = element("p", `Blocked in ${from} for `, "muted");
-        heading.append(elapsedLabel(since));
+        const heading = element("p", `Blocked in ${from}, started `, "muted");
+        heading.append(elapsedLabel(since, " ago"));
         const body = rich("p", reason, "unblock-reason");
         body.tabIndex = 0;
         body.setAttribute("role", "region");
@@ -1641,8 +1641,8 @@
           node.append(links);
         }
         const chips = element("p", null, "chips");
-        const stateAge = element("span", `${task.state} for `, "chip state");
-        stateAge.append(elapsedLabel(entered(task)));
+        const stateAge = element("span", task.state === "resolved" ? "resolved " : "started ", "chip state");
+        stateAge.append(elapsedLabel(entered(task), " ago"));
         chips.append(stateAge);
         if (cycles) chips.append(element("span", `${cycles} review ${cycles === 1 ? "cycle" : "cycles"}`, "chip"));
         for (const [label, sha] of [["head", task.head], ["reviewed", task.reviewed_head]]) {
