@@ -338,7 +338,8 @@ test("conflicts and publish failures preserve concurrent state and remove staged
             return read(...args);
           };
         ` : `
-          fs.rename = async () => { throw new Error("injected rename failure"); };
+          const callbacks = (await import("node:fs")).default;
+          callbacks.rename = (from, to, callback) => callback(new Error("injected rename failure"));
         `}
         syncBuiltinESMExports();
       `;

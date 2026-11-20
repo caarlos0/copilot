@@ -1,7 +1,7 @@
-import { randomUUID } from "node:crypto";
-import { open, readFile, rename, rm } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { basename, extname, resolve } from "node:path";
 import { parseArgs } from "node:util";
+import writeFileAtomic from "write-file-atomic";
 import { validate } from "./board-data.mjs";
 
 type Json = Record<string, any>;
@@ -110,21 +110,10 @@ async function update(file: string, values: Values) {
       task.id === values.task || task.status !== "done" || Date.parse(task.updated_at) >= cutoff);
   }
 
-  const temporary = `${file}.${randomUUID()}.tmp`;
-  const handle = await open(temporary, "wx", 0o600);
-  try {
-    try {
-      await handle.writeFile(`${JSON.stringify(current, null, 2)}\n`);
-    } finally {
-      await handle.close();
-    }
-    if (await readOptional(file) !== original) {
-      throw new Error("Handoff changed during update. Reread it and reconcile before retrying.");
-    }
-    await rename(temporary, file);
-  } finally {
-    await rm(temporary, { force: true });
+  if (await readOptional(file) !== original) {
+    throw new Error("Handoff changed during update. Reread it and reconcile before retrying.");
   }
+  await writeFileAtomic(file, `${JSON.stringify(current, null, 2)}\n`, { mode: 0o600 });
 }
 
 async function main() {
