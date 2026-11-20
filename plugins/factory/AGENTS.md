@@ -478,7 +478,14 @@ whose window is open or whose status is still `running` (`rule-worker-done`),
 the factory relaunches them in their existing worktrees, never creating or
 renaming a session), `running` workers of resolved tasks (`stale-running`, with the
 `factory.mjs` fix command; the writer sets every worker of a task to `closed` when it
-moves to `resolved`, unless the write sets a status), a task blocked longer than
+moves to `resolved`, unless the write sets a status), tasks that hold one piece of work
+(`duplicate-task`: one task's issue or PR is in the other's `issue`, `pr` or `links`, or
+`gh pr view --json closingIssuesReferences` and a `Fixes #N` in the body say an open PR task
+closes the other's issue, skipped without error when `gh` fails; the finding names `keep`,
+`merge` and the `factory.mjs --merge-task KEEP --from OTHER` command, which resolves the
+other task as `duplicate` with `details.merged_into` and moves its issue, PR and links; it
+refuses two running workers and merged tasks; `factory.mjs` also refuses a new task whose
+issue or PR is in another open task's `links`), a task blocked longer than
 `--blocked-after` (default 24h; `stale-blocked`, naming its blocker class and owner),
 an attention item open longer than `--attention-after` (default 30m;
 `attention-stale`, naming task, kind, text and pane), a decided `improve` proposal whose result file

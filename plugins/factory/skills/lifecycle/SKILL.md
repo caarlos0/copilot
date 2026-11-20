@@ -360,6 +360,21 @@ leave work behind. Treat each finding as unfinished work:
   default branch, or it has a merged PR. If `created_by_run` is true, remove it with
   `worktree.mjs delete NAME` as in "Release panes"; for a task with a PR the finding
   carries the exact `command`, which has `--merged-pr URL`. Leave a reused worktree (`false`).
+- `duplicate-task`: two or more tasks hold one piece of work: the issue or PR of one
+  is in the other's `issue`, `pr` or `links`, or GitHub says an open PR task closes
+  another task's issue (`gh pr view --json closingIssuesReferences`, and `Fixes #N`,
+  `Closes #N`, `Resolves #N` in the body; skipped without error when `gh` fails).
+  Merged-PR tasks and tasks already merged away are never listed. It names `keep` (the
+  furthest along: review, implementation, investigation, initial; then the one with a
+  PR; then the older), `merge` (the other IDs) and the exact `command`. Before you run
+  it, note the `window` and `pane` of every worker of the tasks in `merge`: the write
+  sets those workers to `closed`. Run the `command`: `factory.mjs --merge-task KEEP --from OTHER`
+  resolves OTHER as `duplicate` with `details.merged_into`, and moves its issue, PR and
+  links to KEEP, which keeps its own workers, worktree and state. Then close the panes of the
+  merged tasks as in "Release panes" (resolved without a merge). If both tasks have a
+  running worker, the write refuses: park one worker first (`--workers` with
+  status `idle`, after verifying it is idle and nothing is unpushed), then run the command
+  again.
 - `stale-blocked`: a task has been `blocked` longer than `--blocked-after`
   (default `24h`; `30m`, `6h`, `2d`). It names the blocker `class` and `owner`
   (null for an old blocker without them). Check whether the cause is now
@@ -487,6 +502,14 @@ or a separate Lever run just to use its skills.
 
 Skip an issue or PR that another task already holds. Task IDs are
 `issue-<number>`. For another repository, use `issue-<owner.repo>-<number>`.
+
+When you take in every issue and PR of a repo, one PR often fixes one issue, so
+two tasks can hold one piece of work. Before you add a task for a PR, check
+whether an open task already names its issue (and the reverse). The helper
+refuses a new task whose issue or PR is in another open task's `links`, and
+names that task; work on it instead. Tasks that are already duplicates surface
+as `duplicate-task` findings, and the factory merges them with
+`factory.mjs --merge-task KEEP --from OTHER` (see "Write before action; reconcile with reality").
 
 ### Archived work
 
