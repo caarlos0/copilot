@@ -51,6 +51,13 @@ test("is silent and skips rex when REX_SESSION is unset", needsJq, async (t) => 
   await assert.rejects(stat(calls), { code: "ENOENT" });
 });
 
+test("every hook keeps the 25 second timeout", () => {
+  // A busy host stalls a hook past 5 seconds; Copilot then reports the hook as failed.
+  for (const [event, list] of Object.entries(hooks.hooks)) {
+    for (const hook of list) assert.equal(hook.timeoutSec, 25, event);
+  }
+});
+
 test("is silent when rex is not installed", needsJq, async (t) => {
   const { run } = await fixture(t, { rex: false });
   const out = run({ REX_SESSION: "session:x" });

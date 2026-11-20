@@ -5,7 +5,7 @@
       {
         "type": "command",
         "bash": "[ -n \"$REX_SESSION\" ] && command -v rex >/dev/null && command -v jq >/dev/null || exit 0; context=$(rex __internal session-start --agent=copilot --feature-session-naming=false) && jq -n --arg context \"$context\" '{additionalContext: $context}'",
-        "timeoutSec": 5
+        "timeoutSec": 25
       }
     ],
     "preToolUse": [
