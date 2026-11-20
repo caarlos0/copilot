@@ -1489,28 +1489,15 @@ skill and run it from that directory:
 node serve.mjs
 ```
 
-Bun can run it too. No package install is needed. It binds to `127.0.0.1` with
-no token, uses port 8766 (`--port PORT` to change it), and prints its URL. It
-lists the factories of both `~/.local/state/copilot-factory/` and the legacy
-`~/.local/state/copilot-coordinator/` (the new one wins on a name clash);
-`--directory PATH` uses only that directory. Do not stop another process to
-take a port. Share the printed HTTP URL, not a `file://` link. Do not open the
-browser for the user.
+It binds to `127.0.0.1` on port 8766 and prints its URL; `--help` lists
+the options. By default it lists the factories of both state directories;
+`--directory PATH` uses only that directory. Do not stop another process to take
+a port. Share the printed HTTP URL, not a `file://` link. Do not
+open the browser for the user.
 
-`--host ADDR` (for example `0.0.0.0`, to reach the dashboard from another
-device such as a phone) binds that address instead. Any non-loopback `--host`
-requires an access token on every request. The token is random, saved (mode
-0600) as `dashboard-token` in the state directory on the first start, and reused
-on later starts, so a restart keeps the phone's cookie valid; delete the file to
-rotate it. `--token TOKEN` overrides it and is not saved. The startup output lists a ready URL with the token
-(`http://<LAN-IP>:PORT/?token=...`) for each non-internal IPv4 address, and
-warns that plain HTTP carries the token in clear text, so only use this on a
-trusted network. A browser that opens the printed URL gets a cookie (30 days)
-and no longer needs the token in the address bar. A browser page request
-without a valid token gets a login form instead of an error; the form posts to
-`/login`. Other clients send `Authorization: Bearer TOKEN` and get a JSON 401
-without it. Only use `--host` when the user asks to reach the
-dashboard from another device.
+Use `--host ADDR` only when the user asks to reach the dashboard from another
+device. The server then requires a token and prints how to use it; see
+`AGENTS.md` for the rules.
 
 The page shows the flow with a task count per state, task lists, the read-only
 "Find work" panel, the "Waiting for you" list (an `ask_user` question has one button per option; the user's click, never the coordinator, types it into the pane), Move and Unblock, settings, a Cmd+K palette, and an `r` refresh key (see
