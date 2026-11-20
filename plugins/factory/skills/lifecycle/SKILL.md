@@ -1337,8 +1337,12 @@ Rules:
    so there is never a duplicate. `wait` records its PID in
    `<owner.repo>-factory-waiter.pid` beside the factory file and removes it on
    exit; `armed` and the `no-waiter` finding of `reconcile.mjs` read it. A
-   process that died, or a PID reused by another command, leaves a stale file,
-   which counts as no waiter.
+   process that died, a PID reused by another command, or a waiter whose parent
+   is gone (ppid 1, an orphan) leaves a stale file, which counts as no waiter.
+   Run `wait` only as async bash. Never add `&`, `nohup`, `setsid`, `disown` or
+   an output redirect: nobody reads that output, so the wake never reaches you.
+   `wait` refuses to start with stdout sent to a file or `/dev/null`, and the
+   guard hook denies the other forms.
 4. Use the tool's completion notification to resume. Reconcile dashboard
    direction first, then handle each event in order. For a `worker.result`,
    read the result file named in `data.result`, verify its feedback ID and

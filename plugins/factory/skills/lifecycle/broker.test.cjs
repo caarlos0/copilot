@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const { spawn, spawnSync } = require("node:child_process");
-const { writeFileSync } = require("node:fs");
-const { mkdtemp, readFile, rename, rm, stat, writeFile } = require("node:fs/promises");
+const { closeSync, openSync, writeFileSync } = require("node:fs");
+const { mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } = require("node:fs/promises");
 const { tmpdir } = require("node:os");
 const { basename, dirname, join } = require("node:path");
 const { test } = require("node:test");
@@ -554,6 +554,41 @@ test("a recycled PID in the waiter file counts as no waiter, and a waiter-lookin
   t.after(() => lookalike.kill());
   await writeFile(pidFile, `${lookalike.pid}\n`);
   assert.deepEqual(JSON.parse(f.run("armed", f.factory).stdout), { armed: true, pid: lookalike.pid });
+});
+
+test("a waiter whose parent is gone (ppid 1) counts as no waiter", async (t) => {
+  const f = await fixture(t);
+  const bin = join(f.directory, "bin");
+  await mkdir(bin);
+  // A fake ps reports the parent PID from $FAKE_PPID, so the test needs no real ps or orphan.
+  await writeFile(join(bin, "ps"), `#!/bin/sh\necho "  $FAKE_PPID node broker.mjs wait /f.json"\n`, { mode: 0o755 });
+  const armed = (ppid) => spawnSync(process.execPath, [script, "armed", f.factory], {
+    encoding: "utf8",
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, FAKE_PPID: String(ppid) },
+  });
+  const idle = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { stdio: "ignore" });
+  t.after(() => idle.kill());
+  await writeFile(join(f.directory, "owner.repo-factory-waiter.pid"), `${idle.pid}\n`);
+
+  const orphan = armed(1);
+  assert.equal(orphan.status, 1);
+  assert.deepEqual(JSON.parse(orphan.stdout), { armed: false });
+  const owned = armed(process.pid);
+  assert.equal(owned.status, 0);
+  assert.deepEqual(JSON.parse(owned.stdout), { armed: true, pid: idle.pid });
+});
+
+test("wait refuses to start when stdout goes to a file or /dev/null", async (t) => {
+  const f = await fixture(t);
+  const file = join(f.directory, "out.txt");
+  const fd = openSync(file, "w");
+  t.after(() => closeSync(fd));
+  for (const stdout of ["ignore", fd]) {
+    const out = spawnSync(process.execPath, [script, "wait", f.factory, "--timeout", "1"], { encoding: "utf8", stdio: ["ignore", stdout, "pipe"] });
+    assert.equal(out.status, 2, `stdout ${stdout}`);
+    assert.match(String(out.stderr), /never background it/);
+  }
+  assert.equal(f.run("armed", f.factory).status, 1);
 });
 
 test("--due returns reconcile.due after the injected interval while the run is active", async (t) => {

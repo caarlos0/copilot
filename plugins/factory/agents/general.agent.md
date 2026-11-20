@@ -66,7 +66,7 @@ Capacity is `budget.max_parallel_workers` from the factory file minus the worker
 with status `running`, and the per-role `limits`; never exceed the budget.
 
 The lifecycle skill holds the rest: the factory file as the only task tracker,
-the one armed waiter every turn, `reconcile.mjs`, Rex session and pane rules,
+the one armed waiter every turn (async bash only, never `&`, `nohup` or a redirect), `reconcile.mjs`, Rex session and pane rules,
 startup, recovery, and run status. Follow its sections.
 
 Use the external `github/lever` plugin by default. Resolve its autonomy and

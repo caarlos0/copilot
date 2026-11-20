@@ -67,6 +67,15 @@ test("denies bash rule breaks and names the rule", () => {
     ],
     [`echo "$(gh pr merge 1)"`, "gh-pr-merge"],
     ["echo `gh pr merge 1`", "gh-pr-merge"],
+    ["node /p/broker.mjs wait /f.json --since 1 &", "waiter-async-bash"],
+    ["node /p/broker.mjs wait /f.json --since 1 2>&1 &", "waiter-async-bash"],
+    ["cd /r && node /p/broker.mjs wait /f.json & disown", "waiter-async-bash"],
+    ["nohup node /p/broker.mjs wait /f.json", "waiter-async-bash"],
+    ["setsid node /p/broker.mjs wait /f.json", "waiter-async-bash"],
+    ["node /p/broker.mjs wait /f.json > /dev/null", "waiter-async-bash"],
+    ["node /p/broker.mjs wait /f.json >$TMPDIR/w.json 2>&1", "waiter-async-bash"],
+    ["node /p/broker.mjs wait /f.json &> out.txt", "waiter-async-bash"],
+    ["sh -c 'node /p/broker.mjs wait /f.json &'", "waiter-async-bash"],
   ];
   for (const [command, rule] of cases) denied(bash(command), rule);
 });
@@ -91,6 +100,13 @@ test("allows near misses", () => {
     "copilot --model claude-sonnet-5.5 --deny-tool='shell(git stash)' --deny-tool='shell(rex window:*)' -i 'x'",
     `rex window new -c "$(echo "$WT" | jq -r .path)" -- env FACTORY_TASK=x copilot --model claude-sonnet-5.5 --yolo -i "b"`,
     "echo gh pr merge is forbidden",
+    "node /p/broker.mjs wait /f.json --since 1 --exclude-source coordinator --due",
+    "node /p/broker.mjs wait /f.json 2>&1",
+    "node /p/broker.mjs wait /f.json 2>/dev/null",
+    "node /p/broker.mjs cursor /f.json > $TMPDIR/c.json",
+    "node /p/broker.mjs emit /f.json worker.result & node /p/broker.mjs armed /f.json",
+    "git status && node /p/broker.mjs armed /f.json",
+    "echo nohup node /p/broker.mjs wait",
     "ls",
   ];
   for (const command of allowed) assert.equal(bash(command), null, command);

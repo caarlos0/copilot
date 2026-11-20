@@ -33,6 +33,12 @@ const BASH_RULES: Rule[] = [
     deny: (c) => /^rex\s+new\b/.test(c) || /^rex\s+session\s+(?:new|create|rename)\b/.test(c),
   },
   {
+    name: "waiter-async-bash",
+    reason:
+      "arm `broker.mjs wait` as async bash and read its output; a waiter run with `&`, nohup, setsid, disown or stdout redirected is orphaned or unread, so its wake never reaches you",
+    deny: (c) => /^(?:\S*\/)?(?:node|bun)\s+\S*broker\.mjs\s+wait\b/.test(c) && (/\s&$/.test(c) || /(?:^|\s)(?:1|&)?>>?\s*(?!&)\S/.test(c)),
+  },
+  {
     name: "copilot-autopilot",
     reason: "workers never run with --autopilot",
     deny: (c) => isCopilot(c) && /\s--autopilot\b/.test(c),
@@ -84,7 +90,16 @@ function split(line: string) {
     } else if (ch === "'" || ch === '"') {
       quote = ch;
       cur += ch;
-    } else if ("\n;&|(`".includes(ch)) {
+    } else if (ch === "&" && line[i + 1] === "&") {
+      segs.push(cur);
+      cur = "";
+      i++;
+    } else if (ch === "&" && (line[i + 1] === ">" || cur.endsWith(">") || cur.endsWith("<"))) {
+      cur += ch;
+    } else if (ch === "&") {
+      segs.push(`${cur} &`);
+      cur = "";
+    } else if ("\n;|(`".includes(ch)) {
       segs.push(cur);
       cur = "";
     } else {
@@ -102,8 +117,11 @@ function commands(line: string): string[] {
   const { segs, subs } = split(line);
   for (const sub of subs) out.push(...commands(sub));
   for (let seg of segs) {
-    seg = seg.trim().replace(/^(?:(?:\w+=\S*|sudo|env|command|exec|time|nohup)\s+)+/, "");
+    // nohup and setsid detach the command like a trailing `&`.
+    const detached = /^(?:(?:\w+=\S*|sudo|env|command|exec|time)\s+)*(?:nohup|setsid)\s/.test(seg.trim());
+    seg = seg.trim().replace(/^(?:(?:\w+=\S*|sudo|env|command|exec|time|nohup|setsid)\s+)+/, "");
     if (!seg) continue;
+    if (detached && !seg.endsWith(" &")) seg += " &";
     out.push(seg);
     const inner =
       seg.match(/^rex\b.*?\s--\s+(.+)$/)?.[1] ?? seg.match(/^(?:ba|z)?sh\s+(?:-\w+\s+)*-c\s+(.+)$/)?.[1];

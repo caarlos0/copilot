@@ -461,8 +461,12 @@ completion, and a user message alike. Arm it first in a turn with a long step,
 not last. `wait` records its PID in `<owner.repo>-factory-waiter.pid` beside
 the factory file and removes it on exit. A second `wait` for the same factory
 is refused with exit 1 unless the first PID is dead, or no longer belongs to a
-`broker.mjs wait` process (a recycled PID; checked with `ps -o command=`, and a
-live PID counts as the waiter when `ps` cannot run, as in some sandboxes). The
+`broker.mjs wait` process (a recycled PID; checked with `ps -o ppid=,command=`, and a
+live PID counts as the waiter when `ps` cannot run, as in some sandboxes). An orphaned
+waiter (ppid 1, its parent gone) is not armed either: nobody reads its output, so its
+wake never reaches the agent. `wait` itself exits 2 when stdout is a file or `/dev/null`,
+and the guard rule `waiter-async-bash` denies a bash `broker.mjs wait` with `&`, `nohup`,
+`setsid` or a redirect. The
 file stays a bare PID. `broker.mjs armed FILE`
 exits 0 when a waiter is alive and 1 otherwise, and `reconcile.mjs` reports
 `no-waiter` while the run is `active` or a task is open. Keep the rule in the

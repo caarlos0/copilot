@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { readFileSync, unlinkSync, watch } from "node:fs";
+import { fstatSync, readFileSync, statSync, unlinkSync, watch } from "node:fs";
 import type { FSWatcher } from "node:fs";
 import { link, open, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve } from "node:path";
@@ -63,13 +63,25 @@ class UsageError extends Error {}
 
 function isWaiter(pid: number) {
   if (!alive(pid)) return false;
-  // A reused PID is alive but not a waiter. When ps cannot run (some sandboxes),
-  // the process cannot be identified, so it counts as the waiter.
+  // A reused PID is alive but not a waiter. An orphan (parent gone, so ppid 1) has no
+  // reader for its output: its wake can never reach the agent. When ps cannot run
+  // (some sandboxes), the process cannot be identified, so it counts as the waiter.
   try {
-    const command = execFileSync("ps", ["-o", "command=", "-p", String(pid)], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
-    return /broker\.mjs\s+wait\b/.test(command);
+    const line = execFileSync("ps", ["-o", "ppid=,command=", "-p", String(pid)], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    const [, ppid, command] = line.match(/^\s*(\d+)\s+(.*)$/s) ?? [];
+    return command !== undefined && /broker\.mjs\s+wait\b/.test(command) && Number(ppid) > 1;
   } catch {
     return true;
+  }
+}
+
+// Output sent to a file or /dev/null is never read, so the agent would not be woken.
+function stdoutUnread() {
+  try {
+    const out = fstatSync(1);
+    return out.isFile() || (out.isCharacterDevice() && out.rdev === statSync("/dev/null").rdev);
+  } catch {
+    return false;
   }
 }
 
@@ -463,8 +475,10 @@ cursor  Prints {"cursor":"N"} for the current end of the log.
 armed   Read-only. Prints {"armed":true,"pid":N} and exits 0 when a waiter for this factory is
         alive, or {"armed":false} and exits 1 when none is. wait records its PID in
         <owner.repo>-factory-waiter.pid and removes it on exit; a PID file whose process is
-        gone, or whose command line (ps -o command=) is not "broker.mjs wait", is stale (a
-        recycled PID). Without a usable ps, a live PID counts as the waiter. A second wait for
+        gone, whose command line (ps -o command=) is not "broker.mjs wait" (a recycled PID),
+        or whose parent is gone (ppid 1: an orphan nobody reads), is stale. wait itself refuses
+        to start with stdout sent to a file or /dev/null. Without a usable ps, a live PID
+        counts as the waiter. A second wait for
         the same factory refuses with exit 1 unless the first is stale, so there is exactly one
         waiter. A turn must never end while armed exits 1.
 
@@ -537,6 +551,9 @@ async function main() {
       console.log(JSON.stringify(pid === null ? { armed: false } : { armed: true, pid }));
       if (pid === null) process.exitCode = 1;
     } else {
+      if (stdoutUnread()) {
+        throw new UsageError("wait refuses to run with stdout sent to a file or /dev/null: nobody would read the wake. Run it as async bash and read its output; never background it with & or nohup.");
+      }
       console.log(JSON.stringify(await waitForEvents(factory, waitOptions)));
     }
   } catch (error) {
