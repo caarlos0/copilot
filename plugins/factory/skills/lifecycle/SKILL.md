@@ -181,7 +181,8 @@ Resolve it beside this loaded skill and run it with Node or Bun. Never
 hand-edit the file or use ad hoc scripts. Hold the owner lock for agent writes.
 The helper takes a separate, short-lived `<file>.write.lock` for each write.
 On a busy lock, reread and reconcile; never retry a stale decision blindly.
-Remove a stale write lock only after verifying no writer is active.
+The lock holds its owner's PID, and the helper clears it automatically when that process is dead.
+A lock with no PID is cleared after 10 minutes; remove it sooner only after verifying no writer is active.
 
 ```sh
 FILE=~/.local/state/copilot-factory/owner.repo-factory.json

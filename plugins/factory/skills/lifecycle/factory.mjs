@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { open, readFile, realpath, rename, rm } from "node:fs/promises";
+import { open, readFile, realpath, rename, rm, stat } from "node:fs/promises";
 import { basename, extname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
@@ -483,6 +483,48 @@ async function locateSessions(current, previous, launches, now, track) {
   }
 }
 
+const lockMaxAge = 10 * 60 * 1000;
+
+function alive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === "EPERM";
+  }
+}
+
+// The lock holds its owner's PID. A dead owner leaves a stale lock. A lock with no PID
+// (old format, or its owner stopped before writing it) is stale only after ten minutes.
+async function lockOwner(lockFile) {
+  try {
+    const pid = Number.parseInt(await readFile(lockFile, "utf8"), 10);
+    if (Number.isInteger(pid) && pid > 0) return alive(pid) ? { pid } : null;
+    return Date.now() - (await stat(lockFile)).mtimeMs > lockMaxAge ? null : { pid: null };
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+async function takeLock(lockFile) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const lock = await open(lockFile, "wx", 0o600);
+      await lock.writeFile(`${process.pid}\n`);
+      return lock;
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+    }
+    const owner = await lockOwner(lockFile);
+    if (owner) {
+      throw new ConflictError(`Factory write is locked${owner.pid ? ` by pid ${owner.pid}` : ""}. Reread before retrying; remove a .write.lock with no pid only after verifying no writer is active.`);
+    }
+    await rm(lockFile, { force: true });
+  }
+  throw new ConflictError("Factory write is locked by another writer. Reread before retrying.");
+}
+
 export async function update(file, values, { operator = false, source = operator ? "dashboard" : "coordinator" } = {}) {
   try {
     file = await realpath(file);
@@ -491,13 +533,7 @@ export async function update(file, values, { operator = false, source = operator
     file = await resolveFactory(file);
   }
   const lockFile = `${file}.write.lock`;
-  let lock;
-  try {
-    lock = await open(lockFile, "wx", 0o600);
-  } catch (error) {
-    if (error.code !== "EEXIST") throw error;
-    throw new ConflictError("Factory write is locked. Reread before retrying; remove a stale .write.lock only after verifying no writer is active.");
-  }
+  const lock = await takeLock(lockFile);
   try {
     return await writeFactory(file, values, operator, source);
   } finally {

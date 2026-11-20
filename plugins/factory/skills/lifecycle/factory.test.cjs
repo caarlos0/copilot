@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const { readFileSync } = require("node:fs");
-const { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } = require("node:fs/promises");
+const { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, utimes, writeFile } = require("node:fs/promises");
 const { spawnSync } = require("node:child_process");
 const { join } = require("node:path");
 const { tmpdir } = require("node:os");
@@ -386,6 +386,27 @@ test("a rejected move leaves the file unchanged", async (t) => {
   f.fails(/cannot move/, "--task", "issue-1", "--state", "review");
   assert.equal(await readFile(f.file, "utf8"), before);
   assert.deepEqual(await readdir(f.directory), ["owner.repo-factory-events.jsonl", "owner.repo-factory.json"]);
+});
+
+test("a write lock whose owner died is replaced; a live or fresh unowned lock refuses", async (t) => {
+  const f = await started(t);
+  const lock = `${f.file}.write.lock`;
+  const dead = spawnSync(process.execPath, ["-e", ""]).pid;
+  await writeFile(lock, `${dead}\n`);
+  f.ok("--task", "issue-1", "--next-action", "after stale lock");
+  assert.equal((await f.read()).tasks[0].next_action, "after stale lock");
+  await assert.rejects(stat(lock), { code: "ENOENT" });
+
+  await writeFile(lock, `${process.pid}\n`);
+  f.fails(new RegExp(`locked by pid ${process.pid}\\b`), "--task", "issue-1", "--next-action", "refused");
+  await writeFile(lock, "");
+  f.fails(/Factory write is locked\./, "--task", "issue-1", "--next-action", "refused");
+  assert.equal((await f.read()).tasks[0].next_action, "after stale lock");
+
+  const old = new Date(Date.now() - 11 * 60 * 1000);
+  await utimes(lock, old, old);
+  f.ok("--task", "issue-1", "--next-action", "after old lock");
+  await assert.rejects(stat(lock), { code: "ENOENT" });
 });
 
 test("blocked needs a reason that is cleared on leaving; resolved needs an outcome", async (t) => {

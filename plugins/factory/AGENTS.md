@@ -194,7 +194,8 @@ State is one `<owner.repo>-factory.json` (`factory/v1`) per project under
 `~/.local/state/copilot-factory/` (or the legacy `~/.local/state/copilot-coordinator/`,
 resolved per file), with one agent owner guarded by
 `<project>-factory.lock`. Agent and dashboard writes share `factory.mjs` and
-its short-lived `<file>.write.lock`. It validates the
+its short-lived `<file>.write.lock`, which holds the owner PID; a dead owner's
+lock is cleared, and a lock with no PID after 10 minutes. It validates the
 state flow (`initial`, `investigation`, `implementation`, `review`, `blocked`,
 `resolved`), keeps history, and replaces the file atomically. A task links a
 GitHub issue, or has `issue: null` for work without one. An issue-less task
