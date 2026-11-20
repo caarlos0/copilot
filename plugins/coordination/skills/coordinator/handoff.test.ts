@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { test } from "node:test";
 import type { TestContext } from "node:test";
 
-const script = join(import.meta.dirname, "handoff.mjs");
+const script = join(import.meta.dirname, "coordinator.mjs");
 const example = JSON.parse(readFileSync(join(import.meta.dirname, "handoff.example.json"), "utf8"));
 
 async function fixture(t: TestContext, data: any = example, now?: string) {
@@ -26,7 +26,7 @@ async function fixture(t: TestContext, data: any = example, now?: string) {
     directory,
     file,
     read: async () => JSON.parse(await readFile(file, "utf8")),
-    run: (...args: string[]) => spawnSync(process.execPath, [...nodeArgs, script, file, ...args], { encoding: "utf8" }),
+    run: (...args: string[]) => spawnSync(process.execPath, [...nodeArgs, script, "handoff", file, ...args], { encoding: "utf8" }),
   };
 }
 
@@ -331,7 +331,7 @@ test("conflicts and publish failures preserve concurrent state and remove staged
       const hook = `
         import fs from "node:fs/promises";
         import { syncBuiltinESMExports } from "node:module";
-        const file = process.argv[2];
+        const file = process.argv[3];
         const read = fs.readFile;
         let reads = 0;
         ${item.action ? `
@@ -346,7 +346,7 @@ test("conflicts and publish failures preserve concurrent state and remove staged
         syncBuiltinESMExports();
       `;
       const result = spawnSync(process.execPath, [
-        "--import", `data:text/javascript,${encodeURIComponent(hook)}`, script, f.file,
+        "--import", `data:text/javascript,${encodeURIComponent(hook)}`, script, "handoff", f.file,
         ...(item.args ?? ["--task", "task-1", "--status", "running"]),
       ], { encoding: "utf8" });
       assert.equal(result.status, 1, JSON.stringify(result));
@@ -364,7 +364,7 @@ test("conflicts and publish failures preserve concurrent state and remove staged
 
 test("CLI help, usage, missing files, and dash-prefixed paths have stable streams and exits", async (t) => {
   const f = await fixture(t, null);
-  const invoke = (...args: string[]) => spawnSync(process.execPath, [script, ...args], { encoding: "utf8" });
+  const invoke = (...args: string[]) => spawnSync(process.execPath, [script, "handoff", ...args], { encoding: "utf8" });
   for (const args of [["--help"], ["-h"]]) {
     const result = invoke(...args);
     assert.equal(result.status, 0, result.stderr);
@@ -385,12 +385,12 @@ test("CLI help, usage, missing files, and dash-prefixed paths have stable stream
   assert.match(withoutTask.stderr, /Task options require --task ID/);
   const missingPath = join(f.directory, "missing", "run.json");
   const missing = spawnSync(process.execPath, [
-    script, missingPath, ...createArgs,
+    script, "handoff", missingPath, ...createArgs,
   ], { encoding: "utf8" });
   assert.equal(missing.status, 1);
   assert.match(missing.stderr, /ENOENT/);
   const dashFile = join(f.directory, "-run.json");
-  const dash = spawnSync(process.execPath, [script, ...createArgs, "--", dashFile], { encoding: "utf8" });
+  const dash = spawnSync(process.execPath, [script, "handoff", ...createArgs, "--", dashFile], { encoding: "utf8" });
   success(dash);
   assert.equal((await readFile(dashFile, "utf8")).includes('"project": "owner/repository"'), true);
 });

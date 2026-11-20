@@ -36,7 +36,7 @@ async function serverFixture(t: TestContext) {
   const write = (name: string, data: unknown) => raw(name, JSON.stringify(data));
   await write("example-handoff.json", example);
   child = spawn(process.execPath, [
-    join(import.meta.dirname, "serve.mjs"), "--directory", directory, "--port", "0",
+    join(import.meta.dirname, "coordinator.mjs"), "serve", "--directory", directory, "--port", "0",
   ], { stdio: ["ignore", "pipe", "pipe"] });
   closed = new Promise((resolve) => child.once("close", resolve));
   const url = await new Promise<string>((resolve, reject) => {
@@ -462,18 +462,18 @@ test("HTTP reads are uncached and expose only scoped handoffs and their referenc
 });
 
 test("CLI help has no state dependency and invalid arguments have a nonzero exit", () => {
-  const script = join(import.meta.dirname, "serve.mjs");
-  const help = spawnSync(process.execPath, [script, "--help", "--directory", "/no-such-state-directory"], { encoding: "utf8" });
+  const script = join(import.meta.dirname, "coordinator.mjs");
+  const help = spawnSync(process.execPath, [script, "serve", "--help", "--directory", "/no-such-state-directory"], { encoding: "utf8" });
   assert.equal(help.status, 0, help.stderr);
   assert.match(help.stdout, /No packages are required/);
   assert.equal(help.stderr, "");
   for (const args of [["--unknown"], ["--port"], ["--port", "invalid"], ["--port", "65536"], ["extra-operand"]]) {
-    const result = spawnSync(process.execPath, [script, ...args], { encoding: "utf8" });
+    const result = spawnSync(process.execPath, [script, "serve", ...args], { encoding: "utf8" });
     assert.equal(result.status, 2, JSON.stringify({ args, stderr: result.stderr }));
     assert.equal(result.stdout, "");
     assert.match(result.stderr, /--help/);
   }
-  const missing = spawnSync(process.execPath, [script, "--directory", "/no-such-state-directory"], { encoding: "utf8" });
+  const missing = spawnSync(process.execPath, [script, "serve", "--directory", "/no-such-state-directory"], { encoding: "utf8" });
   assert.equal(missing.status, 1);
   assert.match(missing.stderr, /ENOENT/);
 });

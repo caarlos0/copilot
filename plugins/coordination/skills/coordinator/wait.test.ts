@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { TestContext } from "node:test";
 
-const script = join(import.meta.dirname, "wait.mjs");
+const script = join(import.meta.dirname, "coordinator.mjs");
 
 type WaitResult = { code: number | null; signal: NodeJS.Signals | null; stdout: string; stderr: string };
 
@@ -32,7 +32,7 @@ async function fixture(t: TestContext) {
     await rename(temporary, file);
   }
   async function start(files = [first, second]) {
-    const child = spawn(process.execPath, [script, "--cursor", cursor, ...files], {
+    const child = spawn(process.execPath, [script, "wait", "--cursor", cursor, ...files], {
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
@@ -119,12 +119,12 @@ test("reports deletion once and detects recreation with the same contents",
   });
 
 test("help and invalid usage have distinct stdout, stderr, and exit contracts", () => {
-  const help = spawnSync(process.execPath, [script, "--help"], { encoding: "utf8" });
+  const help = spawnSync(process.execPath, [script, "wait", "--help"], { encoding: "utf8" });
   assert.equal(help.status, 0, help.stderr);
   assert.match(help.stdout, /Usage: node wait\.mjs --cursor FILE RESULT/);
   assert.equal(help.stderr, "");
   for (const args of [[], ["--unknown"], ["--cursor"], ["--cursor", "same", "same"]]) {
-    const result = spawnSync(process.execPath, [script, ...args], { encoding: "utf8" });
+    const result = spawnSync(process.execPath, [script, "wait", ...args], { encoding: "utf8" });
     assert.equal(result.status, 2, JSON.stringify({ args, ...result }));
     assert.equal(result.stdout, "");
     assert.match(result.stderr, /Run with --help for usage/);
@@ -145,7 +145,7 @@ test("cursor, watch, result-read, and cursor-write failures exit without a succe
     for (const item of cases) {
       await f.replace(f.cursor, item.content ?? "{}");
       const result = spawnSync(process.execPath,
-        [script, "--cursor", item.cursor, item.file],
+        [script, "wait", "--cursor", item.cursor, item.file],
         { encoding: "utf8", timeout: 2000 });
       assert.equal(result.status, 1, JSON.stringify({ item, ...result }));
       assert.equal(result.stdout, "");
