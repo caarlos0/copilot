@@ -1,9 +1,9 @@
 const assert = require("node:assert/strict");
 const { spawn, spawnSync } = require("node:child_process");
 const { writeFileSync } = require("node:fs");
-const { mkdtemp, readFile, rm, stat, writeFile } = require("node:fs/promises");
+const { mkdtemp, readFile, rename, rm, stat, writeFile } = require("node:fs/promises");
 const { tmpdir } = require("node:os");
-const { join } = require("node:path");
+const { basename, dirname, join } = require("node:path");
 const { test } = require("node:test");
 
 const script = join(__dirname, "broker.mjs");
@@ -14,6 +14,13 @@ function withResult(directory, task, data) {
   const name = `${task}-result.json`;
   writeFileSync(join(directory, name), JSON.stringify({ task, role: data.role, outcome: data.outcome }));
   return { ...data, result: name };
+}
+
+// A plain writeFile truncates first, so a waiter can read an empty file; factory.mjs renames too.
+async function writeAtomic(path, content) {
+  const temp = join(dirname(path), `.${basename(path)}.${process.pid}.tmp`);
+  await writeFile(temp, content);
+  await rename(temp, path);
 }
 
 async function fixture(t) {
@@ -568,20 +575,20 @@ test("--due returns reconcile.due after the injected interval while the run is a
 
 test("reconcile.due does not fire while paused or without --due, and resumes when active", async (t) => {
   const f = await fixture(t);
-  await writeFile(f.factory, JSON.stringify({ status: "paused", rules: [] }));
+  await writeAtomic(f.factory, JSON.stringify({ status: "paused", rules: [] }));
   const { waitForEvents } = await import(script);
   let out = await waitForEvents(f.factory, { due: true, reconcile: 50, timeout: 0.4 });
   assert.equal(out.timeout, true);
   assert.deepEqual(out.events, []);
 
-  await writeFile(f.factory, JSON.stringify({ status: "active", rules: [] }));
+  await writeAtomic(f.factory, JSON.stringify({ status: "active", rules: [] }));
   out = await waitForEvents(f.factory, { due: false, reconcile: 50, timeout: 0.4 });
   assert.equal(out.timeout, true);
 
   const pending = waitForEvents(f.factory, { due: true, reconcile: 100, timeout: 10 });
-  await writeFile(f.factory, JSON.stringify({ status: "paused", rules: [] }));
+  await writeAtomic(f.factory, JSON.stringify({ status: "paused", rules: [] }));
   await new Promise((resolve) => setTimeout(resolve, 250));
-  await writeFile(f.factory, JSON.stringify({ status: "active", rules: [] }));
+  await writeAtomic(f.factory, JSON.stringify({ status: "active", rules: [] }));
   out = await pending;
   assert.deepEqual(out.events.map(({ type }) => type), ["reconcile.due"]);
 });
