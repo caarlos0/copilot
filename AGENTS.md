@@ -44,6 +44,14 @@ structure or workflows change.
   instructions, agents, or skills. Pass this boundary in delegated prompts;
   external task artifacts and loaded skill assets use their exact paths.
 
+## Tooling
+
+Bun and TypeScript are dev and CI tooling only. The root `package.json`,
+`bun.lock` and `tsconfig.json` serve this repository, not the plugins. Plugins
+ship plain `.mjs` files that run with `node`, so consumers need no Bun and no
+`node_modules`. Install with `bun install --frozen-lockfile`, then run
+`bun run test` and `bun run typecheck`.
+
 ## Plugin instructions
 
 Copilot loads only the root `AGENTS.md` and the one in the current directory.
