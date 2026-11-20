@@ -37,7 +37,7 @@
     "agentStop": [
       {
         "type": "command",
-        "bash": "[ \"$FACTORY_COORDINATOR\" != 0 ] || exit 0; root=\"${PLUGIN_ROOT:-$COPILOT_PLUGIN_ROOT}\"; [ -n \"$root\" ] || exit 0; exec node \"$root/hooks/stop-hook.mjs\"",
+        "bash": "[ \"$FACTORY_COORDINATOR\" != 0 ] || exit 0; root=\"${PLUGIN_ROOT:-$COPILOT_PLUGIN_ROOT}\"; [ -n \"$root\" ] || exit 0; [ -f \"$root/hooks/stop-hook.mjs\" ] || exit 0; exec node \"$root/hooks/stop-hook.mjs\"",
         "timeoutSec": 25
       }
     ]

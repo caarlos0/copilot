@@ -58,6 +58,20 @@ test("every hook keeps the 25 second timeout", () => {
   }
 });
 
+test("every hook script runs only after a file check", () => {
+  // A missing bundle must fail open, so a hook never blocks a session.
+  for (const [event, list] of Object.entries(hooks.hooks)) {
+    for (const hook of list) {
+      for (const [, script] of hook.bash.matchAll(/\$root\/(hooks\/[\w-]+\.mjs)/g)) {
+        assert.ok(
+          hook.bash.includes(`[ -f "$root/${script}" ] || `),
+          `${event} runs ${script} without a -f guard`,
+        );
+      }
+    }
+  }
+});
+
 test("is silent when rex is not installed", needsJq, async (t) => {
   const { run } = await fixture(t, { rex: false });
   const out = run({ REX_SESSION: "session:x" });
