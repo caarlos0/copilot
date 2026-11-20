@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
 import { type FSWatcher, watch } from "node:fs";
-import { readFile, rename, rm, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import { parseArgs } from "node:util";
+import writeFileAtomic from "write-file-atomic";
 
 const errorMessage = (error: unknown) => (error as Error).message;
 
@@ -52,13 +53,7 @@ async function waitForResults(cursor: string, files: string[]) {
             }
             const changed = files.filter((file) => current[file] !== (previous[file] ?? null));
             if (changed.length) {
-              const temporary = `${cursor}.${process.pid}.tmp`;
-              await writeFile(temporary, JSON.stringify(current), { flag: "wx" });
-              try {
-                await rename(temporary, cursor);
-              } finally {
-                await rm(temporary, { force: true });
-              }
+              await writeFileAtomic(cursor, JSON.stringify(current));
               stopped = true;
               complete({ changed });
             }
