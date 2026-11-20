@@ -164,6 +164,13 @@
       dialog:focus { outline: none; }
       dialog::backdrop { background: rgb(0 0 0 / .5); }
       #move-dialog, #settings-dialog { width: min(560px, calc(100% - 32px)); }
+      .result-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 12px 24px 0; }
+      .result-bar code { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+      #result-error { margin: 8px 24px 0; color: var(--blocked); overflow-wrap: anywhere; }
+      #result-body { margin: 12px 24px 24px; max-height: 60vh; overflow: auto; }
+      #result-body pre { margin: 0; }
+      #result-body:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      .summary-result { margin: 4px 0 0; }
       #palette-dialog { width: min(720px, 92vw); margin-top: 12vh; }
       #palette-input { flex: 1; min-width: 0; padding: 5px 12px; background: var(--bg); }
       #palette-list { list-style: none; margin: 0; padding: 0; max-height: 50vh; overflow-y: auto; }
@@ -433,6 +440,20 @@
         </div>
         <div id="move-body"></div>
       </dialog>
+      <dialog id="result-dialog" aria-labelledby="result-title">
+        <div class="detail-head">
+          <h2 id="result-title"></h2>
+          <button id="close-result" class="icon-button close-button" type="button" tabindex="-1"
+            aria-label="Close result" title="Close result">&times;</button>
+        </div>
+        <div class="result-bar">
+          <code id="result-name"></code>
+          <button id="copy-result" type="button">Copy JSON</button>
+          <a id="open-raw" target="_blank" rel="noopener noreferrer">Open raw</a>
+        </div>
+        <p id="result-error" class="muted" role="alert" hidden></p>
+        <div id="result-body" tabindex="0" role="region" aria-label="Result JSON"></div>
+      </dialog>
       <dialog id="palette-dialog" aria-label="Go to task">
         <div class="detail-head">
           <input id="palette-input" type="text" autocomplete="off" placeholder="Go to task" aria-label="Go to task"
@@ -623,6 +644,7 @@
       const panel = document.getElementById("detail");
       const moveDialog = document.getElementById("move-dialog");
       const settingsDialog = document.getElementById("settings-dialog");
+      const resultDialog = document.getElementById("result-dialog");
       const paletteDialog = document.getElementById("palette-dialog");
       const projectToggle = document.getElementById("project-toggle");
       const projectMenu = document.getElementById("project-menu");
@@ -1000,8 +1022,12 @@
       }
 
       function highlightJSON(value) {
+        return highlightText(JSON.stringify(value, null, 2));
+      }
+
+      // Colours JSON text token by token; every piece goes in with textContent, so the text is never markup.
+      function highlightText(source) {
         const pre = element("pre", null, "json");
-        const source = JSON.stringify(value, null, 2);
         const token = /("(?:\\.|[^"\\])*")(\s*:)?|\b(?:true|false|null)\b|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g;
         let last = 0;
         for (const match of source.matchAll(token)) {
@@ -1046,6 +1072,61 @@
         document.getElementById("move-body").replaceChildren(moveForm(task));
         moveDialog.showModal();
         moveDialog.querySelector("select").focus();
+      }
+
+      let resultLoad = 0;
+      let resultOpener = null;
+
+      function closeResult() {
+        resultLoad += 1;
+        resultDialog.close();
+        resultOpener?.focus();
+        resultOpener = null;
+      }
+
+      // Loads one result file through the artifact route and shows it pretty-printed and highlighted.
+      async function openResult({ task, role, name, href, trigger }) {
+        const load = ++resultLoad;
+        resultOpener = trigger;
+        const body = document.getElementById("result-body");
+        const error = document.getElementById("result-error");
+        const copy = document.getElementById("copy-result");
+        document.getElementById("result-title").textContent = `${task}: ${role} result`;
+        document.getElementById("result-name").textContent = name;
+        document.getElementById("open-raw").href = href;
+        error.hidden = true;
+        copy.disabled = true;
+        copy.textContent = "Copy JSON";
+        copy.rawText = "";
+        body.replaceChildren(element("p", "Loading…", "muted"));
+        resultDialog.showModal();
+        body.focus();
+        let message = null;
+        let text = "";
+        let parsed;
+        try {
+          const response = await fetch(href);
+          text = await response.text();
+          if (!response.ok) {
+            try { message = JSON.parse(text).error; } catch {}
+            message ??= `The server answered ${response.status}.`;
+          } else {
+            try { parsed = JSON.parse(text); } catch (cause) { message = `Not valid JSON: ${cause.message}`; }
+          }
+        } catch (cause) {
+          message = `Could not load the result: ${cause.message}`;
+        }
+        if (load !== resultLoad) return;
+        if (message) {
+          error.textContent = message;
+          error.hidden = false;
+          body.replaceChildren(element("pre", text));
+          copy.disabled = !text;
+        } else {
+          body.replaceChildren(highlightJSON(parsed));
+          copy.disabled = false;
+        }
+        copy.rawText = text;
       }
 
       function closeSettings() {
@@ -1156,7 +1237,7 @@
           projectToggle.focus();
           return;
         }
-        const popupOpen = moveDialog.open || settingsDialog.open;
+        const popupOpen = moveDialog.open || settingsDialog.open || resultDialog.open;
         if ((event.metaKey || event.ctrlKey) && isKKey(event)) {
           if (event.repeat) {
             event.preventDefault();
@@ -1519,9 +1600,26 @@
         return form;
       }
 
-      function appendArtifacts(parent, worker) {
+      // A plain click opens the result popup; the href keeps new tab, copy link and middle-click working.
+      function resultLink(label, worker, context) {
+        const name = artifactName(worker.result, "result");
+        const href = `/api/artifact?${new URLSearchParams({ file: selection, name })}`;
+        const node = link(label, href);
+        node.addEventListener("click", (event) => {
+          if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+          event.preventDefault();
+          return openResult({ ...context, name, href, trigger: node });
+        });
+        return node;
+      }
+
+      function appendArtifacts(parent, worker, context) {
         for (const field of ["brief", "result"]) {
           if (!worker[field]) continue;
+          if (field === "result") {
+            parent.append(resultLink(field, worker, context), " ");
+            continue;
+          }
           const query = new URLSearchParams({ file: selection, name: artifactName(worker[field], field) });
           parent.append(link(field, `/api/artifact?${query}`), " ");
         }
@@ -1617,6 +1715,12 @@
           show();
           block.append(toggle);
         }
+        const worker = task.workers[summary.role];
+        if (worker.result) {
+          const result = element("p", null, "summary-result");
+          result.append(resultLink("View result", worker, { task: task.id, role: summary.role }));
+          block.append(result);
+        }
         return block;
       }
 
@@ -1701,7 +1805,7 @@
             const item = element("li");
             const dot = element("span", null, `dot ${worker.status}`);
             item.append(dot, ...codeParts(`${role}: ${worker.status}${worker.name ? `, ${worker.name}` : ""}${worker.pane ? `, ${worker.pane}` : ""} `));
-            appendArtifacts(item, worker);
+            appendArtifacts(item, worker, { task: task.id, role });
             list.append(item);
           }
           more.append(list);
@@ -2017,7 +2121,7 @@
           const worker = rule.worker;
           item.append(element("span", null, `dot ${worker.status}`),
             `Worker: ${[worker.status, worker.mode].filter(Boolean).join(", ")} `);
-          appendArtifacts(item, worker);
+          appendArtifacts(item, worker, { task: rule.id, role: "rule worker" });
           node.append(item);
         }
         return node;
@@ -2285,7 +2389,7 @@
       document.getElementById("refresh").addEventListener("click", refreshNow);
       document.addEventListener("visibilitychange", tick);
       document.getElementById("open-palette").addEventListener("click", () => {
-        if (snapshot && !moveDialog.open && !settingsDialog.open && !paletteDialog.open) openPalette();
+        if (snapshot && !moveDialog.open && !settingsDialog.open && !resultDialog.open && !paletteDialog.open) openPalette();
       });
       document.getElementById("open-settings").addEventListener("click", openSettings);
       document.getElementById("attention-badge").addEventListener("click", chooseAttention);
@@ -2302,6 +2406,17 @@
       paletteInput.addEventListener("input", renderPalette);
       wireDismiss(moveDialog, "close-move", closeMove);
       wireDismiss(settingsDialog, "close-settings", closeSettings);
+      wireDismiss(resultDialog, "close-result", closeResult);
+      document.getElementById("copy-result").addEventListener("click", async (event) => {
+        const button = event.target;
+        try {
+          await navigator.clipboard.writeText(button.rawText);
+          button.textContent = "Copied";
+        } catch {
+          button.textContent = "Copy failed";
+        }
+        setTimeout(() => { button.textContent = "Copy JSON"; }, 2000);
+      });
       wireDismiss(paletteDialog, "close-palette", () => paletteDialog.close());
 
       document.getElementById("logo").src = document.getElementById("icon").href;

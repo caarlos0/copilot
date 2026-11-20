@@ -268,6 +268,11 @@ The dashboard task cards show one worker summary (`cardSummary` in
 dashboard reads only the factory file. A `--workers` write that sets a worker
 `running` with a different `pane` or `window` (a relaunch) first drops its stored
 `session`, `summary` and `summary_at`; `result` stays, as it is the planned filename.
+A worker's `result` link (Task details, Find work) and the "View result" link under
+a card summary open one popup with the result file, pretty-printed and highlighted
+(`highlightText`, built with `textContent`). It loads the file through
+`/api/artifact`, so the server's access checks apply. The link keeps its `href`, so
+a modified click or "Open raw" still opens the raw file in a new tab.
 
 The dashboard sorts and groups factories in the sidebar with `compareFactories`
 and `factorySection` in `factory-data.mjs`. `paused`, `blocked`, and `finished`

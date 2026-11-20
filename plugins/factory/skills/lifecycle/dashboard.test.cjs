@@ -2688,3 +2688,76 @@ test("a proposal row has Accept and Decline buttons that post the decision, and 
   assert.match(row.textContent, /Recorded: accepted\./);
   assert.equal(accept.disabled && decline.disabled, true, "A recorded decision is not sent twice.");
 });
+
+test("the result highlighter colours each token class and never renders a string as markup", async (t) => {
+  const ui = await dashboard(t);
+  const source = '{"a": "<script>alert(1)</script>", "n": -2.5e3, "ok": true, "gone": null, "list": [1, "x"]}';
+  const pre = ui.run(`highlightText(${JSON.stringify(source)})`);
+  assert.equal(pre.textContent, source);
+  const tokens = (name) => pre.querySelectorAll(`.json-${name}`).map((node) => node.textContent);
+  assert.deepEqual(tokens("key"), ['"a"', '"n"', '"ok"', '"gone"', '"list"']);
+  assert.deepEqual(tokens("string"), ['"<script>alert(1)</script>"', '"x"']);
+  assert.deepEqual(tokens("literal"), ["-2.5e3", "true", "null", "1"]);
+  assert.equal(pre.querySelectorAll("script").length, 0, "Result text is data, never an element.");
+});
+
+test("the result link in Task details and the card summary both open the result popup", async (t) => {
+  const ui = await dashboard(t);
+  const name = "owner.repo-issue-9-implementation-result.json";
+  const raw = '{"outcome":"complete","note":"<script>alert(1)</script>","count":3}';
+  await writeFile(join(ui.directory, name), raw);
+  ui.run("navigator = { clipboard: { writeText: async (value) => { globalThis.copied = value; } } }");
+  const task = structuredClone(example.tasks.find((item) => item.id === "issue-9"));
+  task.state = "implementation";
+  task.workers.implementation.summary = "Shipped.";
+  const row = ui.run(`taskRow(${JSON.stringify(task)}, new Set())`);
+  const href = `/api/artifact?file=${encodeURIComponent(factoryFile)}&name=${encodeURIComponent(name)}`;
+  const inDetails = row.querySelectorAll("a").find((node) => node.textContent === "result" && node.href === href);
+  const inSummary = row.querySelector(".summary").querySelector("a");
+  assert.equal(inSummary.href, href, "The summary link keeps a real href.");
+  const dialog = ui.get("result-dialog");
+
+  const modified = await inDetails.fire("click", { ctrlKey: true });
+  assert.equal(modified.defaultPrevented, false, "A modified click keeps the browser's new tab.");
+  assert.equal(dialog.open, false);
+
+  for (const trigger of [inDetails, inSummary]) {
+    const click = await trigger.fire("click");
+    assert.equal(click.defaultPrevented, true);
+    assert.equal(dialog.open, true);
+    assert.equal(ui.get("result-title").textContent, "issue-9: implementation result");
+    assert.equal(ui.get("result-name").textContent, name);
+    assert.equal(ui.get("open-raw").href, href);
+    assert.equal(ui.get("result-error").hidden, true);
+    const body = ui.get("result-body");
+    assert.equal(body.textContent, JSON.stringify(JSON.parse(raw), null, 2));
+    assert.equal(body.querySelector(".json-key").textContent, '"outcome"');
+    assert.equal(body.querySelector("script"), null);
+    await ui.get("copy-result").fire("click");
+    assert.equal(ui.run("copied"), raw, "Copy JSON copies the file as it is.");
+    assert.equal(ui.document.activeElement, body, "Focus moves into the popup.");
+    await dialog.fire("cancel");
+    assert.equal(dialog.open, false);
+    assert.equal(ui.document.activeElement, trigger, "Focus returns to the link that opened it.");
+  }
+});
+
+test("the result popup shows the error and the raw body for a missing file or invalid JSON", async (t) => {
+  const ui = await dashboard(t);
+  const task = structuredClone(example.tasks.find((item) => item.id === "issue-9"));
+  const row = ui.run(`taskRow(${JSON.stringify(task)}, new Set())`);
+  const missing = row.querySelectorAll("a").find((node) => node.textContent === "result");
+  await missing.fire("click");
+  assert.equal(ui.get("result-error").hidden, false);
+  assert.match(ui.get("result-error").textContent, /is not in the state directory/);
+  assert.match(ui.get("result-body").textContent, /is not in the state directory/);
+  await ui.get("result-dialog").fire("cancel");
+
+  const rule = example.rules.find((item) => item.worker?.result);
+  await writeFile(join(ui.directory, rule.worker.result), "not <b>json</b>");
+  const ruleRow = ui.run(`ruleRow(${JSON.stringify(rule)})`);
+  await ruleRow.querySelectorAll("a").find((node) => node.textContent === "result").fire("click");
+  assert.match(ui.get("result-error").textContent, /^Not valid JSON/);
+  assert.equal(ui.get("result-body").textContent, "not <b>json</b>");
+  assert.equal(ui.get("result-body").querySelectorAll("b").length, 0);
+});
