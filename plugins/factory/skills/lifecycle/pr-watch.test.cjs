@@ -16,6 +16,23 @@ const fs = require("node:fs");
 const path = require("node:path");
 const dir = process.env.FAKE_GH_DIR;
 const args = process.argv.slice(2);
+// \`gh event listen\` is unavailable unless FAKE_GH_LISTEN=event. Then it attaches,
+// waits for the first graphql read, emits one event and stays attached until killed.
+if (args[0] === "event") {
+  if (process.env.FAKE_GH_LISTEN !== "event") {
+    process.stderr.write("gh: event streams are not enabled for this account");
+    process.exit(1);
+  }
+  process.stderr.write("Listening for events.\\n");
+  const counter = path.join(dir, "counter");
+  let seen = "";
+  setInterval(() => {
+    const now = fs.existsSync(counter) ? fs.readFileSync(counter, "utf8") : "";
+    if (now && now !== seen) process.stdout.write('{"type":"com.github.pull_request.state.changed.v1"}\\n');
+    seen = now;
+  }, 10);
+  return;
+}
 fs.appendFileSync(path.join(dir, "calls.log"), args.join(" ").slice(0, 40) + "\\n");
 if (args[0] === "pr") {
   process.stdout.write(JSON.stringify({ number: 7, url: "https://github.com/o/r/pull/7" }));
@@ -97,6 +114,7 @@ async function fixture(t, responses, extraEnv = {}) {
   const watch = (...args) => {
     const out = spawnSync(process.execPath, [script, "--interval", "0.01", ...args], {
       encoding: "utf8",
+      timeout: 30000,
       env: { ...process.env, ...extraEnv, FAKE_GH_DIR: directory, PR_WATCH_MIN_INTERVAL: "0", PATH: `${join(directory, "bin")}${delimiter}${process.env.PATH}` },
     });
     return { ...out, json: out.stdout ? JSON.parse(out.stdout) : null };
@@ -285,4 +303,21 @@ test("--help needs no gh, a bad flag exits 2, and the default interval minimum i
   assert.equal(run("--help").status, 0);
   assert.equal(run("--bogus").status, 2);
   assert.equal(run("7", "--interval", "5").status, 2);
+});
+
+test("a listener event wakes the next read; the interval is not used", async (t) => {
+  const { watch, calls } = await fixture(t, [pr(), pr({ headRefOid: "h2" })], { FAKE_GH_LISTEN: "event" });
+  const out = watch("7", "--interval", "3600");
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(out.json.event, "head");
+  assert.deepEqual((await calls()).map((call) => call.split(" ")[0]), ["pr", "api", "api"]);
+});
+
+test("when gh event listen is unavailable it polls once and says so", async (t) => {
+  const { watch, calls } = await fixture(t, [pr(), pr(), pr({ state: "MERGED", merged: true })]);
+  const out = watch("7");
+  assert.equal(out.status, 0, out.stderr);
+  assert.equal(out.json.event, "merged");
+  assert.equal(out.stderr.match(/gh event listen is unavailable, polling: gh: event streams are not enabled/g).length, 1);
+  assert.deepEqual((await calls()).map((call) => call.split(" ")[0]), ["pr", "api", "api", "api"]);
 });

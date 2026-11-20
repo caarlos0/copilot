@@ -333,7 +333,10 @@ PR watching goes through `skills/lifecycle/pr-watch.mjs`, which the factory
 ships and workers call by absolute path (like `broker.mjs`). It makes one
 GraphQL call per tick (one more per extra page of 100 checks or review threads;
 a page that fails is an error, never a pass), prints one typed JSON event, and exits 3 on a rate limit
-instead of sleeping. Run one watcher per PR; the review worker runs none. It is
+instead of sleeping. On github.com it keeps one `gh event listen --follow` child
+only as a wake-up signal (every wake is the same GraphQL read, with a 5 minute
+safety check) and polls on the interval if that child ends, with no retry.
+Run one watcher per PR; the review worker runs none. It is
 a native watcher, so its own loop uses a timer and its tests never sleep or poll
 (a fake `gh` is on `PATH`; tests never call GitHub). `session-metrics.mjs`
 counts it under `gh_wait`.

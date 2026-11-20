@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 // Watches one pull request with one GraphQL call per tick (one more per extra
-// page of 100 checks or review threads) and exits on the
-// first typed event. Dependency-free; talks to GitHub only through `gh`.
-import { execFile } from "node:child_process";
+// page of 100 checks or review threads) and exits on the first typed event.
+// Where `gh event listen` works, a listener only wakes the next tick; the
+// classification is the same either way. Dependency-free; talks to GitHub only
+// through `gh`.
+import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 
 const run = promisify(execFile);
@@ -15,7 +17,8 @@ Watch a pull request and print one JSON line on the first event.
   --repo, -R REPO  repository, OWNER/REPO (GH_REPO is honored)
   --merge          only report merged or closed
   --interval S     seconds between checks, default 30, minimum 15
-                   (PR_WATCH_MIN_INTERVAL overrides the minimum)
+                   (PR_WATCH_MIN_INTERVAL overrides the minimum); used only
+                   when "gh event listen" is unavailable
   --timeout S      print a timeout event and exit 0 after S seconds
   -h, --help       print this help
 
@@ -24,7 +27,9 @@ passed), head, review, conflict, draft, base, timeout, rate_limited, error.
 Exit codes: 0 event, 1 error, 2 usage, 3 rate limited (retry_at in the JSON).
 A transient failure (HTTP 502/503/504, connection reset, timeout, EOF) is retried
 on the next check; the 5th one in a row is an error.
-A PR that already merged, closed, or has a failed required check exits at once.`;
+A PR that already merged, closed, or has a failed required check exits at once.
+On github.com, "gh event listen" (preview) wakes each check instead of the
+interval, with a 5 minute safety check. If it fails, polling takes over.`;
 
 // Both connections are paged. The first call has no cursors; a PR with 100 items
 // or fewer needs no other call.
@@ -53,6 +58,14 @@ const RATE_LIMIT = /rate limit|abuse detection|HTTP 429|RATE_LIMITED/i;
 const TRANSIENT = /HTTP 50[234]\b|bad gateway|service unavailable|gateway time-?out|ECONNRESET|connection reset|ETIMEDOUT|timed? ?out|\bEOF\b/i;
 const MAX_TRANSIENT = 5;
 const RETRY_AFTER = 5 * 60;
+const SAFETY_CHECK = 5 * 60 * 1000;
+const EVENTS = [
+  "review.submitted.v1",
+  "state.changed.v1",
+  "head.changed.v1",
+  "merge_conflict.v1",
+  "check_suite.status.changed.v1",
+].map((type) => `com.github.pull_request.${type}`).join(",");
 
 function usageError(message) {
   process.stderr.write(`pr-watch: ${message}\n${USAGE}\n`);
@@ -255,43 +268,114 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// One `gh event listen --follow` child, used only as a wake-up signal: events
+// are not replayed, so the caller reads the PR once attached and after each wake.
+// The child ending for any reason means the feature is unavailable or broken.
+class Listener {
+  alive = true;
+  attached = false;
+  pending = false;
+  error = "";
+  #wake = null;
+
+  constructor(url) {
+    this.child = spawn("gh", ["event", "listen", "--follow", "--resource", url, "--event", EVENTS], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    this.child.stdout.on("data", () => {
+      this.pending = true;
+      this.#wake?.();
+    });
+    // The first stderr line is the attach message, or the reason for failing.
+    this.child.stderr.on("data", (chunk) => {
+      this.error ||= String(chunk).trim().split("\n")[0];
+      this.attached = true;
+      this.#wake?.();
+    });
+    const end = (error) => {
+      this.alive = false;
+      this.error ||= error?.message ?? "";
+      this.#wake?.();
+    };
+    this.child.on("error", end);
+    this.child.on("exit", () => end());
+  }
+
+  // Returns when ready() holds, the child ended, or ms passed.
+  async until(ready, ms) {
+    if (ready() || !this.alive) return;
+    let timer;
+    await new Promise((resolve) => {
+      this.#wake = resolve;
+      timer = setTimeout(resolve, ms);
+    });
+    clearTimeout(timer);
+    this.#wake = null;
+  }
+
+  async wait(ms) {
+    await this.until(() => this.pending, ms);
+    this.pending = false;
+  }
+
+  stop() {
+    this.child.kill();
+  }
+}
+
 async function watch(opts) {
   const deadline = opts.timeout === null ? Infinity : Date.now() + opts.timeout * 1000;
   let target = null;
   let base = null;
   let last = null;
   let failures = 0;
-  for (;;) {
-    let fetched = null;
-    try {
-      target ??= await resolve(opts);
-      fetched = await fetchSnapshot(target);
-      failures = 0;
-    } catch (error) {
-      // A transient failure retries on the next tick; the Nth in a row is an error.
-      if (!(error instanceof Transient) || ++failures >= MAX_TRANSIENT) throw error;
-      process.stderr.write(`pr-watch: transient failure ${failures}/${MAX_TRANSIENT}: ${error.message.split("\n")[0]}\n`);
-    }
-    if (fetched) {
-      const { snapshot, limit } = fetched;
-      last = snapshot;
-      let event;
-      if (base === null) {
-        base = snapshot;
-        event = startupEvent(snapshot, opts.merge);
-      } else {
-        if (base.mergeable === "UNKNOWN") base.mergeable = snapshot.mergeable;
-        event = detect(base, snapshot, opts.merge);
+  // undefined: not tried; null: unavailable, poll.
+  let listener;
+  try {
+    for (;;) {
+      let fetched = null;
+      try {
+        target ??= await resolve(opts);
+        if (listener === undefined) {
+          listener = target.host === "github.com" ? new Listener(target.url) : null;
+          await listener?.until(() => listener.attached, Math.min(deadline - Date.now(), SAFETY_CHECK));
+        }
+        fetched = await fetchSnapshot(target);
+        failures = 0;
+      } catch (error) {
+        // A transient failure retries on the next tick; the Nth in a row is an error.
+        if (!(error instanceof Transient) || ++failures >= MAX_TRANSIENT) throw error;
+        process.stderr.write(`pr-watch: transient failure ${failures}/${MAX_TRANSIENT}: ${error.message.split("\n")[0]}\n`);
       }
-      if (event) return report(target, snapshot, event);
-      if (limit.remaining < limit.cost * 2) {
-        throw new RateLimited(`only ${limit.remaining} GraphQL points left`, new Date(limit.resetAt).toISOString());
+      if (fetched) {
+        const { snapshot, limit } = fetched;
+        last = snapshot;
+        let event;
+        if (base === null) {
+          base = snapshot;
+          event = startupEvent(snapshot, opts.merge);
+        } else {
+          if (base.mergeable === "UNKNOWN") base.mergeable = snapshot.mergeable;
+          event = detect(base, snapshot, opts.merge);
+        }
+        if (event) return report(target, snapshot, event);
+        if (limit.remaining < limit.cost * 2) {
+          throw new RateLimited(`only ${limit.remaining} GraphQL points left`, new Date(limit.resetAt).toISOString());
+        }
       }
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) return report(target, last, { event: "timeout", timeout: true });
+      if (listener && !listener.alive) {
+        process.stderr.write(`pr-watch: gh event listen is unavailable, polling: ${listener.error.split("\n")[0]}\n`);
+        listener = null;
+      }
+      // After a transient failure, retry on the interval rather than wait for an event.
+      if (listener && failures === 0) await listener.wait(Math.min(SAFETY_CHECK, remaining));
+      // Jitter keeps several lanes from hitting GitHub on the same second.
+      else await sleep(Math.min(opts.interval * 1000 * (0.9 + Math.random() * 0.2), remaining));
     }
-    const remaining = deadline - Date.now();
-    if (remaining <= 0) return report(target, last, { event: "timeout", timeout: true });
-    // Jitter keeps several lanes from hitting GitHub on the same second.
-    await sleep(Math.min(opts.interval * 1000 * (0.9 + Math.random() * 0.2), remaining));
+  } finally {
+    listener?.stop();
   }
 }
 
