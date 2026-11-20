@@ -1,12 +1,13 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { type IncomingMessage, type ServerResponse, createServer } from "node:http";
-import { readFile, readdir, realpath, rename, stat, writeFile } from "node:fs/promises";
+import { readFile, readdir, realpath, stat } from "node:fs/promises";
 import { type AddressInfo } from "node:net";
 import { homedir, networkInterfaces } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { gzipSync } from "node:zlib";
+import writeFileAtomic from "write-file-atomic";
 import { countByState, isObject, validate } from "./factory-data.mjs";
 import type { Factory, Worker } from "./factory-data.ts";
 import { resolveAttention, scanStamp, sendAnswer } from "./attention.mjs";
@@ -57,9 +58,7 @@ async function persistedToken(path: string) {
     if (errorCode(error) !== "ENOENT") throw error;
   }
   const token = randomBytes(24).toString("base64url");
-  const temporary = `${path}.${process.pid}.tmp`;
-  await writeFile(temporary, `${token}\n`, { mode: 0o600 });
-  await rename(temporary, path);
+  await writeFileAtomic(path, `${token}\n`, { mode: 0o600 });
   return token;
 }
 
