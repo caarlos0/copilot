@@ -292,8 +292,9 @@ chip's tooltip has the AIC value). Unknown values show no
 chip. `usage.mjs` computes it on the server for
 `/api/factory` (`usage`, keyed by task ID, in the ETag). It reads only
 `$FACTORY_SESSION_STATE` (default `~/.copilot/session-state`) logs of the session IDs in the
-factory file, through `session-metrics.mjs` `measureFile` (streamed, no log over 512 MiB), and
-caches by file mtime and size, with no reread of a changing log within 30 seconds. Credits are
+factory file, through `session-metrics.mjs` `measureFile` (streamed, no log over 512 MiB, four
+logs at a time), and
+caches by file mtime and size (at most 1024 logs, oldest dropped first), with no reread of a changing log within 30 seconds. Credits are
 `totalNanoAiu` of the `session.usage_record` events divided by 1e9 (verified: the log's
 `costPerBatch` rates equal GitHub's published per-token prices at 1 AI credit = $0.01); `usd` is
 credits times `usdPerCredit` in `usage.mjs`. A log without credits shows tokens instead, and a task total shows credits only when every session has

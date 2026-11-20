@@ -5,6 +5,8 @@ import { sessionID } from "./sessions.mjs";
 
 const maxLogBytes = 512 * 1024 * 1024;
 const refreshMs = 30_000;
+const readers = 4;
+const maxCached = 1024;
 
 // 1 AI credit = $0.01 (docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing).
 // totalNanoAiu is 1e9 per credit: the log's costPerBatch for Claude Sonnet 5.5 input is 2e11
@@ -13,9 +15,17 @@ const usdPerCredit = 0.01;
 const usdOf = (credits) => credits === null ? null : Math.round(credits * usdPerCredit * 1e4) / 1e4;
 
 // Session logs are streamed once per file change, and a log that keeps growing is not read
-// again for refreshMs. Only numbers and model names leave this module.
+// again for refreshMs. Only numbers and model names leave this module. The cache serves every
+// factory file, so it is capped, and the oldest entry goes first, instead of tracking references.
 const cache = new Map();
+export const cacheSize = () => cache.size;
 const reading = new Map();
+
+function remember(file, entry) {
+  cache.delete(file);
+  cache.set(file, entry);
+  if (cache.size > maxCached) cache.delete(cache.keys().next().value);
+}
 
 async function readLog(file) {
   try {
@@ -36,7 +46,7 @@ async function readLog(file) {
           output_tokens: usage.output_tokens,
           active_minutes: metrics.wall_minutes,
         };
-        cache.set(file, { stamp, at: Date.now(), usage: value });
+        remember(file, { stamp, at: Date.now(), usage: value });
         return value;
       }).finally(() => reading.delete(file)));
     }
@@ -69,13 +79,13 @@ function total(items) {
 
 // Per worker role usage and a task total; a missing or unreadable session is null.
 // ended_at is null while the task is open, so the browser can keep counting.
-export async function taskUsage(task, directory) {
+export async function taskUsage(task, directory, read = sessionUsage) {
   const workers = {};
   const seen = new Map();
   for (const [role, worker] of Object.entries(task.workers)) {
     if (!worker) continue;
     const id = sessionID(worker.session);
-    workers[role] = id === null ? null : await sessionUsage(id, directory);
+    workers[role] = id === null ? null : await read(id, directory);
     if (id !== null) seen.set(id, workers[role]);
   }
   return {
@@ -86,8 +96,33 @@ export async function taskUsage(task, directory) {
   };
 }
 
+// Runs fn over items with at most `limit` calls in flight; results keep the order of items.
+async function mapLimit(items, limit, fn) {
+  const results = new Array(items.length);
+  let next = 0;
+  const run = async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await fn(items[index]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, run));
+  return results;
+}
+
 export async function factoryUsage(data, directory) {
+  const ids = new Set();
+  for (const task of data.tasks) {
+    for (const worker of Object.values(task.workers)) {
+      const id = worker && sessionID(worker.session);
+      if (id) ids.add(id);
+    }
+  }
+  const list = [...ids];
+  const results = await mapLimit(list, readers, (id) => sessionUsage(id, directory));
+  const measured = new Map(list.map((id, index) => [id, results[index]]));
+  const read = (id) => measured.get(id);
   const usage = {};
-  for (const task of data.tasks) usage[task.id] = await taskUsage(task, directory);
+  for (const task of data.tasks) usage[task.id] = await taskUsage(task, directory, read);
   return usage;
 }

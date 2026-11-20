@@ -97,3 +97,43 @@ test("a log that did not change is not read again", async (t) => {
   // The rewrite changes size and time, but a log read moments ago is served from the cache.
   assert.deepEqual(await sessionUsage(ids.a, directory), before);
 });
+
+const uuid = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+const worker = (n) => ({ session: uuid(n) });
+const history = [{ state: "initial", at: "2026-05-01T10:00:00Z" }, { state: "implementation", at: "2026-05-01T10:30:00Z" }];
+
+test("factoryUsage keeps task order and matches taskUsage for shared and missing sessions", async (t) => {
+  const { factoryUsage, taskUsage } = await import("./usage.mjs");
+  const logs = {};
+  for (let n = 1; n <= 9; n++) logs[uuid(n)] = [event(0, "session.start"), record("m", n * 1_000_000_000, n, 1), event(n, "assistant.turn_end")];
+  const directory = await sessions(t, logs);
+  const data = { tasks: [
+    { id: "t-9", state: "implementation", history, workers: { implementation: worker(9), review: worker(1) } },
+    { id: "t-1", state: "implementation", history, workers: { investigation: worker(1), implementation: worker(2), review: worker(3) } },
+    { id: "t-x", state: "implementation", history, workers: { implementation: worker(99), review: null } },
+    { id: "t-5", state: "implementation", history, workers: { implementation: worker(5), review: worker(4), producer: worker(6) } },
+  ] };
+  const usage = await factoryUsage(data, directory);
+  assert.deepEqual(Object.keys(usage), ["t-9", "t-1", "t-x", "t-5"]);
+  for (const item of data.tasks) assert.deepEqual(usage[item.id], await taskUsage(item, directory));
+  assert.equal(usage["t-9"].workers.implementation.credits, 9);
+  assert.equal(usage["t-x"].workers.implementation, null);
+  assert.equal(usage["t-5"].total.credits, 15);
+});
+
+test("the usage cache is capped and a large run still returns every result", async (t) => {
+  const { cacheSize, factoryUsage } = await import("./usage.mjs");
+  const count = 1100;
+  const directory = await sessions(t, {});
+  for (let n = 1; n <= count; n++) {
+    await mkdir(join(directory, uuid(10_000 + n)));
+    await writeFile(join(directory, uuid(10_000 + n), "events.jsonl"), `${event(0, "session.start")}\n${record("m", 1_000_000_000, 1, 1)}\n`);
+  }
+  const tasks = Array.from({ length: count }, (_, i) => ({
+    id: `t-${i}`, state: "implementation", history, workers: { implementation: worker(10_001 + i) },
+  }));
+  const usage = await factoryUsage({ tasks }, directory);
+  assert.equal(Object.keys(usage).length, count, "Eviction never drops a result of the current call.");
+  assert.ok(Object.values(usage).every((item) => item.workers.implementation.credits === 1));
+  assert.ok(cacheSize() <= 1024, `cache holds ${cacheSize()} entries`);
+});
