@@ -26,7 +26,9 @@ Scheduled passes remain finite; general one-shot workers do not watch GitHub.
 The skill ships `board.html`, `handoff.example.json`, and a dependency-free
 loopback server. Run `node serve.mjs` from the resolved coordinator skill
 directory, or use Bun. Use one server for all runs; do not generate HTML per run.
-Shared JSON validation lives beside the skill in `board-data.mjs`.
+Shared JSON validation lives beside the skill in `board-data.mjs`, a valibot
+schema bundled in (stages end at each cross-field rule, so the first error keeps
+the field order).
 Coordinators must write handoffs with the bundled `handoff.mjs` flags. It
 validates the complete state and atomically replaces the file. The handoff
 stores its project once; tasks merge by ID and preserve unfinished work. Adding

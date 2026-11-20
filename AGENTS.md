@@ -60,6 +60,13 @@ those inside the plugin too. Use the same Bun minor as CI: output differs
 between Bun releases (local variable names), so a stale Bun leaves a diff in
 unrelated bundles.
 
+Runtime libraries (`write-file-atomic`, `valibot`) are `dependencies` in
+`package.json`. The build bundles them into each `.mjs`, so consumers still need
+no `node_modules`; the import boundary applies to plugin sources, not to library
+files. A module served to the browser (`board-data`, `factory-data`) may use only
+libraries that need no `node:` built-ins, and `board-data.mjs` stays under 20 KB.
+Add a library only to replace code you would otherwise maintain.
+
 ## Plugin instructions
 
 Copilot loads only the root `AGENTS.md` and the one in the current directory.
