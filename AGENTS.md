@@ -52,6 +52,13 @@ ship plain `.mjs` files that run with `node`, so consumers need no Bun and no
 `node_modules`. Install with `bun install --frozen-lockfile`, then run
 `bun run test` and `bun run typecheck`.
 
+A `.mjs` with a same-named `.ts` beside it is a generated bundle. Edit the
+`.ts`, run `bun run build` (`scripts/build.ts`), and commit both files. Never
+edit the `.mjs`. CI runs `bun run build && git diff --exit-code`. Sibling
+`.mjs` imports stay external, and tests keep running the `.mjs` paths. A
+bundle must not read files beside itself through `import.meta.url` or
+`__dirname`; check this before you port a module.
+
 ## Plugin instructions
 
 Copilot loads only the root `AGENTS.md` and the one in the current directory.

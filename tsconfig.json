@@ -10,6 +10,6 @@
     "skipLibCheck": true,
     "types": ["node", "bun"]
   },
-  "include": ["plugins/**/*.mjs"],
+  "include": ["plugins/**/*.mjs", "plugins/**/*.ts", "scripts/**/*.ts"],
   "exclude": ["node_modules"]
 }

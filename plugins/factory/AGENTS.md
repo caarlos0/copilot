@@ -569,6 +569,13 @@ when the queue is empty and capacity is free. Keep one waiter armed unless the
 run is truly finished; never mark it finished while a task, result, worktree,
 or scheduled rule remains actionable.
 
+## Generated modules
+
+`default-branch`, `state-dir` and `worker-name` in `skills/lifecycle/` are
+TypeScript. Edit the `.ts`, run `bun run build` at the repository root, and
+commit the `.ts` and the generated `.mjs` together. The other modules are still
+hand-written `.mjs`.
+
 ## Validation
 
 Run `node --test plugins/factory/skills/lifecycle/*.test.cjs` from the

@@ -8,7 +8,7 @@
   "scripts": {
     "test": "node --test",
     "typecheck": "tsc --noEmit",
-    "build": "node -e \"process.exit(0)\""
+    "build": "bun scripts/build.ts"
   },
   "devDependencies": {
     "@types/bun": "^1.4.4",
