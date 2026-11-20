@@ -366,8 +366,10 @@ shows rules and skipped work read-only.
 
 An `improve` rule is maintenance, not work finding. Its one-shot, read-only
 worker follows `improve.md` and Lever's `run-health-review`, and proposes at
-most one change. The factory asks the user, applies `rule` and `limit` changes
-only after the answer, and never edits plugin files. `factory.mjs` keeps
+most one change. The factory does not ask in chat. It emits `improve.proposed`
+(source `improve`) and the user accepts or declines in the dashboard's "Waiting
+for you" list. The factory applies `rule` and `limit` changes only after
+`improve.decided`, and never edits plugin files. `factory.mjs` keeps
 `<owner.repo>-factory-sessions.jsonl` (IDs, roles, task or rule names; mode 0600)
 from `--session` and worker records. `session-metrics.mjs` reads those sessions'
 `events.jsonl` and prints counts only, never content. It cannot measure tool run
@@ -382,13 +384,14 @@ session's totals are cumulative over its whole life.
 The factory waits with `broker.mjs wait`. The broker keeps one
 append-only JSONL log, `<owner.repo>-factory-events.jsonl` (mode 0600), beside
 the factory file. Events are typed notifications (`task.moved`, `task.updated`,
-`feedback.pending`, `budget.updated`, `limits.updated`, `lever.updated`, `worker.result`, `worker.blocked`, `pr.merged`, `attention.requested`, `attention.resolved`; `rule.due` and `reconcile.due` are computed by
+`feedback.pending`, `budget.updated`, `limits.updated`, `lever.updated`, `worker.result`, `worker.blocked`, `pr.merged`, `attention.requested`, `attention.resolved`, `improve.proposed`, `improve.decided`; `rule.due` and `reconcile.due` are computed by
 `wait --due` and never stored), each with a `source`. A cursor is a byte offset,
 so no event is lost between two `wait` calls. `factory.mjs` emits after every
 successful write (source `coordinator`, or `dashboard` for operator moves), and
-the factory waits with `--exclude-source coordinator --exclude-source attention`
-so its own writes and the attention events (no task; hooks emit them with source
-`attention` when a session waits for the user) never wake it. Workers write their result file atomically, then run
+the factory waits with `--exclude-source coordinator --exclude-source attention --exclude-source improve`
+so its own writes, its `improve.proposed` events, and the attention events (no task; hooks emit them with source
+`attention` when a session waits for the user) never wake it. `improve.decided`
+(source `dashboard`) always wakes it. Workers write their result file atomically, then run
 `broker.mjs emit worker.result` (or `worker.blocked`). `emit` validates before it
 appends and exits 1 with a reason when it refuses: a `worker.result` needs
 `data.result`, a JSON file in the state directory whose `task`, `role` and
@@ -441,7 +444,9 @@ renaming a session), `running` workers of resolved tasks (`stale-running`, with 
 moves to `resolved`, unless the write sets a status), a task blocked longer than
 `--blocked-after` (default 24h; `stale-blocked`, naming its blocker class and owner),
 an attention item open longer than `--attention-after` (default 30m;
-`attention-stale`, naming task, kind, text and pane), a missing waiter (`no-waiter`), and an owner lock whose
+`attention-stale`, naming task, kind, text and pane), a decided `improve` proposal whose result file
+still has a `change` and no `decision` (`improve-decided-unapplied`; an undecided proposal never
+produces a finding), a missing waiter (`no-waiter`), and an owner lock whose
 session the coordinator hooks would not match (`hooks-inactive`). The
 factory runs it at startup, on every wake and user message, and before every
 report, so a missed waiter wake cannot leave finished work unmerged. The waiter
@@ -497,6 +502,18 @@ prompts get no buttons: their rows (for example "approve for the rest of the ses
 depend on runtime state the hook cannot see, and a wrong digit could grant a wider approval.
 The row stays until the session log, the pane, or the clock resolves it; its buttons stay
 disabled meanwhile, so one click sends one answer. The coordinator still never answers.
+
+The same panel lists proposed `improve` changes, oldest first, before the attention
+rows, and the badge counts them too. `proposals.mjs` (`scanProposals(file)`) reads
+`improve.proposed` and `improve.decided` from the events log; the first decision per
+`proposal_id` wins, and a proposal never expires. The `/api/factory` payload has
+`proposals` (`id`, `rule`, `kind`, `title`, `evidence`, `recommended`, `result`, `at`)
+and its ETag covers them. A row has the title, kind, age, evidence, and Accept and
+Decline buttons (the recommended one is labeled so). A click sends
+`POST /api/improve/decide?file=` with `{proposal_id, decision: "accepted"|"declined", note?}`
+(same-origin JSON). The server appends `improve.decided` (source `dashboard`) once:
+a repeat or concurrent click records nothing (`recorded: false`), a bad body gets 400,
+and an unknown proposal gets 404. The decision wakes the factory, which applies it.
 
 On every wake, drain all actionable tasks and reconcile results/worktrees,
 fill free worker slots before waiting, and run enabled search/backlog rules

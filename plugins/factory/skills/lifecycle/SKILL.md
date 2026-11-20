@@ -368,6 +368,13 @@ leave work behind. Treat each finding as unfinished work:
   and never let it wake you (the waiter excludes source `attention`). Only the
   user can answer, in the pane or with a click on an option button in the dashboard. The finding clears by itself when the prompt is answered,
   the pane closes, or 24 hours pass.
+- `improve-decided-unapplied`: the user decided an `improve` proposal in the
+  dashboard (an `improve.decided` event exists) but the result file has a
+  `change` and no `decision`, so the wake was lost or the change was never
+  applied. It names `rule`, `proposal_id`, `change`, `title`, `decision` and
+  `result`. Apply an `accepted` one as in "Self-improve" step 5, then write the
+  `decision`. Only the newest proposal of a result file counts. An undecided
+  proposal is never a finding, however old: it waits for the user.
 - `worker-missing`: a worker (a task role or a rule worker) has status `running`,
   but its window is not in the live Rex session. It carries the role, window,
   pane, worktree, brief, and result. Recover it as in "Recover after a restart".
@@ -654,15 +661,32 @@ work". It changes nothing without the user's answer. Its worker follows
    resolved spend budget. The worker reads the metrics file and does not run
    `session-metrics.mjs`. The worker has no write authority.
 5. Read the result. If `change` is null, record the worker as closed and say
-   nothing. Otherwise use `ask_user` once. Show the proposal, its evidence, and
-   a recommended answer. After the user answers:
+   nothing. Otherwise do not ask in chat: the user decides in the dashboard's
+   "Waiting for you" list. Emit one `improve.proposed` per change (one for a
+   result with one `change`; one each if a result lists several), with a new
+   `proposal_id` each, and keep arming the waiter:
+
+   ```sh
+   node broker.mjs emit FACTORY_FILE improve.proposed --source improve --data \
+     '{"rule":"self-improve","change":"limit","title":"Lower the implementation cap","evidence":"Short text, no session content","recommended":"accept","proposal_id":"UNIQUE","result":"<project>-self-improve-result.json"}'
+   ```
+
+   `change` is the change `kind`, `title` is the change `summary`, and
+   `recommended` is `accept` or `decline`, your call from the evidence. The
+   user's click appends `improve.decided` (`proposal_id`, `decision` `accepted`
+   or `declined`, optional `note`) with source `dashboard`, which wakes you.
+   Then, for an `accepted` proposal:
    - `rule`, `limit`, or `budget`: apply it with `--rules`, `--limits`, or `--budget`.
    - `process`: put it in later briefs.
    - `skill`: report only. Never edit plugin files.
 
-   Then add `"decision": {"status": "applied" | "declined" | "noted", "at",
-   "note"}` to the result file with a temporary file and a rename, so the next
-   run can check the prediction.
+   For `declined`, change nothing. Either way add `"decision": {"status":
+   "applied" | "declined" | "noted", "at", "note", "proposal_id"}` to the result
+   file with a temporary file and a rename, so the next run can check the
+   prediction. A proposal never expires, and `reconcile.mjs` reports no finding
+   for an undecided one. It reports `improve-decided-unapplied` when a decision
+   event exists and the result file has a `change` but no `decision`: apply it
+   and write the `decision` now.
 6. Never put session content in an issue, PR, comment, or brief.
 
 ## State rules
@@ -1236,7 +1260,7 @@ attached async command:
 
 ```sh
 node broker.mjs wait /abs/state/owner.repo-factory.json --since CURSOR \
-  --exclude-source coordinator --exclude-source attention --due
+  --exclude-source coordinator --exclude-source attention --exclude-source improve --due
 ```
 
 It exits with `{"events":[...],"cursor":"N"}` as soon as one event exists after
@@ -1252,6 +1276,8 @@ the cursor. Each event has `id`, `at`, `type`, `task`, `source`, and `data`:
 | `pr.merged` | the implementation worker after its final `merged: true` result | `role`, `pr`, `merge_commit`, `head` |
 | `attention.requested` | a hook (`--source attention`) when a Copilot session waits for the user; no `--task` | `session`, `kind` (`permission`, `sandbox-bypass`, `ask-user`; `other` is accepted for old logs but no hook writes it), `text` (at most 2000 characters), optional `role`, `pane`, `options` (strings) |
 | `attention.resolved` | a hook (`--source attention`) when that wait ends; no `--task` | `session` |
+| `improve.proposed` | you (`--source improve`), once per change an `improve` worker proposes; no `--task` | `rule`, `change` (`rule`, `limit`, `budget`, `process`, `skill`), `title`, `evidence` (at most 2000 characters), `recommended` (`accept` or `decline`), `proposal_id` (unique), `result` (the result file name) |
+| `improve.decided` | the dashboard server (`--source dashboard`) when the user clicks Accept or Decline; no `--task` | `proposal_id`, `decision` (`accepted` or `declined`), optional `note` |
 | `rule.due` | `wait --due` itself, never stored | `rules`: due rule IDs |
 | `reconcile.due` | `wait --due` itself, every 5 minutes while the run is `active`, never stored | `every`: `"5m"` |
 
@@ -1269,7 +1295,9 @@ Rules:
    wake you, even when every worker is blocked. `--exclude-source attention`
    skips `attention.requested` and `attention.resolved`: hooks emit them with
    source `attention` for the dashboard, and a session waiting for the user
-   is not work for you, so they never wake you.
+   is not work for you, so they never wake you. `--exclude-source improve`
+   skips your own `improve.proposed` events, so a proposal never wakes you; the
+   user's `improve.decided` has source `dashboard` and always does.
 3. Every turn of a non-finished factory ends with exactly one armed `wait`
    (async bash, latest cursor). Never end a turn without one: not after a
    notification, a merge, a test run, a tool completion, or a user message. Arm
@@ -1519,7 +1547,7 @@ device. The server then requires a token and prints how to use it; see
 `AGENTS.md` for the rules.
 
 The page shows the flow with a task count per state, task lists, the read-only
-"Find work" panel, the "Waiting for you" list (an `ask_user` question has one button per option; the user's click, never the coordinator, types it into the pane), Move and Unblock, settings, a Cmd+K palette, and an `r` refresh key (see
+"Find work" panel, the "Waiting for you" list (an `ask_user` question has one button per option; the user's click, never the coordinator, types it into the pane; a proposed `improve` change has Accept and Decline buttons that record `improve.decided`), Move and Unblock, settings, a Cmd+K palette, and an `r` refresh key (see
 `AGENTS.md`). It rereads the file every 30 seconds and shows saved state, not
 live worker status. The server accepts writes only from its own origin, with
 JSON, through the shared writer. Do not add a polling schedule just for the
