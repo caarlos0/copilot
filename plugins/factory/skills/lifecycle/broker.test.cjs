@@ -292,7 +292,7 @@ test("a complete implementation result is refused while the worktree has uncommi
   writeFileSync(join(repo, "work.txt"), "x");
   const dirty = emit();
   assert.equal(dirty.status, 1);
-  assert.match(dirty.stderr, /uncommitted changes; commit, then emit again/);
+  assert.match(dirty.stderr, /uncommitted changes\. Commit them\. Then emit the event again/);
 
   git(repo, "add", "work.txt");
   git(repo, "commit", "-m", "work");
@@ -586,7 +586,7 @@ test("wait refuses to start when stdout goes to a file or /dev/null", async (t) 
   for (const stdout of ["ignore", fd]) {
     const out = spawnSync(process.execPath, [script, "wait", f.factory, "--timeout", "1"], { encoding: "utf8", stdio: ["ignore", stdout, "pipe"] });
     assert.equal(out.status, 2, `stdout ${stdout}`);
-    assert.match(String(out.stderr), /never background it/);
+    assert.match(String(out.stderr), /Never run it in the background/);
   }
   assert.equal(f.run("armed", f.factory).status, 1);
 });

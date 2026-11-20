@@ -60,7 +60,7 @@ export function hooksInactive(file: string, env: NodeJS.ProcessEnv = process.env
   if (env.FACTORY_COORDINATOR === "0") return "FACTORY_COORDINATOR=0 turns the hooks off";
   if (env.FACTORY_COORDINATOR === "1") return null;
   const owner = lockSession(lock);
-  if (!owner) return `${lock} records no Copilot session; write owner.json with copilot_session`;
+  if (!owner) return `${lock} records no Copilot session. Write owner.json with copilot_session.`;
   const session = env.COPILOT_AGENT_SESSION_ID;
   return session && session !== owner ? `${lock} records session ${owner}, not this session ${session}` : null;
 }

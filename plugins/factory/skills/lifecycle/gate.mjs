@@ -50,7 +50,7 @@ function hooksInactive(file, env = process.env) {
     return null;
   const owner = lockSession(lock);
   if (!owner)
-    return `${lock} records no Copilot session; write owner.json with copilot_session`;
+    return `${lock} records no Copilot session. Write owner.json with copilot_session.`;
   const session = env.COPILOT_AGENT_SESSION_ID;
   return session && session !== owner ? `${lock} records session ${owner}, not this session ${session}` : null;
 }

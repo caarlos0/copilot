@@ -239,8 +239,8 @@ test("--expected-budget rejects a stale budget and leaves the file untouched", a
   f.fails(/positive integer or none/, "--budget", '{"max_parallel_workers":3}', "--expected-budget", "abc");
   f.ok("--budget", '{"max_parallel_workers":3}', "--expected-budget", "none");
   const original = await readFile(f.file, "utf8");
-  f.fails(/Budget changed since it was read/, "--budget", '{"max_parallel_workers":5}', "--expected-budget", "none");
-  f.fails(/Budget changed since it was read/, "--budget", '{"max_parallel_workers":5}', "--expected-budget", "4");
+  f.fails(/budget changed since it was read/, "--budget", '{"max_parallel_workers":5}', "--expected-budget", "none");
+  f.fails(/budget changed since it was read/, "--budget", '{"max_parallel_workers":5}', "--expected-budget", "4");
   assert.equal(await readFile(f.file, "utf8"), original);
   f.ok("--budget", '{"max_parallel_workers":5}', "--expected-budget", "3");
   assert.deepEqual((await f.read()).budget, { max_parallel_workers: 5 });
@@ -254,7 +254,7 @@ test("an operator write needs the seen budget and can set nothing else", async (
   await assert.rejects(update(f.file, { budget }, { operator: true }), ConflictError);
   await assert.rejects(update(f.file, { budget, "expected-budget": "9" }, { operator: true }), ConflictError);
   await assert.rejects(update(f.file, { budget, "expected-budget": "10", "run-goal": "Other" }, { operator: true }),
-    /may only set the budget/);
+    /can set only the budget/);
   assert.equal(await readFile(f.file, "utf8"), original);
   const data = await update(f.file, { budget, "expected-budget": "10" }, { operator: true });
   assert.deepEqual(data.budget, { max_parallel_workers: 2 });
@@ -332,7 +332,7 @@ test("an operator write needs the seen limits and lever and keeps the 1 to 100 c
       /from 1 to 100/, bad);
   }
   await assert.rejects(update(f.file, { limits, "expected-limits": '{"implementation":3}', rules: "[]" }, { operator: true }),
-    /may only set the budget, limits, or Lever/);
+    /can set only the budget, the limits, or the Lever/);
   assert.equal(await readFile(f.file, "utf8"), original);
   const data = await update(f.file, {
     limits, "expected-limits": '{"implementation":3}', lever, "expected-lever": '{"autonomy_cap":null}',
@@ -797,7 +797,7 @@ test("a merged archived task is not restored", async (t) => {
     tasks: example.tasks.map((task) => task.id === "issue-3" ? { ...task, updated_at: "2020-01-01T00:00:00Z" } : task),
   });
   f.ok("--task", "issue-20", "--title", "Next", "--issue", issue(20), "--next-action", "go");
-  f.fails(/cannot be reopened/, "--task", "again", "--title", "Again", "--issue", issue(3), "--next-action", "x");
+  f.fails(/Do not reopen it/, "--task", "again", "--title", "Again", "--issue", issue(3), "--next-action", "x");
   f.fails(/was merged/, "--task", "issue-3", "--restore", "--state", "initial", "--note", "x");
   assert.equal(JSON.parse(await readFile(archiveFile(f, "2020-01-01"), "utf8")).tasks[0].id, "issue-3");
   assert.equal((await f.read()).tasks.some((task) => task.id === "issue-3"), false);

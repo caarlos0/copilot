@@ -19,7 +19,7 @@ var __toESM = (mod, isNodeMode, target) => {
       return cached;
   }
   target = mod != null ? __create(__getProtoOf(mod)) : {};
-  const to = isNodeMode || !mod || !mod.__esModule || !__hasOwnProp.call(mod, "default") ? __defProp(target, "default", { value: mod, enumerable: true }) : target;
+  const to = isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target;
   if (mod && typeof mod === "object" || typeof mod === "function") {
     for (let key of __getOwnPropNames(mod))
       if (!__hasOwnProp.call(to, key))
@@ -58,7 +58,7 @@ var require_cjs = __commonJS(function(exports) {
   Object.defineProperty(exports, "signals", { enumerable: true, get: function() {
     return signals_js_1.signals;
   } });
-  var processOk = (process2) => !!process2 && typeof process2 === "object" && typeof process2.removeListener === "function" && typeof process2.emit === "function" && typeof process2.reallyExit === "function" && typeof process2.listeners === "function" && typeof process2.kill === "function" && typeof process2.pid === "number" && typeof process2.on === "function";
+  var processOk = (process3) => !!process3 && typeof process3 === "object" && typeof process3.removeListener === "function" && typeof process3.emit === "function" && typeof process3.reallyExit === "function" && typeof process3.listeners === "function" && typeof process3.kill === "function" && typeof process3.pid === "number" && typeof process3.on === "function";
   var kExitEmitter = Symbol.for("signal-exit emitter");
   var global = globalThis;
   var ObjectDefineProperty = Object.defineProperty.bind(Object);
@@ -536,10 +536,10 @@ function archivedMessage(id, matches) {
     const outcome = task.resolution ? `${task.resolution.outcome}, ` : "";
     const revision = task.revision ?? 0;
     const fence = task.feedback ? ` --feedback-id ${task.feedback.id}` : "";
-    const action = task.resolution?.outcome === "merged" ? "Merged, so it cannot be reopened: skip it, or file a new issue and task." : `Restore with: --task ${task.id} --restore --state initial --note WHY --expected-revision ${revision}${fence}`;
+    const action = task.resolution?.outcome === "merged" ? "The task is merged. Do not reopen it. Skip it, or file a new issue and a new task." : `Restore with: --task ${task.id} --restore --state initial --note WHY --expected-revision ${revision}${fence}`;
     return `- ${task.id} "${task.title}" (${outcome}archived ${day}, revision ${revision}). ${action}`;
   });
-  return `Task ${id} matches archived work. Ask the user whether to restore it or skip it; do not add a duplicate.
+  return `Task ${id} matches archived work. Ask the user to restore it or skip it. Do not add a duplicate task.
 ${lines.join(`
 `)}`;
 }
@@ -551,7 +551,7 @@ function newTask(values, now) {
   }
   const state = values.state ?? "initial";
   if (state !== "initial" && state !== "review") {
-    throw new Error("A new task starts in the initial state, or in review when it has a --pr.");
+    throw new Error("A new task starts in the initial state. It starts in review only when it has a --pr.");
   }
   if (state === "review" && (values.pr === undefined || values.pr === "null")) {
     throw new Error("A new task starts in review only with --pr URL.");
@@ -581,7 +581,7 @@ function checkNotLinked(tasks, values) {
     const id = resourceId(values[option]);
     const owner = id && tasks.find((task) => task.state !== "resolved" && task.links.some((link) => resourceId(link) === id));
     if (owner) {
-      throw new Error(`Task ${values.task}: ${values[option]} is already linked from open task ${owner.id} "${owner.title}". Work on ${owner.id} instead of adding a duplicate. If two tasks already hold the same work, merge them with --merge-task KEEP --from OTHER.`);
+      throw new Error(`Task ${values.task}: ${values[option]} is already linked from open task ${owner.id} "${owner.title}". Work on ${owner.id}. Do not add a duplicate task. If two tasks hold the same work, merge them with --merge-task KEEP --from OTHER.`);
     }
   }
 }
@@ -601,16 +601,16 @@ function mergeTasks(tasks, values, at) {
   for (const task of [keep, other]) {
     const refusal = mergeRefusal(task);
     if (refusal)
-      throw new Error(`${refusal} Nothing was merged.`);
+      throw new Error(`${refusal} No task was merged.`);
     if (task.feedback && task.feedback.acknowledged_id !== task.feedback.id) {
-      throw new ConflictError(`Task ${task.id} has pending dashboard feedback. Reconcile workers and acknowledge it before merging.`);
+      throw new ConflictError(`Task ${task.id} has pending dashboard feedback. Reconcile the workers and acknowledge the feedback before you merge.`);
     }
   }
   if (running(keep) && running(other)) {
-    throw new Error(`Tasks ${keepId} and ${otherId} both have a running worker. Park one (--workers with status idle or closed) before merging.`);
+    throw new Error(`Tasks ${keepId} and ${otherId} both have a running worker. Park one worker before you merge. Set its --workers status to idle or closed.`);
   }
   if (keepFirst(other, keep) < 0) {
-    throw new Error(`Keep ${otherId}, not ${keepId}: it is further along (review, implementation, investigation, initial; then the one with a PR; then the older). Run --merge-task ${otherId} --from ${keepId}.`);
+    throw new Error(`Keep ${otherId}, not ${keepId}. It is further along. The order is review, implementation, investigation, initial. Then the task with a PR. Then the older task. Run --merge-task ${otherId} --from ${keepId}.`);
   }
   const note = `merged ${otherId} into ${keepId}`;
   const kept = structuredClone(keep);
@@ -647,14 +647,14 @@ function changeState(task, values, now, operator) {
   checkTransition(values.pr === undefined ? task : { ...task, pr: nullable(values.pr) }, to, operator);
   const from = task.state;
   if (values.resolution !== undefined && to !== "resolved") {
-    throw new Error("--resolution is allowed only when moving to resolved.");
+    throw new Error("Use --resolution only when you move a task to resolved.");
   }
   if (to === "blocked") {
     if (!values.blocker)
       throw new Error("Moving to blocked needs --blocker REASON.");
     task.blocker = { from, ...parseBlocker(values.blocker), since: now };
   } else if (values.blocker !== undefined) {
-    throw new Error("--blocker is allowed only when moving to or staying in blocked.");
+    throw new Error("Use --blocker only when you move a task to blocked or when the task stays blocked.");
   }
   if (from === "blocked")
     task.blocker = null;
@@ -715,17 +715,17 @@ function dropRelaunched(task, patch) {
 function checkInvestigation(patch, state) {
   const worker = patch.workers?.investigation;
   if (worker?.mode === "continuous" || worker && Object.hasOwn(worker, "worktree")) {
-    throw new Error("An investigation worker is one-shot and read-only: no continuous mode, no worktree. Implementation work goes to an implementation worker.");
+    throw new Error("An investigation worker is one-shot and read-only. It has no continuous mode and no worktree. Give implementation work to an implementation worker.");
   }
   if (state === "investigation" && patch.worktree != null) {
-    throw new Error("A task in investigation has no worktree. Move it to implementation first.");
+    throw new Error("A task in investigation has no worktree. Move the task to implementation first.");
   }
 }
 var settingOptions = ["budget", "expected-budget", "limits", "expected-limits", "lever", "expected-lever"];
 function checkExpected(name, patch, expectedJson, present, operator) {
   if (expectedJson === undefined) {
     if (operator)
-      throw new ConflictError(`A ${name} change needs --expected-${name} from a fresh read.`);
+      throw new ConflictError(`A ${name} change needs --expected-${name} from the latest read.`);
     return;
   }
   const expected = json(expectedJson, `expected-${name}`, isObject);
@@ -733,7 +733,7 @@ function checkExpected(name, patch, expectedJson, present, operator) {
     if (!Object.hasOwn(expected, key))
       throw new Error(`--expected-${name} must include ${key}.`);
     if (expected[key] !== (present?.[key] ?? null)) {
-      throw new ConflictError(`The ${name} changed since it was read. Reload it and reconcile before saving.`);
+      throw new ConflictError(`The ${name} changed since it was read. Read it again and reconcile. Then save.`);
     }
   }
 }
@@ -742,7 +742,7 @@ async function announce(file, source, events) {
     try {
       await emit(file, { ...event, source });
     } catch (error) {
-      console.error(`${file}: ${event.type} event not emitted: ${error.message}`);
+      console.error(`${file}: ${event.type} event was not emitted: ${error.message}`);
     }
   }
 }
@@ -751,7 +751,7 @@ async function writeFactory(file, values, operator, source) {
   const isNew = original === null;
   const now = new Date().toISOString();
   if (isNew && (!values.project || !values["run-goal"])) {
-    throw new Error("New factories require --project and --run-goal.");
+    throw new Error("A new factory needs --project and --run-goal.");
   }
   let current = isNew ? {
     format,
@@ -816,14 +816,14 @@ async function writeFactory(file, values, operator, source) {
       }
       const present = current.budget?.max_parallel_workers;
       if ((expected === "none" ? undefined : Number(expected)) !== present) {
-        throw new ConflictError("Budget changed since it was read. Reload it and reconcile before saving.");
+        throw new ConflictError("The budget changed since it was read. Read it again and reconcile. Then save.");
       }
     } else if (operator) {
-      throw new ConflictError("A budget change needs --expected-budget from a fresh read.");
+      throw new ConflictError("A budget change needs --expected-budget from the latest read.");
     }
   }
   if (operator && values.task === undefined && Object.keys(values).some((key) => !settingOptions.includes(key))) {
-    throw new Error("A dashboard write without a task may only set the budget, limits, or Lever ceilings.");
+    throw new Error("A dashboard write without a task can set only the budget, the limits, or the Lever ceilings.");
   }
   if (values.ignored !== undefined)
     rootPatch.ignored = json(values.ignored, "ignored", Array.isArray);
@@ -869,7 +869,7 @@ async function writeFactory(file, values, operator, source) {
       throw new Error("--restore needs --task ID, --state initial, and --note WHY.");
     }
     if (live)
-      throw new Error(`Task ${values.task} is live. Restore applies only to archived tasks.`);
+      throw new Error(`Task ${values.task} is live. Restore only archived tasks.`);
   }
   const addingTask = values.task !== undefined && !live && !restoring;
   const inserting = addingTask || restoring;
@@ -898,7 +898,7 @@ async function writeFactory(file, values, operator, source) {
       }
     }
     const at = values["task-updated-at"] ?? now;
-    const before = restoring ? archived.task : addingTask ? newTask(values, at) : tasks.find((task) => task.id === values.task);
+    const before = restoring ? archived.task : addingTask ? newTask(values, at) : tasks.find((task2) => task2.id === values.task);
     const revision = before.revision ?? 0;
     if (values["expected-revision"] !== undefined) {
       if (!/^\d+$/.test(values["expected-revision"]) || !Number.isSafeInteger(Number(values["expected-revision"]))) {
@@ -907,34 +907,34 @@ async function writeFactory(file, values, operator, source) {
       if (addingTask)
         throw new Error("--expected-revision applies only to existing tasks.");
       if (Number(values["expected-revision"]) !== revision) {
-        throw new ConflictError("Task changed since it was read. Reload it and reconcile before saving.");
+        throw new ConflictError("The task changed since it was read. Read it again and reconcile. Then save.");
       }
     } else if (operator || before.feedback) {
-      throw new ConflictError("This task needs --expected-revision from a fresh read.");
+      throw new ConflictError("This task needs --expected-revision from the latest read.");
     }
     if (operator) {
       if (addingTask)
         throw new Error("Select an existing task.");
       if (typeof values.note !== "string" || !values.note.trim()) {
-        throw new Error("A comment is required when moving a task from the dashboard.");
+        throw new Error("A comment is required to move a task from the dashboard.");
       }
       checkTransition(before, values.state, true);
     } else if (values["ack-feedback"] !== undefined) {
       if (!before.feedback || values["ack-feedback"] !== before.feedback.id) {
-        throw new ConflictError("Dashboard feedback changed. Reread it before acknowledging.");
+        throw new ConflictError("Dashboard feedback changed. Read it again before you acknowledge it.");
       }
       if (Object.keys(values).some((key) => !["task", "expected-revision", "ack-feedback"].includes(key))) {
         throw new Error("Use --ack-feedback only with --task and --expected-revision.");
       }
     } else if (before.feedback) {
       if (before.feedback.acknowledged_id !== before.feedback.id) {
-        throw new ConflictError("Dashboard feedback is pending. Reconcile workers, then use --ack-feedback ID.");
+        throw new ConflictError("Dashboard feedback is pending. Reconcile the workers. Then use --ack-feedback ID.");
       }
       if (values["feedback-id"] !== before.feedback.id) {
-        throw new ConflictError("Worker feedback ID is stale or missing. Rebrief the worker before applying its result.");
+        throw new ConflictError("The worker feedback ID is stale or missing. Brief the worker again before you apply its result.");
       }
     } else if (values["feedback-id"] !== undefined) {
-      throw new ConflictError("This task has no dashboard feedback matching --feedback-id.");
+      throw new ConflictError("This task has no dashboard feedback that matches --feedback-id.");
     }
     let task = structuredClone(before);
     if (values.state !== undefined && values.state !== task.state) {
@@ -946,7 +946,7 @@ async function writeFactory(file, values, operator, source) {
         task.blocker = { from: task.blocker.from, ...parseBlocker(values.blocker), since: task.blocker.since };
       }
       if (values.resolution !== undefined) {
-        throw new Error("--resolution is allowed only when moving to resolved.");
+        throw new Error("Use --resolution only when you move a task to resolved.");
       }
     }
     const patch = taskPatch(task, values);
@@ -969,7 +969,7 @@ async function writeFactory(file, values, operator, source) {
       Object.assign(task.history.at(-1), { source: "dashboard", feedback_id: id });
       task.feedback = { id, acknowledged_id: before.feedback?.acknowledged_id ?? null };
       task.merge = null;
-      task.next_action = "Read dashboard feedback and reconcile workers before continuing.";
+      task.next_action = "Read the dashboard feedback. Reconcile the workers. Then continue.";
     } else if (values["ack-feedback"] !== undefined) {
       task.feedback.acknowledged_id = values["ack-feedback"];
     }
@@ -1007,7 +1007,7 @@ async function writeFactory(file, values, operator, source) {
     current.tasks = current.tasks.filter((task) => !stale.includes(task));
   }
   if (await readOptional(file) !== original) {
-    throw new ConflictError("Factory changed during update. Reread it and reconcile before retrying.");
+    throw new ConflictError("The factory changed during the update. Read it again and reconcile. Then try again.");
   }
   if (stale.length)
     await saveArchive(directory, current.project, stale);
@@ -1019,7 +1019,7 @@ async function writeFactory(file, values, operator, source) {
     try {
       await removeArchived(directory, current.project, values.task);
     } catch (error) {
-      throw new Error(`Task ${values.task} is restored, but its archive copy was not removed: ${error.message}. The live task wins; do not retry the restore.`);
+      throw new Error(`Task ${values.task} is restored, but its archive copy was not removed: ${error.message}. The live task wins. Do not restore the task again.`);
     }
   }
   return current;
@@ -1080,11 +1080,11 @@ async function takeLock(lockFile) {
     }
     const owner = await lockOwner(lockFile);
     if (owner) {
-      throw new ConflictError(`Factory write is locked${owner.pid ? ` by pid ${owner.pid}` : ""}. Reread before retrying; remove a .write.lock with no pid only after verifying no writer is active.`);
+      throw new ConflictError(`Factory write is locked${owner.pid ? ` by pid ${owner.pid}` : ""}. Read the factory again before you try again. Remove a .write.lock with no pid only after you verify that no writer is active.`);
     }
     await rm(lockFile, { force: true });
   }
-  throw new ConflictError("Factory write is locked by another writer. Reread before retrying.");
+  throw new ConflictError("Factory write is locked by another writer. Read the factory again before you try again.");
 }
 async function update(file, values, { operator = false, source = operator ? "dashboard" : "coordinator" } = {}) {
   try {
@@ -1162,7 +1162,7 @@ async function main() {
       allowPositionals: true
     }));
     if (values.help) {
-      console.log(`Create or update a factory.json with validated flags.
+      console.log(`Create or update a factory.json file. The command validates all flags.
 
 Usage: node factory.mjs FILE [RUN OPTIONS] [TASK OPTIONS]
        bun factory.mjs FILE [RUN OPTIONS] [TASK OPTIONS]
@@ -1171,7 +1171,7 @@ Create a factory (FILE is <owner.repo>-factory.json):
   node factory.mjs FILE --project owner/repo --run-goal "Run the factory for owner/repo" \\
     --rex-session "$REX_SESSION"
 
-Add a task (link its GitHub issue, or pass --issue null for work without one):
+Add a task (link its GitHub issue, or use --issue null for work without an issue):
   node factory.mjs FILE --task issue-42 --title "Fix login" \\
     --issue https://github.com/owner/repo/issues/42 --next-action "Start investigation"
   node factory.mjs FILE --task favicon --title "Add a favicon" --issue null \\
@@ -1182,122 +1182,132 @@ Move a task (the state change and its history entry are one write):
   node factory.mjs FILE --task issue-42 --state blocked --blocker "Needs a product decision"
   node factory.mjs FILE --task issue-42 --state resolved --resolution merged
 
-Bring back archived work (ask the user first; the add command prints this when a new task
-matches an archived id, issue, or PR):
+Restore archived work (ask the user first. The add command prints this command when a new task
+matches an archived ID, issue, or PR):
   node factory.mjs FILE --task issue-42 --restore --state initial --note "User wants it again" \\
     --expected-revision N
 
-Merge two tasks that hold the same work (the printed command of a duplicate-task finding):
+Merge two tasks that hold the same work (a duplicate-task finding prints this command):
   node factory.mjs FILE --merge-task issue-42 --from pr-57
-  KEEP is the task furthest along (review, implementation, investigation, initial; then the one
-  with a PR; then the older). OTHER becomes resolved as duplicate with details.merged_into KEEP;
-  KEEP gains its issue, PR and links. Refused when both tasks have a running worker, or when
-  either was merged or has pending dashboard feedback. Emits task.updated for both.
+  KEEP is the task that is furthest along. The order is review, implementation, investigation,
+  initial. Then the task with a PR. Then the older task. OTHER becomes resolved as duplicate with
+  details.merged_into KEEP. KEEP gets the issue, PR, and links of OTHER. The command fails when
+  both tasks have a running worker, when a task was merged, or when a task has pending dashboard
+  feedback. The command emits task.updated for both tasks.
 
 Run options:
-  --project VALUE       Project (owner/repo); stored once
+  --project VALUE       Project (owner/repo). The command stores it once
   --run-goal VALUE      Factory goal
   --run-status VALUE    active, paused, blocked, or finished (default active on create)
-  --rex-session VALUE   Rex session the factory started in, or null
+  --rex-session VALUE   Rex session in which the factory started, or null
   --rules JSON          Replace the rules array. A rule: {id, description, enabled, kind?, query?,
                         every?, prompt?, last_run_at?, worker?}. kind: search (needs query), backlog,
                         or improve. every (30m, 6h, 1d) makes the rule run on a schedule while the
                         factory runs
-  --rule ID --ran       Stamp the rule's last_run_at now. Do it before dispatching the run, and after
-                        every due wake, even when nothing was found
-  --rule ID --rule-worker JSON  Set the rule's worker record (same fields as a task worker), or null
-  --ignored JSON        Replace the skipped-work list: [{url, at, reason}]
-  --session UUID        Record the factory's own Copilot session in FILE's sessions registry
-                        (<owner.repo>-factory-sessions.jsonl). Worker sessions are recorded
+  --rule ID --ran       Set last_run_at of the rule to now. Do it before you start the rule worker.
+                        Do it also after every due wake, even when the worker finds nothing
+  --rule ID --rule-worker JSON  Set the worker record of the rule (same fields as a task worker), or null
+  --ignored JSON        Replace the list of skipped work: [{url, at, reason}]
+  --session UUID        Record the Copilot session of the factory in the sessions registry of FILE
+                        (<owner.repo>-factory-sessions.jsonl). The command records worker sessions
                         automatically from --workers and --rule-worker records that have a session.
-                        A running worker without one gets the single session in the Copilot
-                        session-state folder (FACTORY_SESSION_STATE, default ~/.copilot/session-state)
-                        created since its launch in its worktree, or in the current directory;
-                        with many matches it sets "session_scan" and skips the scan until relaunch
-  --limits JSON         Merge worker caps, e.g. '{"investigation":2}' (default 3 each; the dashboard
-                        accepts 1 to 100). Emits limits.updated
-  --expected-limits JSON  Caps the write was based on, e.g. '{"investigation":3}'. Every key in
-                        --limits must be listed and match the current value, or the write is a conflict
-  --lever JSON          Merge Lever ceilings, e.g. '{"spend":"high","autonomy_cap":"L2"}'. spend:
-                        standard, high, max. autonomy_cap: L0 to L5. null means no cap. A ceiling
-                        only lowers what Lever resolves; it never raises it. Emits lever.updated
-  --expected-lever JSON   Ceilings the write was based on (null for unset); same rule as --expected-limits
-  --budget JSON         Merge the total worker budget, e.g. '{"max_parallel_workers":10}' (1 to 100).
-                        The coordinator never runs more workers than this, over all roles. A new
-                        factory gets 10; a file without a budget has no total cap. Emits budget.updated
-  --expected-budget N|none  Budget the write was based on (none when the file had no budget);
-                        a different current value is a conflict. Needs --budget
+                        A running worker without a session gets the one session that started
+                        after its launch in its worktree, or in the current directory. The session
+                        is in the Copilot session-state folder (FACTORY_SESSION_STATE, default
+                        ~/.copilot/session-state). With many matches, the command sets "session_scan"
+                        and skips the scan until the next launch
+  --limits JSON         Merge the worker limits, for example '{"investigation":2}' (default 3 each;
+                        the dashboard accepts 1 to 100). Emits limits.updated
+  --expected-limits JSON  Limits on which the write is based, for example '{"investigation":3}'. List
+                        every key of --limits. Each value must match the current value. If not, the
+                        write is a conflict
+  --lever JSON          Merge the Lever ceilings, for example '{"spend":"high","autonomy_cap":"L2"}'.
+                        spend: standard, high, max. autonomy_cap: L0 to L5. null means no ceiling.
+                        A ceiling only lowers what Lever resolves. It never raises it.
+                        Emits lever.updated
+  --expected-lever JSON   Ceilings on which the write is based (null when not set). The rule is the
+                        same as for --expected-limits
+  --budget JSON         Merge the total worker budget, for example '{"max_parallel_workers":10}'
+                        (1 to 100). The coordinator never runs more workers than this number, over
+                        all roles. A new factory gets 10. A file without a budget has no total
+                        limit. Emits budget.updated
+  --expected-budget N|none  Budget on which the write is based (none when the file has no budget).
+                        A different current value is a conflict. Needs --budget
   --updated-at VALUE    Explicit run timestamp (ISO 8601 with timezone)
-  --source NAME         Source of the events this write emits to the broker (default coordinator;
+  --source NAME         Source of the events that this write emits to the broker (default coordinator;
                         task.moved, task.updated, feedback.pending). The factory waits with
                         --exclude-source coordinator, so its own writes do not wake it
 
 Task options:
-  --task ID             Task ID; required when changing a task
+  --task ID             Task ID. Required to change a task
   --title VALUE         Task title (new task)
   --issue VALUE         GitHub issue URL (new task), or null for work without an issue
   --pr VALUE            GitHub PR URL, or null
-  --head VALUE          Full PR head SHA (local branch head without an issue), or null; a new head
-                        clears the merge decision
+  --head VALUE          Full PR head SHA (local branch head for a task without an issue), or null.
+                        A new head clears the merge decision
   --reviewed-head VALUE Full SHA of the last reviewed head, or null
   --state VALUE         initial, investigation, implementation, review, blocked, resolved
   --note VALUE          History note for the state change
   --next-action VALUE   Next action (new task)
-  --blocker VALUE       Reason; with --state blocked, or to edit a blocked task. For a user decision pass
-                        JSON '{"reason":"...","options":[{"label":"...","state":"implementation","recommended":true}]}'
-                        (1-8 options; state and recommended optional; one recommended at most).
+  --blocker VALUE       Reason. Use it with --state blocked, or to edit a blocked task. For a user
+                        decision, give JSON
+                        '{"reason":"...","options":[{"label":"...","state":"implementation","recommended":true}]}'
+                        (1-8 options; state and recommended are optional; at most one recommended).
                         Optional "class" (user-decision, outside-action, external-wait, ci-infra, approval)
-                        and "owner" (a GitHub login, or operator) say why the task is blocked and who unblocks it
-  --resolution VALUE    ${outcomes.join(", ")}; with --state resolved
-  --links JSON          Replace the GitHub issue/PR URL array
-  --workers JSON        Merge worker records by role, e.g.
-                        '{"implementation":{"status":"running","pane":"block:id"}}'; a null role clears it
-                        Optional "summary" (text, at most 2000 characters) and "summary_at" (ISO 8601
-                        with timezone) hold the latest result summary; the task card shows it
+                        and "owner" (a GitHub login, or operator) show why the task is blocked and
+                        who unblocks it
+  --resolution VALUE    ${outcomes.join(", ")}. Use it with --state resolved
+  --links JSON          Replace the array of GitHub issue and PR URLs
+  --workers JSON        Merge worker records by role, for example
+                        '{"implementation":{"status":"running","pane":"block:id"}}'. A null role
+                        clears the record. Optional "summary" (text, at most 2000 characters) and
+                        "summary_at" (ISO 8601 with timezone) hold the latest result summary.
+                        The task card shows it
   --worktree JSON       {"path":"...","created_by_run":true}, or null
-                        Refused in investigation; an investigation worker is one-shot and
-                        read-only (no continuous mode, no worktree)
-  --merge JSON          Merge the head-specific decision ({authorized_by,source,evidence,
-                        authorized_at,head,requested_at}), or null to clear it
-                        Source: lever; legacy comment/factory-session records remain readable
-                        Audit evidence only; recheck Lever's may_merge before landing
-  --details JSON        Merge a JSON object into task details
+                        The command refuses it in investigation. An investigation worker is one-shot
+                        and read-only (no continuous mode, no worktree)
+  --merge JSON          Merge the decision for the head ({authorized_by,source,evidence,
+                        authorized_at,head,requested_at}), or null to clear it.
+                        Source: lever. Legacy comment and factory-session records stay readable.
+                        The record is audit evidence only. Check the Lever may_merge result
+                        again before you land
+  --details JSON        Merge a JSON object into the task details
   --task-updated-at VALUE  Explicit task and transition timestamp (ISO 8601 with timezone)
-  --expected-revision N  Task revision from a fresh read (missing revision means 0)
-                        Required after a dashboard move; rejects stale writes
-  --ack-feedback ID     Acknowledge dashboard direction after reconciling workers
-                        Use only with --task and --expected-revision
-  --feedback-id ID      Feedback ID from the worker result; required after acknowledgement
+  --expected-revision N  Task revision from the latest read (a missing revision means 0).
+                        Required after a dashboard move. The command rejects stale writes
+  --ack-feedback ID     Acknowledge dashboard direction after you reconcile the workers.
+                        Use it only with --task and --expected-revision
+  --feedback-id ID      Feedback ID from the worker result. Required after the acknowledgement
 
-Allowed moves: initial to investigation, initial to review (only with a PR; a new task may also
+Allowed moves: initial to investigation, initial to review (only with a PR; a new task can also
 start in review with --state review --pr URL), investigation to implementation, implementation to
 review, review to implementation, any open state to blocked or resolved, blocked to any open
 state, and resolved to initial (reopen, not after a merge). A task with an issue needs a PR in
 review and for a merge decision. A task without an issue (--issue null) uses every state without a
-PR; record its local branch head in --head and, after a local git merge, the merge commit SHA in
---details before resolving it as merged. Adding or restoring a task moves resolved tasks
-last updated more than seven days ago, except those with pending dashboard feedback, into
-<owner.repo>-factory-archive/YYYY-MM-DD.json (by last update day). Archived tasks are never deleted.
-Adding a new task that matches an archived id, issue, or PR fails; ask the user whether to restore
-or skip it.
-The helper validates the whole file before writing. Success is
-silent. Errors go to stderr. Exit: 0 success, 1 invalid data or I/O, 2 usage. Use literal null
-only for nullable fields. Keep the factory's owner lock while using this command.
-The dashboard can move a task back or directly to resolved with a non-merge outcome and a comment.
-A short-lived FILE.write.lock serializes
-dashboard and CLI writes; it is separate from the factory owner lock. Each task write increments
-revision. Dashboard feedback blocks agent updates until acknowledged, then fences out results
-with an old feedback ID. A conflict is an error, never an automatic retry.`);
+PR. Record its local branch head in --head. After a local git merge, record the merge commit SHA in
+--details before you resolve the task as merged. When you add or restore a task, the command moves
+resolved tasks to <owner.repo>-factory-archive/YYYY-MM-DD.json (by the day of the last update).
+It moves only tasks whose last update is more than seven days old. It does not move tasks with
+pending dashboard feedback. The command never deletes archived tasks.
+A new task that matches an archived ID, issue, or PR fails. Ask the user to restore it or skip it.
+The command validates the whole file before it writes. Success is silent. Errors go to stderr.
+Exit: 0 success, 1 invalid data or I/O error, 2 usage error. Use the literal null only for nullable
+fields. Keep the owner lock of the factory while you use this command.
+The dashboard can move a task back, or directly to resolved with a non-merge outcome and a comment.
+A short-lived FILE.write.lock serializes dashboard and CLI writes. It is separate from the owner
+lock of the factory. Each task write increments revision. Dashboard feedback blocks agent updates
+until the agent acknowledges it. Then the command rejects results with an old feedback ID.
+A conflict is an error. The command never tries again.`);
       return;
     }
     if (positionals.length !== 1 || !positionals[0])
       throw new Error("Exactly one factory FILE is required.");
     [file] = positionals;
     if (values.task === undefined && taskOptions.some((option) => values[option] !== undefined)) {
-      throw new Error("Task options require --task ID.");
+      throw new Error("Task options need --task ID.");
     }
     if (values.task === undefined && Object.keys(values).length === 0) {
-      throw new Error("Specify run options or --task ID.");
+      throw new Error("Give run options or --task ID.");
     }
     file = resolve(file);
   } catch (error) {

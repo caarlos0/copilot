@@ -115,11 +115,11 @@ async function claimWaiter(factory: string) {
       }
       const pid = await waiterPid(factory);
       if (pid !== null) {
-        throw new Error(`A waiter (pid ${pid}) is already armed for this factory. Keep exactly one waiter; wait for it to exit or stop it first.`);
+        throw new Error(`A waiter (pid ${pid}) is already armed for this factory. Keep only one waiter. Wait for it to exit, or stop it.`);
       }
       await rm(path, { force: true });
     }
-    throw new Error("Another waiter claimed this factory at the same moment. Keep exactly one waiter.");
+    throw new Error("Another waiter claimed this factory at the same time. Keep only one waiter.");
   } finally {
     await rm(temp, { force: true });
   }
@@ -162,7 +162,7 @@ function validateImprove(type: string, data: EventData) {
   }
   for (const key of ["rule", "title", "result"]) text(key);
   if (typeof data.evidence !== "string") throw new UsageError(`${type} data "evidence" must be a string.`);
-  if (data.evidence.length > maxAttentionText) throw new UsageError(`${type} data "evidence" is at most ${maxAttentionText} characters.`);
+  if (data.evidence.length > maxAttentionText) throw new UsageError(`${type} data "evidence" must have at most ${maxAttentionText} characters.`);
   if (!changeKinds.includes(data.change)) throw new UsageError(`${type} change must be one of: ${changeKinds.join(", ")}.`);
   if (data.result !== basename(data.result) || data.result.startsWith(".")) {
     throw new UsageError(`${type} data "result" must name a file in the state directory.`);
@@ -181,7 +181,7 @@ function validateAttention(type: string, data: EventData) {
   }
   if (type === "attention.resolved") return;
   text("text");
-  if (data.text.length > maxAttentionText) throw new UsageError(`${type} data "text" is at most ${maxAttentionText} characters.`);
+  if (data.text.length > maxAttentionText) throw new UsageError(`${type} data "text" must have at most ${maxAttentionText} characters.`);
   if (!attentionKinds.includes(data.kind)) throw new UsageError(`${type} kind must be one of: ${attentionKinds.join(", ")}.`);
   if (data.options !== undefined && !(Array.isArray(data.options) && data.options.every((option: unknown) => typeof option === "string"))) {
     throw new UsageError(`${type} data "options" must be an array of strings.`);
@@ -217,15 +217,15 @@ async function checkHead(factory: string, task: string | null, head: string) {
   const worktree = record?.worktree;
   if (!worktree?.path) return;
   const at = git(worktree.path, "rev-parse", "HEAD");
-  if (at !== head) throw new Error(`The worktree ${worktree.path} is at ${at}, not at head ${head}. Commit, then report the real head.`);
-  if (git(worktree.path, "status", "--porcelain")) throw new Error(`The worktree ${worktree.path} has uncommitted changes; commit, then emit again.`);
+  if (at !== head) throw new Error(`The worktree ${worktree.path} is at ${at}, not at head ${head}. Commit the changes. Then report the correct head.`);
+  if (git(worktree.path, "status", "--porcelain")) throw new Error(`The worktree ${worktree.path} has uncommitted changes. Commit them. Then emit the event again.`);
   if (record.pr) return;
   const base = defaultBranch(worktree.path) ?? "main";
   try {
     git(worktree.path, "merge-base", "--is-ancestor", base, head);
   } catch (error) {
     if ((error as { status?: number }).status !== 1) throw error;
-    throw new Error(`Head ${head} does not descend from ${base}. Run git rebase ${base}, then emit again.`);
+    throw new Error(`Head ${head} does not descend from ${base}. Run git rebase ${base}. Then emit the event again.`);
   }
 }
 
@@ -295,7 +295,7 @@ async function readEvents(file: string, offset: number) {
       try {
         events.push(JSON.parse(line));
       } catch {
-        console.error(`Skipped a malformed event line: ${line.slice(0, 80)}`);
+        console.error(`Skipped an invalid event line: ${line.slice(0, 80)}`);
       }
     }
     return { events, cursor: offset + end };
@@ -420,7 +420,7 @@ async function armedWait(factory: string, { since, timeout, exclude, due, reconc
   }
 }
 
-const usage = `Factory event broker: a durable, append-only event log with a waiter that wakes at once.
+const usage = `Factory event broker: a durable event log that only grows, with a waiter that wakes at once.
 
 Usage: node broker.mjs wait FACTORY_FILE [--since CURSOR] [--timeout SECONDS]
                        [--exclude-source SOURCE ...] [--due]
@@ -429,60 +429,62 @@ Usage: node broker.mjs wait FACTORY_FILE [--since CURSOR] [--timeout SECONDS]
        node broker.mjs armed FACTORY_FILE
 
 The log is <owner.repo>-factory-events.jsonl beside FACTORY_FILE (mode 0600). A cursor is a
-byte offset in it. Events are notifications; the factory JSON stays the source of truth.
+byte offset in the log. Events are notifications. The factory JSON file stays the source of truth.
 
-wait    Blocks until an event exists after the cursor, prints {"events":[...],"cursor":"N"},
-        and exits. Pass the printed cursor to the next wait: no event is lost between calls.
-        Without --since it starts at the current end of the log ("cursor" prints that end).
+wait    Waits until an event exists after the cursor, prints {"events":[...],"cursor":"N"},
+        and exits. Give the printed cursor to the next wait. Then no event is lost between calls.
+        Without --since, wait starts at the current end of the log ("cursor" prints that end).
         --exclude-source skips events from a source (repeatable), so the factory ignores its
-        own writes; skipped events still advance the cursor.
+        own writes. Skipped events still advance the cursor.
         --timeout S exits 0 with "events":[] and "timeout":true after S seconds.
         --due also returns a synthetic rule.due event (data.rules = rule IDs) when an enabled
-        rule with "every" is due. It follows the factory file, so run-status and rule edits made
-        while it waits move the due time. Stamp it with factory.mjs --rule ID --ran, or the next wait
-        returns it again. Leave --due off while no slot is free for the rule.
+        rule with "every" is due. It follows the factory file, so edits of run-status and rules
+        move the due time while it waits. Set last_run_at with factory.mjs --rule ID --ran.
+        If you do not, the next wait returns the event again. Do not use --due while no
+        slot is free for the rule.
         --due also returns a synthetic reconcile.due event (data.every = "5m") every 5 minutes
         after the waiter starts, while the run is active. The window is per waiter, so a wake
-        does not fire it at once. On it, run reconcile.mjs and re-arm.
+        does not start it at once. After this event, run reconcile.mjs and arm the waiter again.
 emit    Appends one event and prints it. Types: ${Object.keys(eventTypes).join(", ")}.
         Needed data keys: ${Object.entries(eventTypes).map(([type, { data }]) => `${type}: ${data.join(", ")}`).join("; ")}.
         worker.result outcome: ${workerOutcomes.join(", ")}. --source defaults to worker.
-        emit refuses (exit 1, nothing appended) a worker.result whose data.result is not a JSON
-        file in the state directory with the same task, role and outcome; a worker.blocked with
+        emit refuses a worker.result (exit 1, nothing appended) when data.result is not a JSON
+        file in the state directory with the same task, role, and outcome. A worker.blocked with
         data.result gets the same check with outcome blocked. A complete implementation
-        worker.result with data.head must match HEAD of the task's worktree and, for a task
-        without a PR, descend from main (skipped when the task has no worktree record).
+        worker.result with data.head must match HEAD of the worktree of the task. For a task
+        without a PR, the head must also descend from main. emit skips these checks when the
+        task has no worktree record.
         pr.merged needs a full merge_commit SHA.
         attention.requested and attention.resolved need no --task (a rule worker or the
         coordinator has none). A hook emits them with --source attention when a Copilot session
         waits for the user. attention.requested data: session (the Copilot session ID, a string),
         kind (${attentionKinds.join(", ")}), text (a string of at most ${maxAttentionText} characters), and
         optional role, pane (strings) and options (an array of strings). attention.resolved needs
-        only session. Wait with --exclude-source attention so these never wake the factory.
+        only session. Wait with --exclude-source attention, so these events never wake the factory.
         improve.proposed (--source improve, no --task) puts one proposed change of an improve rule
-        in the dashboard's "Waiting for you" list. data: rule, change (${changeKinds.join(", ")}), title,
+        in the "Waiting for you" list of the dashboard. data: rule, change (${changeKinds.join(", ")}), title,
         evidence (a string of at most ${maxAttentionText} characters), recommended (${answers.join(", ")}),
-        proposal_id (unique), and result (the result file name). The dashboard server appends
+        proposal_id (unique), and result (the name of the result file). The dashboard server appends
         improve.decided (--source dashboard; data proposal_id, decision ${decisions.join(" or ")}, optional note)
-        when the user clicks. Wait with --exclude-source improve so a proposal never wakes the factory;
-        the decision always does.
-        pr.merged is a hint from the implementation worker (role, pr, merge_commit, head); the
+        when the user clicks. Wait with --exclude-source improve, so a proposal never wakes the
+        factory. The decision always wakes it.
+        pr.merged is a hint from the implementation worker (role, pr, merge_commit, head). The
         factory verifies the merge on GitHub before it resolves the task.
-        factory.mjs emits task.moved, task.updated, and feedback.pending after every task write,
-        and budget.updated, limits.updated, or lever.updated (no --task) after every write of
-        that setting.
+        factory.mjs emits task.moved, task.updated, and feedback.pending after every task write.
+        It emits budget.updated, limits.updated, or lever.updated (no --task) after every write
+        of that setting.
 cursor  Prints {"cursor":"N"} for the current end of the log.
 armed   Read-only. Prints {"armed":true,"pid":N} and exits 0 when a waiter for this factory is
-        alive, or {"armed":false} and exits 1 when none is. wait records its PID in
-        <owner.repo>-factory-waiter.pid and removes it on exit; a PID file whose process is
-        gone, whose command line (ps -o command=) is not "broker.mjs wait" (a recycled PID),
-        or whose parent is gone (ppid 1: an orphan nobody reads), is stale. wait itself refuses
-        to start with stdout sent to a file or /dev/null. Without a usable ps, a live PID
-        counts as the waiter. A second wait for
-        the same factory refuses with exit 1 unless the first is stale, so there is exactly one
-        waiter. A turn must never end while armed exits 1.
+        alive. Prints {"armed":false} and exits 1 when no waiter is alive. wait records its PID in
+        <owner.repo>-factory-waiter.pid and removes it on exit. A PID file is stale in these cases:
+        the process is gone; the command line of the process (ps -o command=) is not
+        "broker.mjs wait" (a reused PID); or the parent of the process is gone (ppid 1), so
+        the process is an orphan that nobody reads. wait refuses to start when stdout goes to
+        a file or to /dev/null. Without a usable ps, a live PID counts as the waiter.
+        A second wait for the same factory exits 1 unless the first waiter is stale, so only one
+        waiter exists. A turn must never end while armed exits 1.
 
-Progress and errors go to stderr. Exit: 0 success, 1 operational failure, 2 invalid usage.`;
+The command prints progress and errors to stderr. Exit: 0 success, 1 operational failure, 2 invalid usage.`;
 
 async function main() {
   let command = "";
@@ -552,7 +554,7 @@ async function main() {
       if (pid === null) process.exitCode = 1;
     } else {
       if (stdoutUnread()) {
-        throw new UsageError("wait refuses to run with stdout sent to a file or /dev/null: nobody would read the wake. Run it as async bash and read its output; never background it with & or nohup.");
+        throw new UsageError("wait refuses to run with stdout sent to a file or /dev/null. Nobody would read the wake. Run wait as async bash and read its output. Never run it in the background with & or nohup.");
       }
       console.log(JSON.stringify(await waitForEvents(factory, waitOptions)));
     }
