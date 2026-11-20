@@ -90,6 +90,8 @@ const day = 86_400_000;
 const hour = 3_600_000;
 const largeFile = 100 * 1024 * 1024;
 const workerRoles = ["investigation", "implementation", "review"];
+// Scratch files that workers leave beside the factory file; nothing names them, so only age removes them.
+const workerScratch = /^(completion\d|discovery[-\d]|queue-).*\.(json|txt)$/;
 const usage = "Usage: node archive.mjs clean FACTORY_FILE [--older-than 14d] [--run]";
 
 function parseAge(value) {
@@ -100,8 +102,10 @@ function parseAge(value) {
 
 const pendingFeedback = (task) => task.feedback && task.feedback.acknowledged_id !== task.feedback.id;
 
-// Lists the per-task artifacts of tasks resolved longer than `olderThan` ago
-// and, with `run`, deletes them. Large unreferenced files are only reported.
+// Lists the per-task artifacts of tasks resolved longer than `olderThan` ago,
+// the briefs and results of rules with no running worker, and worker scratch
+// files, the last two by file age, and with `run` deletes them. Large
+// unreferenced files are only reported.
 export async function clean(file, { olderThan = 14 * day, run = false, now = Date.now() } = {}) {
   const directory = dirname(file);
   const current = JSON.parse(await readFile(file, "utf8"));
@@ -111,32 +115,52 @@ export async function clean(file, { olderThan = 14 * day, run = false, now = Dat
   const resolved = [...current.tasks, ...archived.filter((task) => !live.has(task.id))]
     .filter((task) => task.state === "resolved");
   const expired = resolved.filter((task) => Date.parse(task.updated_at) < now - olderThan && !pendingFeedback(task));
+  const rules = current.rules ?? [];
+  const idle = rules.filter((rule) => rule.worker?.status !== "running");
   const open = JSON.stringify(current.tasks.filter((task) => task.state !== "resolved" || pendingFeedback(task)));
+  const busy = JSON.stringify(rules.filter((rule) => rule.worker?.status === "running"));
 
   const entries = await readdir(directory, { withFileTypes: true });
   const roles = workerRoles.join("|");
   const files = new RegExp(`^(${roles})-(brief|result)([.-].*)?\\.(md|json)$`);
   const dirs = new RegExp(`^(${roles})-instructions$`);
+  const ruleFiles = /^(brief|result)([.-].*)?\.(md|json)$/;
   const prefixes = new Map(expired.map((task) => [`${project}-${task.id}-`, task.id]));
+  const rulePrefixes = new Map(idle.map((rule) => [`${project}-${rule.id}-`, rule.id]));
+  // Task artifacts go by the task's resolution date; the others by file age alone.
   const artifacts = new Map();
   for (const entry of entries) {
+    if (workerScratch.test(entry.name) && entry.isFile()) {
+      artifacts.set(entry.name, { category: "worker", age: olderThan });
+      continue;
+    }
     const pattern = entry.isFile() ? files : entry.isDirectory() ? dirs : null;
-    if (!pattern) continue;
     for (let at = entry.name.indexOf("-"); at !== -1; at = entry.name.indexOf("-", at + 1)) {
-      const task = prefixes.get(entry.name.slice(0, at + 1));
-      if (task !== undefined && pattern.test(entry.name.slice(at + 1))) artifacts.set(entry.name, task);
+      const prefix = entry.name.slice(0, at + 1);
+      const rest = entry.name.slice(at + 1);
+      const task = prefixes.get(prefix);
+      const rule = rulePrefixes.get(prefix);
+      if (task !== undefined && pattern?.test(rest)) artifacts.set(entry.name, { category: "task", task, age: 0 });
+      else if (rule !== undefined && entry.isFile() && ruleFiles.test(rest) && !artifacts.has(entry.name)) {
+        artifacts.set(entry.name, { category: "rule", rule, age: olderThan });
+      }
     }
   }
 
   const remove = [];
   const kept = [];
-  for (const [name, task] of artifacts) {
+  for (const [name, { category, age, ...owner }] of artifacts) {
     const path = join(directory, name);
+    const modified = now - (await stat(path)).mtimeMs;
+    if (category !== "task" && modified < Math.max(day, age)) continue;
     const reason = open.includes(name) ? "referenced by an open task"
-      : now - (await stat(path)).mtimeMs < day ? "modified in the last 24 hours" : null;
-    if (reason) kept.push({ path, task, reason });
-    else remove.push({ path, task });
+      : busy.includes(name) ? "referenced by a running rule worker"
+      : modified < day ? "modified in the last 24 hours" : null;
+    if (reason) kept.push({ path, category, ...owner, reason });
+    else remove.push({ path, category, ...owner });
   }
+  const counts = {};
+  for (const { category } of remove) counts[category] = (counts[category] ?? 0) + 1;
 
   const factories = entries.filter((entry) => entry.isFile() && entry.name.endsWith("-factory.json")).map((entry) => entry.name);
   const references = (await Promise.all(factories.map((name) => readFile(join(directory, name), "utf8")))).join("\n");
@@ -150,7 +174,8 @@ export async function clean(file, { olderThan = 14 * day, run = false, now = Dat
   }
 
   if (run) for (const { path } of remove) await rm(path, { recursive: true, force: true });
-  return { run, tasks: [...new Set(remove.map((item) => item.task))], delete: remove, kept, "stale-large": large };
+  const unique = (key) => [...new Set(remove.map((item) => item[key]).filter((value) => value !== undefined))];
+  return { run, tasks: unique("task"), rules: unique("rule"), counts, delete: remove, kept, "stale-large": large };
 }
 
 async function main() {

@@ -337,7 +337,13 @@ tool for the state directory. It is a dry run unless `--run` is given. For tasks
 resolved longer ago than the threshold (live or archived) it deletes their
 `<project>-<task>-<role>-brief*.md`, `-result*.json` and `-instructions/`
 artifacts, and never a file that an open task names, a task with pending
-feedback, or anything modified in the last 24 hours. It reports files over
+feedback, or anything modified in the last 24 hours. It also deletes, by file age
+alone (the same threshold), the `<project>-<rule>-brief*.md` and
+`<project>-<rule>-result*.json` files of each rule whose worker is not `running`,
+and worker scratch files (`completion<N>…`, `discovery-…`/`discovery<N>…`, `queue-…`; `.json` and `.txt`
+only, no directories). It never touches a file that an open task names or a rule with a
+running worker. The result has `counts` per category (`task`, `rule`, `worker`).
+It reports files over
 100 MB that no factory file names as `stale-large` and never deletes them.
 Artifacts stay flat; grouping them under `<project>-tasks/<task>/` is a
 documented follow-up. Tests are in `archive.test.cjs`.

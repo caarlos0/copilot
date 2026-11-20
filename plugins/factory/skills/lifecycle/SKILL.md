@@ -253,7 +253,12 @@ It is a dry run unless you pass `--run`. `--older-than` takes days or hours
 `<project>-<task>-<role>-instructions/`. Name each worker's instructions
 directory that way so the command finds it. It never touches a file that an open
 task names, a task with pending dashboard feedback, or anything modified in the
-last 24 hours; those show under `kept`. It also reports each file over 100 MB
+last 24 hours; those show under `kept`. It also deletes, by file age alone
+(`--older-than`), the `<project>-<rule>-brief*.md` and
+`<project>-<rule>-result*.json` files of a rule whose worker is not running, and
+worker scratch files (`completion*`, `discovery*`, `queue-*`; `.json` and `.txt`).
+A rule with a running worker is skipped. The dry run prints `counts` per
+category (`task`, `rule`, `worker`). It also reports each file over 100 MB
 that no factory file names and that is older than 24 hours as `stale-large`.
 That is report only: ask the user before you delete one.
 
