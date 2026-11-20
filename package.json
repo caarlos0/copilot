@@ -13,6 +13,11 @@
   "devDependencies": {
     "@types/bun": "^1.4.4",
     "@types/node": "^22.20.5",
+    "@types/write-file-atomic": "^4.0.3",
     "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "valibot": "^1.5.0",
+    "write-file-atomic": "^8.0.0"
   }
 }

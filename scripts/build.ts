@@ -11,16 +11,18 @@ function boundary(entry: string) {
 }
 
 // Relative imports stay inside the entry's boundary. Sibling .mjs imports stay imports; each
-// bundle is one module and the layout is unchanged.
+// bundle is one module and the layout is unchanged. Bundled libraries import their own files.
 const importPolicy = (entry: string): Bun.BunPlugin => ({
   name: "import-policy",
   setup(build) {
     const root = boundary(entry);
     build.onResolve({ filter: /^\.\.?\/.*\.mjs$/ }, ({ path, importer }) => {
+      if (importer.includes("/node_modules/")) return undefined;
       check(entry, root, path, importer);
       return { path, external: true };
     });
     build.onResolve({ filter: /^\.\.?\// }, ({ path, importer }) => {
+      if (importer.includes("/node_modules/")) return undefined;
       check(entry, root, path, importer);
       return undefined;
     });
