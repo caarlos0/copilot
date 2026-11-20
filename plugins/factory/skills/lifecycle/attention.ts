@@ -22,7 +22,7 @@ type AttentionEvent = {
     options?: string[];
   };
 };
-type AttentionItem = {
+export type AttentionItem = {
   id: string;
   at: string;
   session: string;

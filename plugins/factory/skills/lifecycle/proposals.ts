@@ -16,7 +16,7 @@ type ProposalEvent = {
   };
 };
 
-type Proposal = {
+export type Proposal = {
   id: string;
   rule?: string;
   kind?: string;
