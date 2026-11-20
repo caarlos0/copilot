@@ -110,6 +110,13 @@ factory file comes from `FACTORY_FILE`, else `<owner.repo>-factory.json` from th
 hook allows. It also allows on any error, a bad payload, or a reconcile
 timeout (15 seconds).
 
+The `preToolUse`, `permissionRequest`, `notification` and `agentStop` hooks have
+a 25 second timeout. Each hook script runs in about 0.1 second (Node start is
+nearly all of it), but Copilot counts the time from its own scheduling, and a busy
+host (many workers, 30 second `session.eventLog.read` calls in its log) can stall
+a hook past 5 seconds. A guard that times out is skipped, so keep the limit well
+above the real cost.
+
 Workers start with their brief in the launch command
 (`copilot ... --model claude-sonnet-5.5 -i 'Read <brief> and do it.'`), so there is no fixed sleep and no
 `rex send` for the first message; `rex send` is only for follow-ups to idle

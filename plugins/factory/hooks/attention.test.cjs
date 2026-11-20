@@ -46,7 +46,7 @@ test("hooks.json declares the notification, permissionRequest and ask_user preTo
   for (const entry of [...hooks.hooks.notification, ...hooks.hooks.permissionRequest, hooks.hooks.preToolUse[1]]) {
     assert.equal(entry.type, "command");
     assert.ok(entry.bash.includes("hooks/attention.mjs"));
-    assert.ok(entry.timeoutSec > 0 && entry.timeoutSec <= 5);
+    assert.ok(entry.timeoutSec > 0 && entry.timeoutSec <= 30);
   }
 });
 
