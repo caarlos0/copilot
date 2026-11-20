@@ -991,8 +991,12 @@ edits, commits, or pushes. Use a new worktree for every task:
 ```sh
 WT=$(node /abs/path/to/worktree.mjs create fix-login)   # run in the main checkout
 NAME=$(node /abs/path/to/worker-name.mjs --role implementation --ref '#42' --summary 'Fix login redirect')
-rex window new -c "$(echo "$WT" | jq -r .path)" -- env FACTORY_TASK=fix-login FACTORY_ROLE=implementation FACTORY_FILE="$FILE" copilot --agent coding:caarlos0 --model claude-sonnet-5.5 --name "$NAME" --yolo --sandbox -i 'Read /abs/brief.md and do it.'
+rex window new -c "$(echo "$WT" | jq -r .path)" -- env FACTORY_TASK=fix-login FACTORY_ROLE=implementation FACTORY_FILE="$FILE" copilot --agent coding:caarlos0 --model claude-sonnet-5.5 --name "$NAME" --yolo --sandbox --add-dir "$HOME/.copilot" --add-dir "$HOME/Developer/worktrees" --add-dir "$STATE_DIR" -i 'Read /abs/brief.md and do it.'
 ```
+
+`$STATE_DIR` is the factory state directory. Replace `$HOME/Developer/worktrees`
+with the worktree root from `worktreePathTemplate` when it differs. Add the
+deny flags from "Launch rules" before `-i`.
 
 `worktree.mjs` (next to this file) is a dependency-free helper. It prints JSON
 `{path, branch, created_by_run}`; record the worktree with `factory.mjs
@@ -1124,6 +1128,20 @@ roles. Append them to the `copilot` command, before `-i`:
 Deny rules win over every allow, including `--yolo`. They match the command
 text only: `sh -c 'git stash'` is not caught. A worker may still run `rex whoami`, `rex ls`, and `rex capture`. Keep
 the same list in `plugins/factory/AGENTS.md`.
+
+Every worker launch also carries these flags, after `--sandbox`:
+
+```text
+--add-dir "$HOME/.copilot" --add-dir "$HOME/Developer/worktrees" --add-dir "<state directory>"
+```
+
+Without them, workers hit sandbox-bypass prompts when they read session logs,
+other worktrees, or the state directory. `--add-dir` makes those paths readable
+and writable, so no prompt appears. The worktree root comes from
+`worktreePathTemplate` in `$COPILOT_HOME/settings.json` (default
+`~/Developer/worktrees`). The
+state directory is the factory state directory that holds the factory file.
+Keep the same flags in `plugins/factory/AGENTS.md`.
 
 Every worker launch also sets `FACTORY_TASK` (the task ID; a rule worker has none),
 `FACTORY_ROLE` (the worker role) and `FACTORY_FILE` (the absolute factory file) with

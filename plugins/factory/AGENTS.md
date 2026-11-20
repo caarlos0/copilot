@@ -170,6 +170,16 @@ they win over `--yolo`:
 --deny-tool='shell(git stash)' --deny-tool='shell(rex window:*)' --deny-tool='shell(rex block:*)' --deny-tool='shell(rex session:*)' --deny-tool='shell(rex new:*)' --deny-tool='shell(rex run:*)' --deny-tool='shell(rex split:*)' --deny-tool='shell(rex send:*)' --deny-tool='shell(rex send-key:*)' --deny-tool='shell(rex kill:*)' --deny-tool='shell(rex do:*)' --deny-tool='shell(rex api:*)' --deny-tool='shell(rex focus:*)' --deny-tool='shell(rex zoom:*)' --deny-tool='shell(rex move:*)' --deny-tool='shell(rex swap:*)' --deny-tool='shell(rex resize:*)'
 ```
 
+Every worker launch also carries these flags after `--sandbox`, so reads of
+session logs, other worktrees, and the state directory do not trip sandbox-bypass
+prompts. The worktree root comes from `worktreePathTemplate`; the last path is
+the factory state directory. Keep them identical to the lifecycle skill's
+"Launch rules":
+
+```text
+--add-dir "$HOME/.copilot" --add-dir "$HOME/Developer/worktrees" --add-dir "<state directory>"
+```
+
 `hooks.json` also ships a `preToolUse` guard (`hooks/guard.mjs`) for the
 coordinator. It uses the same gate as the stop hook (owner lock session, with
 the `FACTORY_COORDINATOR` override), and it does nothing for any other session.
