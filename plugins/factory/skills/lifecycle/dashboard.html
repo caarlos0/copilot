@@ -188,7 +188,7 @@
       .icon-button { display: inline-flex; flex: none; align-items: center; justify-content: center;
         width: 32px; height: 32px; padding: 0; line-height: 1; }
       .icon-button svg { display: block; }
-      .inline-copy { width: 24px; height: 24px; margin-left: 4px; vertical-align: middle; }
+      .inline-copy { width: 24px; height: 24px; flex: none; }
       .settings-form h3 { margin: 24px 0 4px; padding-top: 16px; border-top: 1px solid var(--border); font-size: 14px; }
       .settings-form h3:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
       .settings-form input { display: block; width: 100%; margin-top: 4px; padding: 5px 12px; background: var(--bg); font-weight: 400; }
@@ -260,7 +260,17 @@
       .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: var(--neutral); }
       .dot.running { background: var(--success); }
       .dot.unknown { background: var(--attention); }
-      ul.workers { margin: 8px 0; padding-left: 20px; }
+      ul.workers { margin: 8px 0; padding: 0; list-style: none; }
+      .worker-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 16px; padding: 4px 0; }
+      .worker-main, .worker-actions, .worktree-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
+      .worker-main .dot { margin-right: 0; }
+      .worktree-row { margin: 8px 0; flex-wrap: nowrap; }
+      .copy-value { display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; }
+      .worktree-row .copy-value { flex: 0 1 auto; }
+      code.ellipsis { min-width: 0; max-width: 32ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .worktree-row code.ellipsis { max-width: 100%; }
+      .details-link { margin-top: 4px; padding: 0; border: 0; background: none; color: var(--accent); font-size: 12px; font-weight: 400; }
+      .details-link:hover:not(:disabled), .details-link:active:not(:disabled) { background: none; text-decoration: underline; }
       h4 { margin: 12px 0 0; font-size: 12px; font-weight: 600; color: var(--fg-muted); }
       ol.history { margin: 8px 0; padding: 0; list-style: none; font-size: 12px; }
       .history-gap { position: relative; display: flex; align-items: center; gap: 8px; min-height: 22px; margin-left: 24px;
@@ -1078,17 +1088,22 @@
         resultOpener = null;
       }
 
-      // Loads one result file through the artifact route and shows it pretty-printed and highlighted.
-      async function openResult({ task, role, href, trigger }) {
+      // Shows one JSON document pretty-printed and highlighted: a result file loaded through the
+      // artifact route (href), or a value the page already holds (data).
+      async function openResult({ title, href, data, trigger }) {
         const load = ++resultLoad;
         resultOpener = trigger;
         const body = document.getElementById("result-body");
         const error = document.getElementById("result-error");
-        document.getElementById("result-title").textContent = `${task}: ${role} result`;
+        document.getElementById("result-title").textContent = title;
         error.hidden = true;
         body.replaceChildren(element("p", "Loading…", "muted"));
         resultDialog.showModal();
         body.focus();
+        if (!href) {
+          body.replaceChildren(highlightJSON(data));
+          return;
+        }
         let message = null;
         let text = "";
         let parsed;
@@ -1593,7 +1608,7 @@
         node.addEventListener("click", (event) => {
           if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
           event.preventDefault();
-          return openResult({ ...context, href, trigger: node });
+          return openResult({ title: `${context.task}: ${context.role} result`, href, trigger: node });
         });
         return node;
       }
@@ -1822,36 +1837,37 @@
         if (workers.length) {
           const list = element("ul", null, "workers");
           for (const [role, worker] of workers) {
-            const item = element("li");
-            const dot = element("span", null, `dot ${worker.status}`);
-            item.append(dot, ...codeParts(`${role}: ${worker.status}${worker.name ? `, ${worker.name}` : ""}${worker.pane ? `, ${worker.pane}` : ""} `));
-            if (plainID(worker.pane)) {
-              item.append(copyButton("Copy focus command", focusCommand(snapshot.rex_session, worker.pane), "inline-copy"), " ");
+            const item = element("li", null, "worker-row");
+            const main = element("span", null, "worker-main");
+            main.append(element("span", null, `dot ${worker.status}`), element("strong", role), element("span", worker.status, "muted"));
+            if (worker.name) main.append(...codeParts(worker.name));
+            const actions = element("span", null, "worker-actions");
+            const live = task.state !== "resolved" && ["running", "unknown"].includes(worker.status)
+              && Boolean(worker.pane || worker.window);
+            if (live && worker.pane) {
+              actions.append(copyValue(worker.pane, plainID(worker.pane) && focusCommand(snapshot.rex_session, worker.pane),
+                "Copy focus command"));
             }
-            appendArtifacts(item, worker, { task: task.id, role });
+            appendArtifacts(actions, worker, { task: task.id, role });
+            item.append(main, actions);
             list.append(item);
           }
           more.append(list);
         }
-        if (task.worktree) {
-          const worktree = element("p", "Worktree: ", "muted");
-          worktree.append(element("code", task.worktree.path),
-            copyButton("Copy worktree path", task.worktree.path, "inline-copy"));
+        if (task.worktree && task.state !== "resolved") {
+          const worktree = element("p", null, "worktree-row");
+          worktree.append(element("span", "Worktree", "muted"),
+            copyValue(task.worktree.path, task.worktree.path, "Copy worktree path"));
           more.append(worktree);
         }
 
         if (task.details && Object.keys(task.details).length) {
-          const details = element("details");
-          details.dataset.taskId = task.id;
-          // The highlighted JSON is large; build it only once the section is opened.
-          const showJSON = () => {
-            if (details.open && !details.querySelector("pre")) details.append(highlightJSON(task.details));
-          };
-          details.addEventListener("toggle", showJSON);
-          details.open = expanded.has(task.id);
-          details.append(element("summary", "Evidence and task details"));
-          showJSON();
-          more.append(details);
+          const evidence = element("button", "Evidence and task details", "details-link");
+          evidence.type = "button";
+          evidence.addEventListener("click", () => openResult({
+            title: `${task.id}: evidence and task details`, name: `${task.id} details`, data: task.details, trigger: evidence,
+          }));
+          more.append(evidence);
         }
         node.append(more);
         return node;
@@ -1990,6 +2006,16 @@
         setCopyState(button, label, COPY_PATHS);
         button.addEventListener("click", () => copyText(button, value));
         return button;
+      }
+
+      // A long value shows truncated, with the full text in the tooltip; the copy button is left out when there is nothing safe to copy.
+      function copyValue(value, copied, label) {
+        const node = element("span", null, "copy-value");
+        const code = element("code", value, "ellipsis");
+        code.title = value;
+        node.append(code);
+        if (copied) node.append(copyButton(label, copied, "inline-copy"));
+        return node;
       }
 
       // The pane and session go into a shell command, so only plain IDs are copied. Rex resolves a

@@ -273,7 +273,11 @@ a card summary open one popup with the result file, pretty-printed and highlight
 (`highlightText`, built with `textContent`). It loads the file through
 `/api/artifact`, so the server's access checks apply. The popup shows only the title,
 a close button and the JSON. The link keeps its `href`, so a modified click still opens
-the raw file in a new tab.
+the raw file in a new tab. The "Evidence and task details" link in Task details opens the
+same popup with the task's `details` from the factory file. Task details shows a worker's
+pane ID and the "Copy focus command" button only while the worker is `running` or `unknown`
+with a pane and the task is not `resolved`, and the Worktree row only while the task is not
+`resolved`.
 
 The "Task details" section of a task card has a "Usage" block: elapsed time (first history
 entry to `resolved`, or live while open) and, per worker role plus a task total, models, credits

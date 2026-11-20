@@ -689,7 +689,7 @@ test("unchanged refresh updates elapsed labels without replacing expanded rows o
   ui.setNow(Date.parse("2026-05-01T12:10:00Z"));
   await ui.run("refresh()");
   assert.equal(ui.get("task-list").children[0], row);
-  assert.deepEqual(details.map((detail) => detail.open), [true, true]);
+  assert.deepEqual(details.map((detail) => detail.open), [true]);
   assert.equal(row.querySelector(".state").textContent, "started 20m ago");
   assert.match(row.textContent, /20h 40m ago/);
 
@@ -995,13 +995,13 @@ test("rows show history, open references in a new tab, and highlight evidence", 
     assert.equal(node.target, "_blank", node.href);
     assert.equal(node.rel, "noopener noreferrer", node.href);
   }
-  const section = row.querySelectorAll("details").find((node) => node.dataset.taskId === "issue-9");
-  assert.equal(section.querySelector("pre"), null);
-  section.open = true;
-  await section.fire("toggle");
-  const evidence = row.querySelector("pre");
-  assert.equal(evidence.textContent, JSON.stringify(example.tasks.find((task) => task.id === "issue-9").details, null, 2));
-  assert.equal(evidence.querySelector(".json-key").textContent, '"verdict"');
+  const evidence = row.querySelectorAll("button").find((node) => node.textContent === "Evidence and task details");
+  assert.equal(row.querySelector("pre"), null, "The evidence is not inline.");
+  await evidence.fire("click");
+  const popup = ui.get("result-body");
+  assert.equal(popup.textContent, JSON.stringify(example.tasks.find((task) => task.id === "issue-9").details, null, 2));
+  assert.equal(popup.querySelector(".json-key").textContent, '"verdict"');
+  await ui.get("result-dialog").fire("cancel");
   const value = { note: 'say "a": 1', count: -2.5e3, ok: true, gone: null, list: [1, "x"] };
   const pre = ui.run(`highlightJSON(${JSON.stringify(value)})`);
   assert.equal(pre.textContent, JSON.stringify(value, null, 2));
@@ -1011,32 +1011,26 @@ test("rows show history, open references in a new tab, and highlight evidence", 
   assert.deepEqual(tokens("literal"), ["-2500", "true", "null", "1"]);
 });
 
-test("evidence renders on first open, once, and stays open across a list rebuild", async (t) => {
+test("the evidence link opens the popup with the task details and is absent without details", async (t) => {
   const ui = await dashboard(t);
-  const data = structuredClone(example);
-  data.tasks.find((task) => task.id === "issue-9").details = { notes: "x".repeat(5000), verdict: "implement" };
-  await writeFile(join(ui.directory, factoryFile), JSON.stringify(data));
-  await ui.run("refresh()");
-  ui.run("choose('implementation')");
-  const section = () => ui.get("task-list").querySelectorAll("details").find((node) => node.dataset.taskId === "issue-9");
-  assert.equal(section().querySelector("pre"), null);
-  assert.equal(section().querySelector(".json-key"), null);
+  const task = structuredClone(example.tasks.find((item) => item.id === "issue-9"));
+  task.details = { notes: "<b>x</b>", verdict: "implement" };
+  const row = ui.run(`taskRow(${JSON.stringify(task)}, new Set())`);
+  assert.equal(row.querySelectorAll("details").length, 1, "Only Task details is collapsible.");
+  const trigger = row.querySelectorAll("button").find((node) => node.textContent === "Evidence and task details");
+  await trigger.fire("click");
+  assert.equal(ui.get("result-dialog").open, true);
+  assert.equal(ui.get("result-title").textContent, "issue-9: evidence and task details");
+  assert.equal(ui.get("result-error").hidden, true);
+  const body = ui.get("result-body");
+  assert.equal(body.textContent, JSON.stringify(task.details, null, 2));
+  assert.equal(body.querySelectorAll("b").length, 0);
+  await ui.get("result-dialog").fire("cancel");
+  assert.equal(ui.document.activeElement, trigger);
 
-  section().open = true;
-  await section().fire("toggle");
-  const pre = section().querySelector("pre");
-  assert.equal(pre.textContent, JSON.stringify(data.tasks.find((task) => task.id === "issue-9").details, null, 2));
-  await section().fire("toggle");
-  assert.equal(section().querySelectorAll("pre").length, 1);
-
-  const row = ui.get("task-list").children.find((node) => node.dataset.taskId === "issue-9");
-  const issue9 = data.tasks.find((task) => task.id === "issue-9");
-  issue9.revision = (issue9.revision ?? 0) + 1;
-  await writeFile(join(ui.directory, factoryFile), JSON.stringify(data));
-  await ui.run("refresh()");
-  assert.notEqual(ui.get("task-list").children.find((node) => node.dataset.taskId === "issue-9"), row);
-  assert.equal(section().open, true);
-  assert.equal(section().querySelectorAll("pre").length, 1);
+  task.details = {};
+  assert.equal(ui.run(`taskRow(${JSON.stringify(task)}, new Set())`).querySelectorAll("button")
+    .some((node) => node.textContent === "Evidence and task details"), false);
 });
 
 test("the list rebuilds only when a row's revision, update time or history changes", async (t) => {
@@ -2762,13 +2756,45 @@ test("the result popup shows the error and the raw body for a missing file or in
   assert.equal(ui.get("result-body").querySelectorAll("b").length, 0);
 });
 
-test("task details copy the focus command of each worker pane and the worktree path", async (t) => {
+test("task details show the pane and its focus command only for a live worker of an open task", async (t) => {
+  const ui = await dashboard(t);
+  const task = structuredClone(example.tasks.find((item) => item.id === "issue-9"));
+  const row = (value) => ui.run(`taskRow(${JSON.stringify(value)}, new Set())`);
+  const labels = (node) => node.querySelectorAll("button").map((button) => button.title);
+
+  let node = row(task);
+  const [closed, running] = node.querySelectorAll(".worker-row");
+  assert.equal(closed.querySelectorAll("code").some((code) => code.textContent === "pane-1"), false, "A closed worker hides its pane.");
+  assert.equal(labels(closed).includes("Copy focus command"), false);
+  const pane = running.querySelectorAll("code").find((code) => code.textContent === "pane-2");
+  assert.equal(pane.title, "pane-2", "The tooltip carries the full value.");
+  assert.deepEqual(labels(running), ["Copy focus command"]);
+  assert.ok(labels(node).includes("Copy worktree path"));
+
+  task.workers.implementation.status = "unknown";
+  assert.ok(labels(row(task).querySelectorAll(".worker-row")[1]).includes("Copy focus command"), "unknown with a pane is live");
+  delete task.workers.implementation.pane;
+  delete task.workers.implementation.window;
+  assert.equal(labels(row(task).querySelectorAll(".worker-row")[1]).includes("Copy focus command"), false, "No pane recorded.");
+
+  task.workers.implementation.status = "running";
+  task.workers.implementation.pane = "pane-2";
+  task.state = "resolved";
+  task.resolution = { outcome: "merged", note: null };
+  node = row(task);
+  assert.equal(labels(node).includes("Copy focus command"), false, "A resolved task has no live pane.");
+  assert.equal(labels(node).includes("Copy worktree path"), false, "A resolved task hides the worktree.");
+  assert.equal(node.querySelector(".worktree-row"), null);
+  assert.equal(node.querySelectorAll(".worker-row").length, 2, "Workers and their links stay.");
+});
+
+test("task details copy the focus command of each live worker pane and the worktree path", async (t) => {
   const ui = await dashboard(t);
   ui.run("choose('implementation')");
   const row = ui.get("task-list").children.find((node) => /issue-9/.test(node.textContent));
   const [pane, path] = ["Copy focus command", "Copy worktree path"]
     .map((label) => row.querySelectorAll("button").filter((button) => button.title === label));
-  assert.equal(pane.length, 2, "Each worker with a pane gets a focus button.");
+  assert.equal(pane.length, 1, "Only the running worker gets a focus button.");
   assert.equal(path.length, 1);
   for (const button of [...pane, path[0]]) {
     assert.equal(button["aria-label"], button.title);
@@ -2779,10 +2805,8 @@ test("task details copy the focus command of each worker pane and the worktree p
 
   ui.run("navigator = { clipboard: { writeText: async (value) => { globalThis.copied = value; } } }");
   await pane[0].fire("click");
-  assert.equal(ui.run("copied"), "rex focus -s work pane-1");
-  await pane[1].fire("click");
   assert.equal(ui.run("copied"), "rex focus -s work pane-2");
-  assert.equal(pane[1]["aria-label"], "Copied");
+  assert.equal(pane[0]["aria-label"], "Copied");
   await path[0].fire("click");
   assert.equal(ui.run("copied"), "/Users/me/src/repo.worktrees/issue-9");
   assert.equal(path[0]["aria-label"], "Copied");
