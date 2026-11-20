@@ -1184,7 +1184,8 @@ window. Run `reconcile.mjs` at startup and handle each `worker-missing`:
    restarted: check git status and your result file, then continue." Investigation
    and rule workers start one-shot from the beginning.
 7. Record the new session, pane, and window with `running` status, then re-arm
-   the waiter.
+   the waiter. A `running` write with a different `pane` or `window` drops the
+   stored `session`, `summary` and `summary_at`; the planned `result` filename stays.
 
 ## Receive worker events
 

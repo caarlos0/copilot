@@ -248,7 +248,9 @@ The dashboard task cards show one worker summary (`cardSummary` in
 `factory-data.mjs`): the role matching the task state, else the newest by
 `summary_at`. The coordinator mirrors each result's `summary` into the optional
 `workers.<role>.summary` (at most 2000 characters) and `summary_at`; the
-dashboard reads only the factory file.
+dashboard reads only the factory file. A `--workers` write that sets a worker
+`running` with a different `pane` or `window` (a relaunch) first drops its stored
+`session`, `summary` and `summary_at`; `result` stays, as it is the planned filename.
 
 The dashboard sidebar sorts factories with `compareFactories` in `factory-data.mjs`:
 active with open tasks, then paused or blocked with open tasks, then nothing open,

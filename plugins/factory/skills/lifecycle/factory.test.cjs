@@ -57,6 +57,48 @@ test("creates a private factory with defaults and a new task in initial", async 
   assert.deepEqual(await readdir(f.directory), ["owner.repo-factory-events.jsonl", "owner.repo-factory.json"]);
 });
 
+test("a relaunch drops the old session and summary, and keeps the planned result", async (t) => {
+  await sessionState(t);
+  const f = await started(t);
+  const old = "11111111-1111-4111-8111-111111111111";
+  const at = "2026-01-01T00:00:00Z";
+  const worker = (extra) => JSON.stringify({ implementation: { status: "running", ...extra } });
+  const record = async () => {
+    const { launched_at, ...rest } = (await f.read()).tasks[0].workers.implementation;
+    return rest;
+  };
+  f.ok("--task", "issue-1", "--state", "investigation", "--workers", worker({
+    pane: "block:p1", window: "window:w1", session: old, result: "r1.json", summary: "old summary", summary_at: at,
+  }));
+  f.ok("--task", "issue-1", "--workers", worker({ pane: "block:p1" }));
+  assert.equal((await record()).session, old);
+
+  f.ok("--task", "issue-1", "--workers", worker({ pane: "block:p2", window: "window:w2" }));
+  assert.deepEqual(await record(), { status: "running", pane: "block:p2", window: "window:w2", result: "r1.json" });
+
+  const next = "22222222-2222-4222-8222-222222222222";
+  f.ok("--task", "issue-1", "--workers", worker({ pane: "block:p3", session: next, summary: "new", summary_at: at }));
+  assert.deepEqual(await record(), {
+    status: "running", pane: "block:p3", window: "window:w2", result: "r1.json", session: next, summary: "new", summary_at: at,
+  });
+});
+
+test("a worker write without a pane or window change keeps its session and summary", async (t) => {
+  await sessionState(t);
+  const f = await started(t);
+  const session = "11111111-1111-4111-8111-111111111111";
+  const at = "2026-01-01T00:00:00Z";
+  f.ok("--task", "issue-1", "--workers", JSON.stringify({ implementation: {
+    status: "running", pane: "block:p1", window: "window:w1", session, summary: "s", summary_at: at,
+  } }));
+  for (const patch of [{ status: "idle" }, { status: "running", pane: "block:p1" }, { pane: "block:p9" }]) {
+    f.ok("--task", "issue-1", "--workers", JSON.stringify({ implementation: patch }));
+    const worker = (await f.read()).tasks[0].workers.implementation;
+    assert.equal(worker.session, session);
+    assert.equal(worker.summary, "s");
+  }
+});
+
 test("the shipped example is a valid factory", async () => {
   const { validate } = await import("./factory-data.mjs");
   validate(example);

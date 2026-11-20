@@ -149,6 +149,17 @@ function taskPatch(task, values) {
   return patch;
 }
 
+// A running write with a new pane or window is a relaunch: the stored session and summary belong to the old worker.
+function dropRelaunched(task, patch) {
+  for (const [role, worker] of Object.entries(patch.workers ?? {})) {
+    const stored = task.workers?.[role];
+    if (worker?.status !== "running" || !isObject(stored)) continue;
+    if (["pane", "window"].some((key) => stored[key] != null && worker[key] !== undefined && worker[key] !== stored[key])) {
+      for (const key of ["session", "summary", "summary_at"]) delete stored[key];
+    }
+  }
+}
+
 // Investigation only validates and hydrates a task, so it is read-only and one-shot.
 // Checked on writes only, so old files with other records stay readable.
 function checkInvestigation(patch, state) {
@@ -371,6 +382,7 @@ async function writeFactory(file, values, operator, source) {
     }
     const patch = taskPatch(task, values);
     checkInvestigation(patch, task.state);
+    dropRelaunched(task, patch);
     task = merge(task, { ...patch, updated_at: at, revision: revision + 1 });
     if (before.state !== "resolved" && task.state === "resolved") {
       for (const [role, worker] of Object.entries(task.workers ?? {})) {
