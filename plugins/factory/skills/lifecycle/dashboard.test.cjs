@@ -2789,7 +2789,7 @@ test("the result link in a history step and the card summary both open the resul
     assert.equal(body.textContent, JSON.stringify(JSON.parse(raw), null, 2));
     assert.equal(body.querySelector(".json-key").textContent, '"outcome"');
     assert.equal(body.querySelector("script"), null);
-    assert.equal(ui.document.activeElement, body, "Focus moves into the popup.");
+    assert.equal(ui.document.activeElement, dialog, "Focus moves to the dialog, not the scrolling body.");
     await dialog.fire("cancel");
     assert.equal(dialog.open, false);
     assert.equal(ui.document.activeElement, trigger, "Focus returns to the link that opened it.");
