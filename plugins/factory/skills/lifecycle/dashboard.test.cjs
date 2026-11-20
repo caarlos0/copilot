@@ -2248,8 +2248,9 @@ test("the page works on a phone: viewport, safe areas, touch sizes and contained
     const [, button] = html.match(new RegExp(`(<button id="${id}"[\\s\\S]*?</button>)`));
     assert.match(button, /<svg [^>]*aria-hidden="true"/, `${id} has an icon.`);
     assert.match(button, /<span class="label">/, `${id} keeps its text on desktop.`);
-    const name = id === "refresh" ? "Refresh" : "Go to task";
+    const name = id === "refresh" ? "Refresh" : "Go to a task \\(Cmd\\+K\\)";
     assert.match(button, new RegExp(`aria-label="${name}" title="${name}( \\(R\\))?"`));
+    if (id === "open-palette") assert.match(button, /<span class="label">Go to<\/span>/);
   }
 
   const blocks = (query) => {

@@ -285,7 +285,7 @@ with a dialog open. While a button refresh runs the button is disabled and `aria
 (the icon spins unless reduced motion is set), and it comes back when the request ends,
 also on failure; the 30 second timer never disables it. Every button has an `:active`
 pressed state (a darker background, and a 1px slide unless reduced motion is set). The header
-shows "Go to task" and "Refresh" with an icon and text; at 700px wide or less
+shows "Go to" and "Refresh" with an icon and text; at 700px wide or less
 they are icon-only 44px buttons. The header has no freshness label. At that width the
 sidebar gives way to a project dropdown (the sidebar list, same sort order) with a
 settings button beside it. Resolved tasks with pending
