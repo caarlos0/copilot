@@ -19,7 +19,7 @@ var __toESM = (mod, isNodeMode, target) => {
       return cached;
   }
   target = mod != null ? __create(__getProtoOf(mod)) : {};
-  const to = isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target;
+  const to = isNodeMode || !mod || !mod.__esModule || !__hasOwnProp.call(mod, "default") ? __defProp(target, "default", { value: mod, enumerable: true }) : target;
   if (mod && typeof mod === "object" || typeof mod === "function") {
     for (let key of __getOwnPropNames(mod))
       if (!__hasOwnProp.call(to, key))
@@ -58,7 +58,7 @@ var require_cjs = __commonJS(function(exports) {
   Object.defineProperty(exports, "signals", { enumerable: true, get: function() {
     return signals_js_1.signals;
   } });
-  var processOk = (process3) => !!process3 && typeof process3 === "object" && typeof process3.removeListener === "function" && typeof process3.emit === "function" && typeof process3.reallyExit === "function" && typeof process3.listeners === "function" && typeof process3.kill === "function" && typeof process3.pid === "number" && typeof process3.on === "function";
+  var processOk = (process2) => !!process2 && typeof process2 === "object" && typeof process2.removeListener === "function" && typeof process2.emit === "function" && typeof process2.reallyExit === "function" && typeof process2.listeners === "function" && typeof process2.kill === "function" && typeof process2.pid === "number" && typeof process2.on === "function";
   var kExitEmitter = Symbol.for("signal-exit emitter");
   var global = globalThis;
   var ObjectDefineProperty = Object.defineProperty.bind(Object);
@@ -678,14 +678,14 @@ An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
     return briefs;
   }
   async function factoryView(entry) {
-    const attention = (await pendingAttention(entry.target)).map(({ id, session, kind, text, options: options2, role, pane, rex_session, task, at }) => ({ id, session, kind, text, options: options2, role, pane, rex_session: rex_session ?? null, task, at })).sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+    const attention = (await pendingAttention(entry.target)).map(({ id, session, kind, text, options, role, pane, rex_session, task, at }) => ({ id, session, kind, text, options, role, pane, rex_session: rex_session ?? null, task, at })).sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
     const proposals = await openProposals(entry.target);
     const data = await readFactory(entry);
     const usage = await factoryUsage(data, sessionStateDirectory());
     const briefs = await taskBriefs(entry.file, data);
-    const digest2 = createHash("sha1").update(JSON.stringify([attention, proposals, usage, briefs])).digest("base64url");
+    const digest = createHash("sha1").update(JSON.stringify([attention, proposals, usage, briefs])).digest("base64url");
     return {
-      tag: `${entry.tag.slice(0, -1)}-${digest2}"`,
+      tag: `${entry.tag.slice(0, -1)}-${digest}"`,
       body: async () => ({ ...await readFactory(entry), attention, proposals, usage, briefs })
     };
   }
@@ -901,11 +901,11 @@ An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
   }
   const requireToken = !isLoopback(options.host);
   const token = requireToken ? options.token ?? await persistedToken(join(directories[0].directory, "dashboard-token")) : undefined;
-  function allowedHosts(port2) {
+  function allowedHosts(port) {
     const hosts = new Set;
     const add = (addr) => {
-      hosts.add(`${bracket(addr)}:${port2}`);
-      if (port2 === 80)
+      hosts.add(`${bracket(addr)}:${port}`);
+      if (port === 80)
         hosts.add(bracket(addr));
     };
     if (isWildcard(options.host)) {
@@ -1002,11 +1002,11 @@ p{margin:0;color:#f87171}
   }
   const server = createServer(async (request, response) => {
     try {
-      const port2 = server.address().port;
-      if (!allowedHosts(port2).has(request.headers.host)) {
+      const port = server.address().port;
+      if (!allowedHosts(port).has(request.headers.host)) {
         throw new HttpError(403, "Use the printed URL.");
       }
-      const url = new URL(request.url, `http://127.0.0.1:${port2}`);
+      const url = new URL(request.url, `http://127.0.0.1:${port}`);
       if (requireToken && request.method === "POST" && url.pathname === "/login")
         return await login(request, response);
       try {

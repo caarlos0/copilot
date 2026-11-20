@@ -177,7 +177,7 @@ function checkState(node) {
 }
 function summarizeChecks(contexts) {
   const required = contexts.filter((node) => node.isRequired).map((node) => ({ name: node.name ?? node.context, state: checkState(node) }));
-  const names = (state2) => required.filter((check) => check.state === state2).map((check) => check.name);
+  const names = (state) => required.filter((check) => check.state === state).map((check) => check.name);
   const failed = names("failed");
   const cancelled = names("cancelled");
   let state = "passed";
@@ -309,7 +309,7 @@ function report(target, snapshot, extra) {
 `);
 }
 function sleep(ms) {
-  return new Promise((resolve2) => setTimeout(resolve2, ms));
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 class Listener {
@@ -345,9 +345,9 @@ class Listener {
     if (ready() || !this.alive)
       return;
     let timer;
-    await new Promise((resolve2) => {
-      this.#wake = resolve2;
-      timer = setTimeout(resolve2, ms);
+    await new Promise((resolve) => {
+      this.#wake = resolve;
+      timer = setTimeout(resolve, ms);
     });
     clearTimeout(timer);
     this.#wake = null;

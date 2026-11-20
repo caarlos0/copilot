@@ -59,9 +59,11 @@ bundle must not read files beside itself through `import.meta.url` or
 `__dirname`; check this before you port a module. The build fails when a
 plugin module imports a file outside its own plugin directory. A relative
 `import type` from a sibling `.ts` is erased, so the build cannot see it; keep
-those inside the plugin too. Use the same Bun minor as CI: output differs
-between Bun releases (local variable names), so a stale Bun leaves a diff in
-unrelated bundles. The build rewrites absolute checkout paths that Bun inlines
+those inside the plugin too. Use the same Bun version as CI: `bun-version` in
+`.github/workflows/test.yml` pins it. Output differs between Bun releases
+(local variable names), so a different Bun leaves a diff in unrelated bundles.
+Change the pin and regenerate all bundles in one commit.
+The build rewrites absolute checkout paths that Bun inlines
 (`__filename` of CommonJS libraries) to repository-relative paths, so output does
 not depend on where the repository is cloned.
 
