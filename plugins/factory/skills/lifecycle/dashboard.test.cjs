@@ -2572,21 +2572,13 @@ test("the badge, the page title and the waiting list show pending attention as d
   assert.equal(ui.get("task-view").hidden, true);
   assert.equal(ui.get("detail-title").textContent, "Waiting for you2");
   const [first, second] = ui.get("attention-list").children;
-  assert.match(first.textContent, /Sandbox bypass.*10m.*Run command: <b>rm<\/b> 0.*yes.*no.*issue-5, implementation.*rex focus -s session:s0 block:p0/);
-  assert.equal(first.querySelector("code").textContent, "rex focus -s session:s0 block:p0");
-
-  ui.run("navigator = { clipboard: { writeText: async (value) => { globalThis.copied = value; } } }");
-  const copy = first.querySelector("button");
-  assert.equal(copy.textContent, "", "The copy button shows a glyph, not text.");
-  assert.equal(copy["aria-label"], "Copy rex focus command");
-  assert.equal(copy.title, "Copy rex focus command");
-  assert.ok(copy.querySelector("svg"));
-  await copy.fire("click");
-  assert.equal(ui.run("copied"), "rex focus -s session:s0 block:p0");
-  assert.equal(copy["aria-label"], "Copied");
-  assert.equal(copy.textContent, "");
-  assert.equal(second.querySelector("button"), null, "A pane that is not a plain ID gets no shell command.");
-  assert.match(second.textContent, /Pane: block:x; rm -rf ~/);
+  assert.match(first.textContent, /Sandbox bypass.*10m.*Run command: <b>rm<\/b> 0.*yes.*no.*issue-5, implementation/);
+  for (const row of [first, second]) {
+    assert.equal(row.querySelector("code"), null, "No Rex command is shown.");
+    assert.equal(row.querySelector("button"), null, "No copy button.");
+    assert.equal(row.textContent.includes("rex focus"), false);
+    assert.equal(row.textContent.includes("Pane:"), false);
+  }
 
   show(Array.from({ length: 23 }, (_, n) => item(n, { pane: null })));
   assert.equal(ui.get("attention-list").children.length, 20);
@@ -2753,7 +2745,7 @@ test("the result popup shows the error and the raw body for a missing file or in
   assert.equal(ui.get("result-body").querySelectorAll("b").length, 0);
 });
 
-test("history steps carry the worker, its Rex command link and the worktree link only while live, and no pane ID or chips", async (t) => {
+test("history steps carry the worker and the worktree link only while live, and no pane ID or chips", async (t) => {
   const ui = await dashboard(t);
   const task = structuredClone(example.tasks.find((item) => item.id === "issue-9"));
   const row = (value) => ui.run(`taskRow(${JSON.stringify(value)}, new Set())`);
@@ -2769,39 +2761,33 @@ test("history steps carry the worker, its Rex command link and the worktree link
   assert.equal(node.textContent.includes("Worktree"), false, "No Worktree label.");
   assert.deepEqual(labels(investigation), []);
   assert.deepEqual(investigation.querySelectorAll("a").map((a) => a.textContent), ["brief", "result"]);
-  assert.deepEqual(labels(implementation), ["Copy Rex command", "Copy worktree path"]);
+  assert.deepEqual(labels(implementation), ["Copy worktree path"]);
   assert.deepEqual(implementation.querySelectorAll("a").map((a) => a.textContent), ["brief", "result"]);
   assert.equal(implementation.querySelectorAll("svg").length, 0, "The links have no glyph.");
 
   task.workers.implementation.status = "unknown";
-  assert.deepEqual(labels(steps(row(task))[2]), ["Copy Rex command", "Copy worktree path"], "unknown with a pane is live");
-  delete task.workers.implementation.pane;
-  delete task.workers.implementation.window;
-  assert.deepEqual(labels(steps(row(task))[2]), ["Copy worktree path"], "No pane recorded.");
+  assert.deepEqual(labels(steps(row(task))[2]), ["Copy worktree path"]);
 
   task.workers.implementation.status = "running";
   task.workers.implementation.pane = "pane-2";
   task.state = "resolved";
   task.resolution = { outcome: "merged", note: null };
   node = row(task);
-  assert.deepEqual(labels(node), [], "A resolved task has no live pane or worktree.");
+  assert.deepEqual(labels(node), [], "A resolved task has no worktree link.");
   assert.equal(node.querySelectorAll("a").filter((a) => a.textContent === "brief").length, 2, "Workers and their links stay.");
 });
 
-test("history steps copy the Rex command of each live worker and the worktree path with brief feedback", async (t) => {
+test("history steps copy the worktree path with brief feedback", async (t) => {
   const ui = await dashboard(t);
   ui.run("choose('implementation')");
   const row = ui.get("task-list").children.find((node) => /Retry loop never stops/.test(node.textContent));
-  const [pane, path] = ["Copy Rex command", "Copy worktree path"]
-    .map((label) => row.querySelectorAll("button").filter((button) => button.textContent === label));
-  assert.equal(pane.length, 1, "Only the running worker gets a Rex command link.");
+  const rex = row.querySelectorAll("button").filter((button) => /Rex/.test(button.textContent));
+  assert.equal(rex.length, 0, "No Rex command link.");
+  const path = row.querySelectorAll("button").filter((button) => button.textContent === "Copy worktree path");
   assert.equal(path.length, 1);
-  for (const button of [pane[0], path[0]]) assert.equal(button.type, "button");
+  assert.equal(path[0].type, "button");
 
   ui.run("navigator = { clipboard: { writeText: async (value) => { globalThis.copied = value; } } }");
-  await pane[0].fire("click");
-  assert.equal(ui.run("copied"), "rex focus -s work pane-2");
-  assert.equal(pane[0].textContent, "Copied");
   await path[0].fire("click");
   assert.equal(ui.run("copied"), "/Users/me/src/repo.worktrees/issue-9");
   assert.equal(path[0].textContent, "Copied");

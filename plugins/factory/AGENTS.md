@@ -277,11 +277,10 @@ file through `/api/artifact`, so the server's access checks apply. The popup sho
 title, a close button and the document. The links keep their `href`, so a modified click still
 opens the raw file in a new tab. A task card has no "Task details" section. The history steps
 carry the worker lines (`stepExtras`): each worker sits on the latest step of its role's state
-(else the last step) with its status, name, usage, "Copy Rex command" (only while the worker is
-`running` or `unknown` with a pane and the task is not `resolved`; the pane ID is never shown),
+(else the last step) with its status, name, usage,
 `brief` and `result`. The latest review step carries the merge decision (open tasks with a PR),
 and the latest implementation step the "Copy worktree path" link (only while the task is not
-`resolved`). Both copy links are plain text links that show "Copied" for a moment. The
+`resolved`). The copy link is a plain text link that shows "Copied" for a moment. The
 "Evidence and task details" link under the history opens the result popup with the task's
 `details` from the factory file.
 
@@ -511,14 +510,13 @@ from `openAttention`, and the ETag covers it, so an item that appears or closes
 refreshes the browser even when the factory file is unchanged. The header has a
 badge with the count (hidden at 0) and the page title gets a `(N) ` prefix; the badge
 opens the "Waiting for you" panel (`#attention`) in the right dock. It lists the oldest 20
-rows: age, kind, text, options, task, role, and the pane's `rex focus -s SESSION BLOCK` command
-with a copy glyph button (no text; `aria-label` and tooltip "Copy rex focus command"; only
-for a plain block and session ID, since the command goes to a shell; no `-s` when the session is unknown). Rex registers a `rex` URL
+rows: age, kind, text, options, task and role. The pane ID and any Rex command are not shown, and
+there is no copy button. Rex registers a `rex` URL
 scheme, but the app documents no pane-focus URL, so there is no `rex://` link.
 All text is data, set with `textContent`. The dashboard makes no sound or notification.
 
 Only an `ask-user` item with options gets one button per option; every other item
-lists its options as text and offers only the copy button. The hook records `options`
+lists its options as text. The hook records `options`
 only for an `ask_user` form with one enum field, so the index of a button is the row
 of the form. A click sends `POST /api/attention/answer?file=` with `{id, index}`
 (same-origin JSON like the other writes). The server looks the item up among the
