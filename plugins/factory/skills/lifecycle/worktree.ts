@@ -1,0 +1,300 @@
+import { execFileSync, spawn } from "node:child_process";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { constants, homedir } from "node:os";
+import { basename, join, resolve } from "node:path";
+import { parseArgs } from "node:util";
+import { defaultBranch } from "./default-branch.mjs";
+
+const usage = `Usage:
+  node worktree.mjs create NAME [--pr N] [--base REF] [-- CMD...]
+  node worktree.mjs delete NAME [--force] [--default-branch NAME] [--merged-pr URL_OR_NUMBER]
+  node worktree.mjs path NAME
+
+Run it inside the project checkout. NAME is the branch name. Output is JSON on
+stdout; with "-- CMD", create prints its JSON to stderr, runs CMD in the
+worktree, and exits with the code of CMD.
+
+The path comes from "worktreePathTemplate" in $COPILOT_HOME/settings.json
+(default ~/.copilot). Fields: {repoPath}, {repo}, {branch}, {branchSlug}; a
+leading "~" is the home directory. When it is unset the path is
+~/Developer/worktrees/{repo}/{branch}.
+
+create branches from local HEAD (or --base REF), or reuses the worktree that
+already has the branch. delete removes a clean worktree whose tip is in the
+default branch or in a remote branch; --force skips both checks. With
+--merged-pr (a squash-merged branch is in neither), it asks gh whether the PR is
+merged and its head is the worktree tip or an ancestor of it, then removes the
+clean worktree and deletes the branch. It never asks.
+Exit codes: 1 usage, 2 refused, 3 not found, 4 git or gh failed.`;
+
+const DEFAULT_TEMPLATE = "~/Developer/worktrees/{repo}/{branch}";
+const CODES = { usage: 1, refused: 2, "not-found": 3, "git-failed": 4 };
+
+type Context = { cwd: string; worktrees: { path: string; branch: string | null }[]; repoPath: string; template: string };
+type Outcome = { out: string } | { result: Record<string, unknown> & { path?: string }; command?: string[] };
+
+class Fail extends Error {
+  error: keyof typeof CODES;
+  extra: Record<string, unknown>;
+
+  constructor(error: keyof typeof CODES, message: string, extra: Record<string, unknown> = {}) {
+    super(message);
+    this.error = error;
+    this.extra = extra;
+  }
+}
+
+function run(cmd: string, args: string[], cwd?: string) {
+  try {
+    return execFileSync(cmd, args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  } catch (error) {
+    const failure = error as NodeJS.ErrnoException & { stderr?: unknown };
+    if (failure.code === "ENOENT") throw new Fail("git-failed", `${cmd} is not installed.`);
+    const detail = String(failure.stderr ?? "").trim() || failure.message;
+    throw new Fail("git-failed", `${cmd} ${args.join(" ")} failed: ${detail}`);
+  }
+}
+
+const git = (cwd: string, ...args: string[]) => run("git", args, cwd);
+const gitOk = (cwd: string, ...args: string[]) => {
+  try {
+    execFileSync("git", args, { cwd, stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const real = (path: string) => {
+  try {
+    return realpathSync(path);
+  } catch {
+    return resolve(path);
+  }
+};
+
+function listWorktrees(cwd: string) {
+  const entries: { path: string; branch: string | null }[] = [];
+  for (const block of git(cwd, "worktree", "list", "--porcelain").split("\n\n")) {
+    const entry: { path: string; branch: string | null } = { path: "", branch: null };
+    for (const line of block.split("\n")) {
+      if (line.startsWith("worktree ")) entry.path = line.slice(9);
+      else if (line.startsWith("branch refs/heads/")) entry.branch = line.slice(18);
+    }
+    if (entry.path) entries.push(entry);
+  }
+  return entries;
+}
+
+function readTemplate() {
+  const file = join(process.env.COPILOT_HOME || join(homedir(), ".copilot"), "settings.json");
+  let settings;
+  try {
+    settings = JSON.parse(readFileSync(file, "utf8"));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return DEFAULT_TEMPLATE;
+    throw new Fail("usage", `Cannot read ${file}: ${(error as Error).message}`);
+  }
+  const value = settings?.worktreePathTemplate;
+  if (value === undefined || value === null) return DEFAULT_TEMPLATE;
+  if (typeof value !== "string" || value === "") {
+    throw new Fail("usage", `worktreePathTemplate in ${file} must be a non-empty string.`);
+  }
+  return value;
+}
+
+function context(cwd: string): Context {
+  const worktrees = listWorktrees(cwd);
+  const repoPath = worktrees[0].path;
+  return { cwd, worktrees, repoPath, template: readTemplate() };
+}
+
+function templatePath({ repoPath, template }: Context, name: string) {
+  const fields: Record<string, string> = { repoPath, repo: basename(repoPath), branch: name, branchSlug: name.replaceAll("/", "-") };
+  const expanded = template.replace(/\{(repoPath|repo|branch|branchSlug)\}/g, (_, key) => fields[key])
+    .replace(/^~(?=\/|$)/, homedir());
+  return resolve(repoPath, expanded);
+}
+
+function validName(cwd: string, name: string | undefined) {
+  if (!name || name.startsWith("-") || !gitOk(cwd, "check-ref-format", "--branch", name) || /^@\{/.test(name)) {
+    throw new Fail("usage", `Invalid branch name: ${name ?? ""}`);
+  }
+}
+
+// A changed template must not strand old worktrees, so the branch wins over the path.
+function find(ctx: Context, name: string, path: string) {
+  return ctx.worktrees.find((w) => w.branch === name) ??
+    ctx.worktrees.find((w) => real(w.path) === real(path));
+}
+
+function repoSlug(cwd: string) {
+  const url = git(cwd, "remote", "get-url", "origin");
+  return url.replace(/\.git$/, "").split(/[:/]/).slice(-2).join("/");
+}
+
+function create(ctx: Context, name: string, { pr, base }: { pr?: string; base: string }) {
+  const path = templatePath(ctx, name);
+  const existing = find(ctx, name, path);
+  if (existing) {
+    if (existing.branch !== name) {
+      throw new Fail("refused", `${existing.path} is a worktree of ${existing.branch ?? "a detached HEAD"}, not ${name}.`);
+    }
+    return { path: existing.path, branch: name, created_by_run: false };
+  }
+  if (existsSync(path)) throw new Fail("refused", `${path} exists and is not a worktree of ${name}.`);
+
+  if (pr) {
+    const info = JSON.parse(run("gh", ["pr", "view", pr, "--json", "url"], ctx.cwd));
+    if (!info.url.includes(`github.com/${repoSlug(ctx.cwd)}/pull/`)) {
+      throw new Fail("refused", `PR ${pr} (${info.url}) is not in this repository.`);
+    }
+    git(ctx.cwd, "worktree", "add", "--detach", path);
+    try {
+      run("gh", ["pr", "checkout", pr, "--branch", name, "--force"], path);
+    } catch (error) {
+      git(ctx.cwd, "worktree", "remove", "--force", path);
+      throw error;
+    }
+    return { path: real(path), branch: name, created_by_run: true };
+  }
+
+  if (gitOk(ctx.cwd, "show-ref", "--verify", "--quiet", `refs/heads/${name}`)) {
+    git(ctx.cwd, "worktree", "add", path, name);
+    return { path: real(path), branch: name, created_by_run: true };
+  }
+  git(ctx.cwd, "worktree", "add", "-b", name, path, base);
+  return { path: real(path), branch: name, created_by_run: true, base };
+}
+
+function mergedPR(ctx: Context, path: string, tip: string, ref: string) {
+  const slug = repoSlug(ctx.cwd);
+  const match = /^(?:https:\/\/github\.com\/([^/]+\/[^/]+)\/pull\/)?(\d+)\/?$/.exec(ref);
+  if (!match || (match[1] && match[1].toLowerCase() !== slug.toLowerCase())) {
+    throw new Fail("usage", `--merged-pr needs a PR number or a URL in ${slug}.`);
+  }
+  const pr = JSON.parse(run("gh", ["api", `repos/${slug}/pulls/${match[2]}`], ctx.cwd));
+  const head = pr.head?.sha ?? "";
+  return pr.merged === true && head !== "" && (head === tip || gitOk(path, "merge-base", "--is-ancestor", head, tip));
+}
+
+function remove(
+  ctx: Context,
+  name: string,
+  { force, defaultBranch: override, mergedPr }: { force: boolean; defaultBranch?: string; mergedPr?: string },
+) {
+  const wt = find(ctx, name, templatePath(ctx, name));
+  if (!wt) throw new Fail("not-found", `No worktree for ${name}.`);
+  const { path, branch } = wt;
+  const info = { path, branch };
+  if (real(path) === real(ctx.repoPath)) throw new Fail("refused", "Refusing to remove the main checkout.", info);
+  if (real(path) === real(git(ctx.cwd, "rev-parse", "--show-toplevel"))) {
+    throw new Fail("refused", "Refusing to remove the current worktree.", info);
+  }
+
+  const tip = git(path, "rev-parse", "HEAD");
+  const target = defaultBranch(ctx.cwd, override);
+  const merged = (target !== null && gitOk(path, "merge-base", "--is-ancestor", tip, target)) ||
+    git(path, "branch", "-r", "--contains", tip) !== "";
+  let prMerged = false;
+  if (!force) {
+    if (git(path, "status", "--porcelain") !== "") {
+      throw new Fail("refused", `${path} has uncommitted changes.`, { ...info, removed: false, reason: "dirty" });
+    }
+    if (mergedPr !== undefined) {
+      prMerged = mergedPR(ctx, path, tip, mergedPr);
+      if (!prMerged) {
+        throw new Fail("refused", `PR ${mergedPr} is not merged, or its head is not in ${branch ?? tip}.`,
+          { ...info, removed: false, reason: "pr-not-merged" });
+      }
+    }
+    if (!merged && !prMerged) {
+      throw new Fail("refused", `${branch ?? tip} is not in ${target ?? "the default branch"} or a remote branch.`,
+        { ...info, removed: false, reason: "unmerged" });
+    }
+  }
+
+  git(ctx.cwd, "worktree", "remove", ...(force ? ["--force"] : []), path);
+  const branchDeleted = (merged || prMerged) && branch !== null &&
+    gitOk(ctx.cwd, "branch", prMerged && !merged ? "-D" : "-d", branch);
+  return { ...info, removed: true, branch_deleted: branchDeleted };
+}
+
+function main(argv: string[]): Outcome {
+  const dash = argv.indexOf("--");
+  const [args, command] = dash === -1 ? [argv, []] : [argv.slice(0, dash), argv.slice(dash + 1)];
+  let parsed;
+  try {
+    parsed = parseArgs({
+      args,
+      allowPositionals: true,
+      options: {
+        pr: { type: "string" },
+        base: { type: "string", default: "HEAD" },
+        force: { type: "boolean", default: false },
+        "default-branch": { type: "string" },
+        "merged-pr": { type: "string" },
+        help: { type: "boolean", short: "h", default: false },
+      },
+    });
+  } catch (error) {
+    throw new Fail("usage", (error as Error).message);
+  }
+  const { values, positionals } = parsed;
+  if (values.help) return { out: usage };
+  const [subcommand, name, ...rest] = positionals;
+  if (!["create", "delete", "path"].includes(subcommand) || rest.length > 0) throw new Fail("usage", usage);
+  if (values["merged-pr"] !== undefined && subcommand !== "delete") throw new Fail("usage", "--merged-pr works only with delete.");
+  if (command.length > 0 && subcommand !== "create") throw new Fail("usage", "-- CMD works only with create.");
+  if (values.pr !== undefined && !/^\d+$/.test(values.pr)) throw new Fail("usage", "--pr needs a PR number.");
+
+  const cwd = process.cwd();
+  const ctx = context(cwd);
+  validName(cwd, name);
+
+  if (subcommand === "path") {
+    const path = templatePath(ctx, name);
+    const existing = find(ctx, name, path);
+    return { result: { path: existing?.path ?? path, branch: name, exists: existing !== undefined } };
+  }
+  if (subcommand === "delete") {
+    return { result: remove(ctx, name, {
+      force: values.force,
+      defaultBranch: values["default-branch"],
+      mergedPr: values["merged-pr"],
+    }) };
+  }
+  const result = create(ctx, name, { pr: values.pr, base: values.base });
+  return { result, command };
+}
+
+function exitWith(error: unknown): never {
+  const { message } = error as Error;
+  const code = error instanceof Fail ? error.error : "git-failed";
+  process.stdout.write(`${JSON.stringify({ error: code, message, ...(error as Fail).extra })}\n`);
+  if (code !== "usage" || !message.startsWith("Usage:")) process.stderr.write(`${message}\n`);
+  process.exit(CODES[code]);
+}
+
+let outcome: Outcome;
+try {
+  outcome = main(process.argv.slice(2));
+} catch (error) {
+  exitWith(error);
+}
+
+if ("out" in outcome) {
+  process.stdout.write(`${outcome.out}\n`);
+} else if (outcome.command?.length) {
+  process.stderr.write(`${JSON.stringify(outcome.result)}\n`);
+  const [cmd, ...args] = outcome.command;
+  const child = spawn(cmd, args, { cwd: outcome.result.path, stdio: "inherit" });
+  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) process.on(signal, () => child.kill(signal));
+  child.on("error", (error) => {
+    process.stderr.write(`${cmd}: ${error.message}\n`);
+    process.exit(127);
+  });
+  child.on("exit", (code, signal) => process.exit(code ?? 128 + constants.signals[signal as NodeJS.Signals]));
+} else {
+  process.stdout.write(`${JSON.stringify(outcome.result)}\n`);
+}
