@@ -17,7 +17,7 @@ process.chdir(repoRoot);
 // Browser entries bundle npm packages and run in the page, not in Node. Each is minified and
 // carries the full licence text of the packages it inlines.
 const browser: Record<string, string[]> = {
-  "plugins/factory/skills/lifecycle/dashboard-markdown.ts": ["marked", "dompurify"],
+  "plugins/factory/skills/lifecycle/dashboard.ts": ["marked", "dompurify"],
 };
 
 function licenses(packages: string[]) {

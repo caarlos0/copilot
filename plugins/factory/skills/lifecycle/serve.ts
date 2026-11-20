@@ -658,10 +658,8 @@ p{margin:0;color:#f87171}
         throw new HttpError(405, "Use GET. To change the dashboard, use POST /api/move, /api/settings, /api/attention/answer or /api/improve/decide.");
       } else if (url.pathname === "/" || url.pathname === "/dashboard.html") {
         await sendAsset(request, response, "dashboard.html", "text/html; charset=utf-8");
-      } else if (url.pathname === "/factory-data.mjs") {
-        await sendAsset(request, response, "factory-data.mjs", "text/javascript; charset=utf-8");
-      } else if (url.pathname === "/dashboard-markdown.mjs") {
-        await sendAsset(request, response, "dashboard-markdown.mjs", "text/javascript; charset=utf-8");
+      } else if (url.pathname === "/dashboard.mjs") {
+        await sendAsset(request, response, "dashboard.mjs", "text/javascript; charset=utf-8");
       } else if (url.pathname === "/api/factories") {
         const { entries, tag } = await listingTags();
         await sendTagged(request, response, "listing", tag, () => listFactories(entries));

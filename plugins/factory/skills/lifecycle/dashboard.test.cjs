@@ -67,14 +67,13 @@ test("serves the dashboard and the shared data module without caching", async (t
   assert.equal(page.headers.get("cache-control"), "no-store");
   assert.equal(page.headers.get("x-content-type-options"), "nosniff");
   assert.equal(await page.text(), html);
-  const data = await get(url, "/factory-data.mjs");
-  assert.match(data.headers.get("content-type"), /text\/javascript/);
-  assert.match(await data.text(), /^export \{[^}]*^ {2}states,$/ms);
-  const markdown = await get(url, "/dashboard-markdown.mjs");
-  assert.equal(markdown.status, 200);
-  assert.match(markdown.headers.get("content-type"), /text\/javascript/);
-  assert.equal(await markdown.text(), readFileSync(join(__dirname, "dashboard-markdown.mjs"), "utf8"));
-  assert.equal((await get(url, "/vendor/marked.min.js")).status, 404, "There is no vendor route.");
+  const bundle = await get(url, "/dashboard.mjs");
+  assert.equal(bundle.status, 200);
+  assert.match(bundle.headers.get("content-type"), /text\/javascript/);
+  assert.equal(await bundle.text(), readFileSync(join(__dirname, "dashboard.mjs"), "utf8"));
+  for (const old of ["/factory-data.mjs", "/dashboard-markdown.mjs", "/vendor/marked.min.js"]) {
+    assert.equal((await get(url, old)).status, 404, `${old} has no route.`);
+  }
 });
 
 test("lists valid factories with counts and reports invalid ones separately", async (t) => {
@@ -141,7 +140,7 @@ const rawGet = (base, path, headers = {}) => new Promise((resolve, reject) => {
 
 test("gzips the pages and the API only for a client that asks, and a 304 stays bare", async (t) => {
   const { url } = await server(t);
-  for (const path of [`/api/factory?file=${factoryFile}`, "/api/factories", "/", "/factory-data.mjs"]) {
+  for (const path of [`/api/factory?file=${factoryFile}`, "/api/factories", "/", "/dashboard.mjs"]) {
     const plain = await rawGet(url, path, { "Accept-Encoding": "identity" });
     assert.equal(plain.status, 200, path);
     assert.equal(plain.headers["content-encoding"], undefined, path);
@@ -564,6 +563,17 @@ test("a 304 still redraws the Find work countdowns", async (t) => {
   assert.match(ui.get("rule-list").children[0].textContent, /last run 35m ago, due now/);
 });
 
+test("the page script imports only names that dashboard.mjs exports", async () => {
+  const bundle = await import("./dashboard.mjs");
+  const imports = [...html.matchAll(/^\s*import \{([^}]+)\} from "\.\/dashboard\.mjs";$/gm)];
+  assert.equal(imports.length, 2);
+  for (const [, list] of imports) {
+    for (const name of list.split(",").map((part) => part.trim())) {
+      assert.ok(name in bundle, `dashboard.mjs does not export ${name}`);
+    }
+  }
+});
+
 test("the page script parses, never renders data as HTML, and finds its elements", () => {
   const script = html.match(/<script type="module">([\s\S]*?)<\/script>/)[1].replace(/^\s*import .+;$/gm, "");
   new vm.Script(script);
@@ -707,9 +717,9 @@ async function dashboard(t, { reducedMotion = true, confirm = () => true, now = 
     constructor(...args) { super(...(args.length ? args : [now])); }
     static now() { return now; }
   }
-  const { marked } = await import("./dashboard-markdown.mjs");
+  const { marked, ...data } = await import("./dashboard.mjs");
   const context = vm.createContext({
-    ...await import("./factory-data.mjs"),
+    ...data,
     document, location, URL, URLSearchParams, Date: ClockDate, marked,
     DOMPurify: { sanitize: (markup, config) => { sanitized.push({ markup, config }); return parseHTML(markup); } },
     history: { replaceState: (_, __, value) => { location.href = new URL(value, location).href; } },

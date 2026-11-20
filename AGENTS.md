@@ -70,9 +70,9 @@ Runtime libraries (`write-file-atomic`, `valibot`, `marked`, `dompurify`) are
 library to a plugin that does not import it. The build bundles them into each
 `.mjs`, so consumers still need
 no `node_modules`; the import boundary applies to plugin sources, not to library
-files. A module served to the browser (`board-data`, `factory-data`) may use only
+files. A module served to the browser (`board-data`, `dashboard`) may use only
 libraries that need no `node:` built-ins, and `board-data.mjs` stays under 20 KB.
-A browser entry that inlines npm packages (`dashboard-markdown.ts`: `marked`,
+A browser entry that inlines npm packages (`dashboard.ts`: `marked`,
 `dompurify`) is listed in `scripts/build.ts`, which minifies it and puts the
 packages' licence text in its header.
 Add a library only to replace code you would otherwise maintain.
