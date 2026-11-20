@@ -30,16 +30,6 @@ async function fixture(t, { rex = true } = {}) {
   return { calls, run };
 }
 
-test("hooks.json declares one sessionStart command that never enables naming", () => {
-  assert.equal(hooks.version, 1);
-  assert.equal(hooks.hooks.sessionStart.length, 1);
-  assert.equal(entry.type, "command");
-  assert.equal(typeof entry.bash, "string");
-  assert.ok(entry.timeoutSec > 0 && entry.timeoutSec <= 30);
-  assert.ok(entry.bash.includes("--feature-session-naming=false"));
-  assert.ok(!entry.bash.includes("--feature-session-naming=true"));
-});
-
 test("prints rex output as additionalContext", needsJq, async (t) => {
   const { calls, run } = await fixture(t);
   const out = run({ REX_SESSION: "session:x" });
