@@ -573,10 +573,13 @@ or scheduled rule remains actionable.
 
 `default-branch`, `state-dir`, `worker-name`, `gate`, `proposals`, `sessions`,
 `usage`, `session-metrics`, `shot`, `archive`, `attention`, `migrate`,
-`reconcile`, `pr-watch` and `worktree` in `skills/lifecycle/` are
+`reconcile`, `pr-watch`, `worktree`, `factory-data` and `factory` in
+`skills/lifecycle/` are
 TypeScript, checked with `strict` on. Edit the `.ts`, run `bun run build` at the repository root, and
 commit the `.ts` and the generated `.mjs` together. The other modules are still
-hand-written `.mjs`.
+hand-written `.mjs`. `factory-data.ts` exports the `factory/v1` types (`Factory`,
+`Task`, `Worker`, and the others). The dashboard loads `factory-data.mjs` in the
+browser, so it must not import `node:` modules.
 
 ## Validation
 

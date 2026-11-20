@@ -69,7 +69,7 @@ test("serves the dashboard and the shared data module without caching", async (t
   assert.equal(await page.text(), html);
   const data = await get(url, "/factory-data.mjs");
   assert.match(data.headers.get("content-type"), /text\/javascript/);
-  assert.match(await data.text(), /export const states/);
+  assert.match(await data.text(), /^export \{[^}]*^ {2}states,$/ms);
   for (const name of ["marked", "purify"]) {
     const vendored = await get(url, `/vendor/${name}.min.js`);
     assert.match(vendored.headers.get("content-type"), /text\/javascript/);
