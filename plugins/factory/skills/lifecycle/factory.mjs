@@ -9,7 +9,7 @@ import {
   checkTransition, defaultBudget, defaultLimits, format, isObject, maxRoleLimit, operatorOutcomes, outcomes,
   parseBlocker, validate,
 } from "./factory-data.mjs";
-import { findSession, recordSessions, registryFile, sessionID, sessionStateDirectory } from "./sessions.mjs";
+import { findSessions, recordSessions, registryFile, sessionID, sessionStateDirectory } from "./sessions.mjs";
 
 export class ConflictError extends Error {}
 
@@ -469,16 +469,23 @@ async function writeFactory(file, values, operator, source) {
 
 // A running worker without a session gets the ID of the one session started
 // in its worktree (or in the repo for one-shot workers) since it launched.
+// Sessions only accumulate, so two or more matches stay ambiguous: the scan is
+// recorded in `session_scan` and skipped until the next launch clears it.
 async function locateSessions(current, previous, launches, now, track) {
   const directory = sessionStateDirectory();
   const find = async (worker, key, anchor, cwd, role, owner) => {
     if (worker?.status !== "running" || worker.session) return;
-    if (launches.has(key)) worker.launched_at = anchor;
-    if (!worker.launched_at) return;
-    const id = await findSession(directory, cwd, worker.launched_at);
-    if (id) {
-      worker.session = id;
-      track(id, role, owner);
+    if (launches.has(key)) {
+      worker.launched_at = anchor;
+      delete worker.session_scan;
+    }
+    if (!worker.launched_at || worker.session_scan) return;
+    const found = await findSessions(directory, cwd, worker.launched_at);
+    if (found.length === 1) {
+      worker.session = found[0];
+      track(found[0], role, owner);
+    } else if (found.length > 1) {
+      worker.session_scan = "ambiguous";
     }
   };
   for (const task of current.tasks) {
@@ -639,7 +646,8 @@ Run options:
                         automatically from --workers and --rule-worker records that have a session.
                         A running worker without one gets the single session in the Copilot
                         session-state folder (FACTORY_SESSION_STATE, default ~/.copilot/session-state)
-                        created since its launch in its worktree, or in the current directory
+                        created since its launch in its worktree, or in the current directory;
+                        with many matches it sets "session_scan" and skips the scan until relaunch
   --limits JSON         Merge worker caps, e.g. '{"investigation":2}' (default 3 each; the dashboard
                         accepts 1 to 100). Emits limits.updated
   --expected-limits JSON  Caps the write was based on, e.g. '{"investigation":3}'. Every key in

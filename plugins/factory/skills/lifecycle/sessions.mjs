@@ -53,9 +53,8 @@ export const sessionStateDirectory = () =>
 
 const real = (path) => realpath(path).catch(() => resolve(path));
 
-// The one Copilot session started in cwd at or after `since`, or null when
-// there is none or more than one.
-export async function findSession(directory, cwd, since) {
+// The Copilot sessions started in cwd at or after `since`.
+export async function findSessions(directory, cwd, since) {
   const from = Date.parse(since);
   const names = await readdir(directory).catch(() => []);
   const wanted = await real(cwd);
@@ -72,5 +71,5 @@ export async function findSession(directory, cwd, since) {
       // An unreadable folder is not a match; the lookup never fails a write.
     }
   }));
-  return found.length === 1 ? found[0] : null;
+  return found;
 }

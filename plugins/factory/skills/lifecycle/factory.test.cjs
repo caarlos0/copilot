@@ -1036,11 +1036,16 @@ test("a one-shot rule worker is matched by the factory's directory; no or many m
   await state.add(uuid(2), repo, launch + 2_000);
   run("--rule", "self", "--rule-worker", running);
   assert.equal((await f.read()).rules[0].worker.session, undefined, "Two sessions are not a clear match.");
+  assert.equal((await f.read()).rules[0].worker.session_scan, "ambiguous");
 
   await rm(join(state.directory, uuid(2)), { recursive: true });
   run("--run-status", "active");
-  const { session } = (await f.read()).rules[0].worker;
-  assert.equal(session, uuid(1), "A later write finds the session.");
+  assert.equal((await f.read()).rules[0].worker.session, undefined, "An ambiguous launch is not scanned again.");
+
+  run("--rule", "self", "--rule-worker", running);
+  const { session, session_scan } = (await f.read()).rules[0].worker;
+  assert.equal(session, uuid(1), "A relaunch scans again.");
+  assert.equal(session_scan, undefined);
   const registry = (await readFile(join(f.directory, "owner.repo-factory-sessions.jsonl"), "utf8")).split("\n").filter(Boolean);
   assert.deepEqual(registry.map((line) => JSON.parse(line)).map(({ id, role, rule }) => ({ id, role, rule })),
     [{ id: uuid(1), role: "improver", rule: "self" }]);

@@ -628,7 +628,9 @@ work". It changes nothing without the user's answer. Its worker follows
    automatically, and a `running` worker without one gets the single session
    in `~/.copilot/session-state` created in its worktree (or the factory's
    directory for one-shot workers) since launch, left unset if none or many
-   match. The registry is `<owner.repo>-factory-sessions.jsonl` beside
+   match. Many matches set `session_scan: "ambiguous"` in the worker record,
+   so later writes skip the scan until the worker is launched again. The
+   registry is `<owner.repo>-factory-sessions.jsonl` beside
    the factory file. It holds IDs, roles, and task or rule names only.
 2. When you create a factory, add a rule `self-improve` with `--rules JSON`:
    `kind` `improve`, `every` `7d`, `enabled` true, and `last_run_at` set to
