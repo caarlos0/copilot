@@ -573,11 +573,15 @@ or scheduled rule remains actionable.
 
 `default-branch`, `state-dir`, `worker-name`, `gate`, `proposals`, `sessions`,
 `usage`, `session-metrics`, `shot`, `archive`, `attention`, `migrate`,
-`reconcile`, `pr-watch`, `worktree`, `factory-data` and `factory` in
-`skills/lifecycle/` are
+`reconcile`, `pr-watch`, `worktree`, `factory-data`, `factory` and `broker` in
+`skills/lifecycle/`, and `guard`, `attention` and `stop-hook` in `hooks/`, are
 TypeScript, checked with `strict` on. Edit the `.ts`, run `bun run build` at the repository root, and
 commit the `.ts` and the generated `.mjs` together. The other modules are still
-hand-written `.mjs`. `factory-data.ts` exports the `factory/v1` types (`Factory`,
+hand-written `.mjs`. A hook bundle imports its siblings (`gate.mjs`, `broker.mjs`)
+as external `.mjs` files and `attention` loads `broker.mjs` lazily, so a hook
+that exits early pays no start cost for it. `stop-hook` reads `import.meta.url`
+to find `skills/lifecycle/`; it stays valid because a bundle sits at the path of
+its source. `factory-data.ts` exports the `factory/v1` types (`Factory`,
 `Task`, `Worker`, and the others). The dashboard loads `factory-data.mjs` in the
 browser, so it must not import `node:` modules.
 
