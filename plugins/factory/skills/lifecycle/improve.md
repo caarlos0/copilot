@@ -1,22 +1,24 @@
 # Factory self-improve worker
 
-Use this procedure only when the factory briefs you for an `improve` rule. You
-are a one-shot, read-only worker. You find what slows the factory or wastes
-money, and you propose exactly one change, or none. You change nothing yourself.
+Use this procedure only when the factory gives you a brief for an `improve`
+rule. You are a one-shot, read-only worker. You find what slows the factory or
+wastes money. You propose exactly one change, or none. You change nothing
+yourself.
 
-This is Lever's `run-health-review` discipline applied to the factory's own
-sessions: check last run's prediction first, change one thing, state how to
-verify it. Use `prompt-mirror` only for the "ask less of the user" signal.
+This is the `run-health-review` discipline of Lever, applied to the sessions of
+the factory. Check the prediction of the last run first. Change one thing. State
+how to verify it. Use `prompt-mirror` only for the "ask less of the user"
+signal.
 
 ## Inputs
 
 The brief gives you `WINDOW_START` (an ISO time) and absolute paths for:
 
-- the metrics file, `<project>-self-improve-metrics.json`, which the factory
-  generated with `session-metrics.mjs --active-since WINDOW_START` (your
-  sandbox may not read session logs, so do not run the tool);
-- the sessions registry, `<owner.repo>-factory-sessions.jsonl`, to look up a
-  session's role and task;
+- the metrics file, `<project>-self-improve-metrics.json`. The factory
+  generated it with `session-metrics.mjs --active-since WINDOW_START`. Your
+  sandbox can fail to read session logs, so do not run the tool;
+- the sessions registry, `<owner.repo>-factory-sessions.jsonl`, to find the role
+  and task of a session;
 - the factory file, read only;
 - your result file, `<project>-<rule>-result.json`. If it exists, it is the
   previous run. Read it before you write anything.
@@ -24,8 +26,8 @@ The brief gives you `WINDOW_START` (an ISO time) and absolute paths for:
 ## Privacy
 
 - Read only sessions that are in the registry.
-- Use the metrics file from the brief. It prints counts and names, not content.
-  Read a session's event log yourself only to explain a number, and never copy
+- Use the metrics file from the brief. It shows counts and names, not content.
+  Read the event log of a session yourself only to explain a number. Never copy
   its text.
 - Put session IDs and metric values in the result. Never put prompts, replies,
   commands, file contents, or secrets in the result, an issue, a PR, or a
@@ -33,43 +35,42 @@ The brief gives you `WINDOW_START` (an ISO time) and absolute paths for:
 
 ## Session history queries
 
-If you use `session_store_sql`, follow these rules:
+If you use `session_store_sql`, obey these rules:
 
 - Use `source: "local"` with SQLite syntax. Do not use `INTERVAL` or `ILIKE`.
   Example: `substr(created_at,1,10) >= date('now','-7 days')`.
-- Time-bound every query. Cloud queries time out after 60 seconds.
-- Select IDs and summaries first. Then fetch details for only those IDs.
+- Put a time limit on every query. Cloud queries time out after 60 seconds.
+- Select IDs and summaries first. Then get the details for only those IDs.
 - If a query fails, do not repeat it. Count events in `events.jsonl` instead.
 
 ## Steps
 
 1. **Check the previous run.** If the result file has a `change`, read the
-   top-level `decision.status` the factory added (`applied`, `declined`, or
-   `noted`). If it was applied, measure
-   the metric it named, in the sessions after `decision.at`, and set a verdict:
-   `confirmed`, `refuted`, or `inconclusive`. If it was not applied, the
-   verdict is `not-applied`. Do not propose the same change again after a
-   `declined`.
-2. **Measure.** Read the metrics file. Its sessions were active in the
-   window, and `started_before_window` names those that began earlier; their
-   numbers count only the window's events. Compare it with the window before
-   it when that data exists. Group by session `role`.
+   top-level `decision.status` that the factory added (`applied`, `declined`, or
+   `noted`). If it is `applied`, measure the metric that the change named, in
+   the sessions after `decision.at`. Then set a verdict: `confirmed`,
+   `refuted`, or `inconclusive`. If it is not `applied`, the verdict is
+   `not-applied`. After a `declined`, do not propose the same change again.
+2. **Measure.** Read the metrics file. Its sessions were active in the window.
+   `started_before_window` names the sessions that began earlier. Their numbers
+   count only the events in the window. Compare the window with the window
+   before it when that data exists. Group the sessions by `role`.
 3. **Look for these signals:**
 
    | Signal | Where it shows | Typical change |
    | --- | --- | --- |
-   | Spend | `usage.cost`, tokens, low `cache_read_tokens` | Narrow a brief; smaller worker caps; fewer review models |
-   | Speed | `wall_minutes` and `turns` per resolved task | Cut a step; start workers sooner |
-   | Idle time | `idle.minutes`, `over_10_minutes`, `longest_minutes` | Shorter or no wait; use the waiter instead of manual checks |
-   | Polling | `commands.sleep`, `commands.status_reads` high; `gh_wait` and `watch` low | Use `pr-watch.mjs` (`gh_wait` counts it); `gh pr checks --watch --fail-fast` for a one-off check |
+   | Spend | `usage.cost`, tokens, low `cache_read_tokens` | Make a brief narrower; set smaller worker caps; use fewer review models |
+   | Speed | `wall_minutes` and `turns` per resolved task | Remove a step; start workers sooner |
+   | Idle time | `idle.minutes`, `over_10_minutes`, `longest_minutes` | Use a shorter wait or no wait; use the waiter instead of manual checks |
+   | Polling | `commands.sleep`, `commands.status_reads` high; `gh_wait` and `watch` low | Use `pr-watch.mjs` (`gh_wait` counts it); use `gh pr checks --watch --fail-fast` for a one-off check |
    | Questions to the user | `tools.ask_user.calls`, `user_messages` in worker sessions | Give the worker a default answer, or decide in the brief |
-   | Failures | `tools.<name>.failures` | Fix the tool profile or the brief; a tool that fails every call is a config bug |
+   | Failures | `tools.<name>.failures` | Correct the tool profile or the brief; a tool that fails every call is a config bug |
    | User waits | `attention.requested` per `role`, and the median time to the `attention.resolved` for the same `session`, in the events log `<owner.repo>-factory-events.jsonl` beside the factory file | Give the worker a default answer, or allow the tool in its profile |
 
-   Four of these have a standing line in every implementation brief ("Standing
-   cost lines" in the skill). If the signal is still high, the line is missing
-   from a brief or the worker ignores it; say which, and do not propose the
-   line again:
+   Four of these signals have a standing line in every implementation brief
+   ("Standing cost lines" in the skill). If the signal is still high, the brief
+   does not have the line, or the worker ignores it. Say which one. Do not
+   propose the line again:
 
    | Signal | Standing line |
    | --- | --- |
@@ -78,18 +79,19 @@ If you use `session_store_sql`, follow these rules:
    | `user_messages` per worker (steering) | The brief has the default for every decision; the factory batches its nudges into one message |
    | `idle.over_10_minutes`, high `idle.minutes` in an implementation session after the PR goes to review | Save a `waiting` result; the factory closes the pane and starts a fresh worker for follow-ups |
 
-   The event log does not record tool run times. Do not claim a tool was slow.
-   "Idle" is the time between turns, so it includes waits for the user and for
-   notifications. A session that started before the window has window-only
-   numbers, but its tool calls that began before the window are not counted as
-   failures. The factory's own session is long-lived, so if the factory ran the
-   tool without `--active-since`, its totals are cumulative over the whole
-   session: compare them with the previous result, not with the window.
+   The event log does not record the run times of tools. Do not claim that a
+   tool was slow. "Idle" is the time between turns, so it includes the waits for
+   the user and for notifications. A session that started before the window has
+   numbers for the window only. Its tool calls that began before the window do
+   not count as failures. The session of the factory is long-lived. If the
+   factory ran the tool without `--active-since`, its totals are cumulative over
+   the whole session. Compare them with the previous result, not with the
+   window.
 4. **Pick one change, or none.** Choose the change with the largest expected
-   effect on one metric. With fewer than 3 worker sessions in the window,
-   prefer no change. If the cause is outside the factory (for example a CI
-   outage), say so and propose nothing.
-5. **Write the result** (below), atomically: write a temporary file in the same
+   effect on one metric. If the window has fewer than 3 worker sessions, prefer
+   no change. If the cause is outside the factory (for example a CI outage), say
+   so and propose nothing.
+5. **Write the result** (below), atomically. Write a temporary file in the same
    directory, then rename it. End with the result path.
 
 ## Change kinds
@@ -131,9 +133,9 @@ If you use `session_store_sql`, follow these rules:
 }
 ```
 
-`previous` is `null` on the first run. `change` is `null` for no change; keep
-`findings` so the next run knows what you saw. The factory shows `change` in the
-dashboard's "Waiting for you" list as a proposal with Accept and Decline
-buttons, so write `summary` and `evidence` for a person who reads only that row.
+`previous` is `null` on the first run. `change` is `null` for no change. Keep
+`findings`, so the next run knows what you saw. The factory shows `change` in the
+"Waiting for you" list of the dashboard as a proposal with Accept and Decline
+buttons. Write `summary` and `evidence` for a person who reads only that row.
 The factory adds `decision` (`status`, `at`, `note`) after the user answers. Do
 not write it yourself.
