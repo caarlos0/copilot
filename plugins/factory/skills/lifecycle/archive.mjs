@@ -114,16 +114,17 @@ export async function clean(file, { olderThan = 14 * day, run = false, now = Dat
   const open = JSON.stringify(current.tasks.filter((task) => task.state !== "resolved" || pendingFeedback(task)));
 
   const entries = await readdir(directory, { withFileTypes: true });
+  const roles = workerRoles.join("|");
+  const files = new RegExp(`^(${roles})-(brief|result)([.-].*)?\\.(md|json)$`);
+  const dirs = new RegExp(`^(${roles})-instructions$`);
+  const prefixes = new Map(expired.map((task) => [`${project}-${task.id}-`, task.id]));
   const artifacts = new Map();
-  for (const task of expired) {
-    const prefix = `${project}-${task.id}-`.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const roles = workerRoles.join("|");
-    const files = new RegExp(`^${prefix}(${roles})-(brief|result)([.-].*)?\\.(md|json)$`);
-    const dirs = new RegExp(`^${prefix}(${roles})-instructions$`);
-    for (const entry of entries) {
-      if ((entry.isFile() && files.test(entry.name)) || (entry.isDirectory() && dirs.test(entry.name))) {
-        artifacts.set(entry.name, task.id);
-      }
+  for (const entry of entries) {
+    const pattern = entry.isFile() ? files : entry.isDirectory() ? dirs : null;
+    if (!pattern) continue;
+    for (let at = entry.name.indexOf("-"); at !== -1; at = entry.name.indexOf("-", at + 1)) {
+      const task = prefixes.get(entry.name.slice(0, at + 1));
+      if (task !== undefined && pattern.test(entry.name.slice(at + 1))) artifacts.set(entry.name, task);
     }
   }
 
@@ -141,9 +142,9 @@ export async function clean(file, { olderThan = 14 * day, run = false, now = Dat
   const references = (await Promise.all(factories.map((name) => readFile(join(directory, name), "utf8")))).join("\n");
   const large = [];
   for (const entry of entries) {
-    if (!entry.isFile() || factories.includes(entry.name) || references.includes(entry.name)) continue;
+    if (!entry.isFile() || factories.includes(entry.name)) continue;
     const info = await stat(join(directory, entry.name));
-    if (info.size > largeFile && now - info.mtimeMs >= day) {
+    if (info.size > largeFile && now - info.mtimeMs >= day && !references.includes(entry.name)) {
       large.push({ path: join(directory, entry.name), size: info.size });
     }
   }

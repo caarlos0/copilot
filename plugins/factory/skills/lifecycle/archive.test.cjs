@@ -148,3 +148,17 @@ test("reports large unreferenced files as stale-large and never deletes them", a
   assert.deepEqual(result["stale-large"].map((item) => item.path), [stale]);
   assert.ok((await f.names()).includes("staging-old.tmp"));
 });
+
+test("a large file named only by another factory file is not stale-large", async (t) => {
+  const f = await fixture(t, [task(openTask, "open")]);
+  const big = async (name) => {
+    const path = await f.put(name, 10);
+    await truncate(path, 101 * 1024 * 1024);
+    await utimes(path, daysAgo(10), daysAgo(10));
+    return path;
+  };
+  const stale = await big("unreferenced.tmp");
+  await big("referenced.tmp");
+  await writeFile(join(f.directory, "other.repo-factory.json"), JSON.stringify({ note: "referenced.tmp" }));
+  assert.deepEqual(f.clean()["stale-large"].map((item) => item.path), [stale]);
+});
