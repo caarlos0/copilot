@@ -1,8 +1,8 @@
-import { randomUUID } from "node:crypto";
-import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, stat } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
+import writeFileAtomic from "write-file-atomic";
 import { archiveFormat, githubResourceURL, validateArchive } from "./factory-data.mjs";
 
 type Task = {
@@ -30,13 +30,7 @@ const dayOf = (task: Task) => new Date(task.updated_at).toISOString().slice(0, 1
 
 async function writeDay(directory: string, data: Day) {
   const file = join(directory, `${data.day}.json`);
-  const temporary = `${file}.${randomUUID()}.tmp`;
-  try {
-    await writeFile(temporary, `${JSON.stringify(data, null, 2)}\n`, { flag: "wx", mode: 0o600 });
-    await rename(temporary, file);
-  } finally {
-    await rm(temporary, { force: true });
-  }
+  await writeFileAtomic(file, `${JSON.stringify(data, null, 2)}\n`, { mode: 0o600 });
 }
 
 export async function readArchive(directory: string, project: string) {
