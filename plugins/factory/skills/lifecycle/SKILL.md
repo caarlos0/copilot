@@ -818,6 +818,16 @@ use). Send follow-ups to a worker as one batched message, never a stream. When a
 the step that records the result, and launch a fresh worker with a short
 handoff (task, PR, head, what changed) for any later follow-up.
 
+Every implementation brief for a UI change (the dashboard or any page) also has
+this standing line: "For a UI change, when a browser is available, run
+`node SHOT` (`shot.mjs`, beside `serve.mjs`) and name the screenshot path in the
+result, or save a partial result that says what was not seen." Replace `SHOT`
+with the absolute path, as for `PR_WATCH`. `shot.mjs` serves a copy of
+`factory.example.json` on a free port and runs headless Chrome at 1280 and 390
+pixels wide. In the macOS worker sandbox Chrome, Edge and WebKit all fail
+(Mach service lookup is denied), so the worker says so; it never claims to have
+seen the change.
+
 An investigation brief has one more hard line, in these words: "You are an
 investigation worker. Do not change anything. You are forbidden to write
 anywhere except the result path and `$TMPDIR`: no product file edits, no

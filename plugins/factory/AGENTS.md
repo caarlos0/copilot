@@ -59,6 +59,16 @@ for every decision and batch nudges into one message, and save a `waiting`
 result at hand-off to review so the factory closes the pane and starts a fresh
 worker for follow-ups. `improve.md` maps each line to the metric it addresses.
 
+Every implementation brief for a UI change also carries this line: "For a UI
+change, when a browser is available, run shot.mjs and name the screenshot path in
+the result, or save a partial result that says what was not seen."
+`skills/lifecycle/shot.mjs` serves a private copy of `factory.example.json` with
+`serve.mjs` on a free port (never 8766) and runs headless Chrome or Edge at
+`--widths` (default 1280 and 390), writing `dashboard-<width>.png` to `--out`
+(default `$TMPDIR`). Its test covers argument handling only. The macOS worker
+sandbox denies the Mach bootstrap lookup that Chrome, Edge and WebKit need, so
+no browser starts there; a worker in that sandbox saves a partial result.
+
 `factory:general` is a thin agent over
 `plugins/factory/skills/lifecycle/SKILL.md`. It preloads `lifecycle`, which
 disables model/user invocation. It also preloads `autonomy-dial` and
