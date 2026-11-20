@@ -2197,8 +2197,13 @@
             pendingRefresh = false;
             return refresh();
           }
-          refreshTimer = setTimeout(refresh, 30000);
+          refreshTimer = setTimeout(tick, 30000);
         }
+      }
+
+      // A hidden tab stops polling; visibilitychange restarts it with one refresh.
+      function tick() {
+        if (!document.hidden) refresh();
       }
 
       function select(file) {
@@ -2218,6 +2223,7 @@
         return refresh();
       }
       document.getElementById("refresh").addEventListener("click", refreshNow);
+      document.addEventListener("visibilitychange", tick);
       document.getElementById("open-palette").addEventListener("click", () => {
         if (snapshot && !moveDialog.open && !settingsDialog.open && !paletteDialog.open) openPalette();
       });

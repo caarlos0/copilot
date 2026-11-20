@@ -626,6 +626,7 @@ async function dashboard(t, { reducedMotion = true, confirm = () => true, now = 
   }
   elements.get("flow-wrap").clientWidth = phoneWidth;
   const resizeListeners = [];
+  const timers = [];
   elements.get("detail").append(...["detail-title", "close-detail", "task-list", "detail-empty"]
     .map((id) => elements.get(id)));
   elements.get("settings-dialog").append(...["settings-title", "close-settings", "settings-body"].map((id) => elements.get(id)));
@@ -642,7 +643,8 @@ async function dashboard(t, { reducedMotion = true, confirm = () => true, now = 
     window: { addEventListener: (name, callback) => { if (name === "resize") resizeListeners.push(callback); }, confirm },
     matchMedia: (query) => ({ matches: /reduce/.test(query) ? reducedMotion : phoneWidth > 0 }),
     ResizeObserver: class { observe() {} },
-    setTimeout() {}, clearTimeout() {}, setInterval() {},
+    setTimeout: (callback, delay) => { timers.push({ callback, delay }); return timers.length; },
+    clearTimeout() {}, setInterval() {},
     fetch: (path, options = {}) => {
       const init = {
         ...options,
@@ -663,7 +665,7 @@ async function dashboard(t, { reducedMotion = true, confirm = () => true, now = 
     document.listeners.get("keydown")(pressed);
     return pressed;
   };
-  return { run, document, directory, press, resize: (width) => { elements.get("flow-wrap").clientWidth = width; resizeListeners.forEach((callback) => callback()); }, get: (id) => elements.get(id), setNow: (value) => { now = value; } };
+  return { run, document, directory, press, timers, resize: (width) => { elements.get("flow-wrap").clientWidth = width; resizeListeners.forEach((callback) => callback()); }, get: (id) => elements.get(id), setNow: (value) => { now = value; } };
 }
 
 test("unchanged refresh updates elapsed labels without replacing expanded rows or move drafts", async (t) => {
@@ -2032,6 +2034,44 @@ test("r refreshes like the button, and is ignored while typing, with modifiers, 
   await ui.run("running");
   assert.equal(calls(), 1);
   assert.match(html, /<button id="refresh"[^>]* title="[^"]*\(R\)"[^>]* aria-keyshortcuts="r"/);
+});
+
+test("a hidden tab stops polling, and showing it again refreshes once", async (t) => {
+  let requests = 0;
+  const ui = await dashboard(t, {
+    fetchRequest: async (path, _, request) => {
+      if (path.startsWith("/api/factory?")) requests += 1;
+      return request();
+    },
+  });
+  const timer = () => ui.timers.at(-1);
+  assert.equal(timer().delay, 30000);
+  requests = 0;
+
+  timer().callback();
+  await ui.run("running");
+  assert.equal(requests, 1, "A visible tab refreshes on the 30 second timer.");
+
+  ui.document.hidden = true;
+  const before = ui.timers.length;
+  timer().callback();
+  await ui.run("running");
+  assert.equal(requests, 1, "A hidden tab skips the timer refresh.");
+  assert.equal(ui.timers.length, before, "No timer is armed while hidden.");
+
+  ui.press("r");
+  await ui.run("running");
+  assert.equal(requests, 2, "The r key still refreshes a hidden tab.");
+
+  ui.document.listeners.get("visibilitychange")();
+  await ui.run("running");
+  assert.equal(requests, 2, "Hiding the tab does not refresh.");
+
+  ui.document.hidden = false;
+  ui.document.listeners.get("visibilitychange")();
+  await ui.run("running");
+  assert.equal(requests, 3, "Showing the tab refreshes once.");
+  assert.equal(timer().delay, 30000, "Polling resumes on the 30 second cadence.");
 });
 
 test("the Refresh button is disabled and busy while a refresh runs, and works again after it ends, also on failure", async (t) => {
