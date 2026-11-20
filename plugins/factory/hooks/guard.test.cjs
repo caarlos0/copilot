@@ -59,6 +59,14 @@ test("denies bash rule breaks and names the rule", () => {
     ["rex window new -s s -- sh -c 'cd w && copilot -i x'", "copilot-model"],
     ["rex window new -s s -- copilot --model claude-sonnet-5.5 --autopilot -i 'x'", "copilot-autopilot"],
     ["bash -c 'gh pr merge 1'", "gh-pr-merge"],
+    ["copilot --model gpt-6-sol --deny-tool='shell(git stash)' -i 'x'", "copilot-model"],
+    ["copilot --model claude-sonnet-5.5 --deny-tool='shell(git stash)' --autopilot -i x", "copilot-autopilot"],
+    [
+      `rex window new -c "$(echo "$WT" | jq -r .path)" -- env FACTORY_TASK=x copilot --model gpt-6-sol --yolo -i "b"`,
+      "copilot-model",
+    ],
+    [`echo "$(gh pr merge 1)"`, "gh-pr-merge"],
+    ["echo `gh pr merge 1`", "gh-pr-merge"],
   ];
   for (const [command, rule] of cases) denied(bash(command), rule);
 });
@@ -80,6 +88,8 @@ test("allows near misses", () => {
     "copilot instruction list",
     "copilot --version",
     "rex window new -s s -- copilot --agent coding:caarlos0 --model claude-sonnet-5.5 --yolo --sandbox -i 'x'",
+    "copilot --model claude-sonnet-5.5 --deny-tool='shell(git stash)' --deny-tool='shell(rex window:*)' -i 'x'",
+    `rex window new -c "$(echo "$WT" | jq -r .path)" -- env FACTORY_TASK=x copilot --model claude-sonnet-5.5 --yolo -i "b"`,
     "echo gh pr merge is forbidden",
     "ls",
   ];

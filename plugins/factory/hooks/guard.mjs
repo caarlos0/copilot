@@ -43,11 +43,64 @@ const BASH_RULES = [
   },
 ];
 
+// Splits a line at `; & | ( `` and newlines outside quotes, so an argument such
+// as 'shell(git stash)' or "$(a | b)" stays in its command. A `$(...)` or
+// backtick substitution inside double quotes is returned as extra lines.
+function split(line) {
+  const segs = [];
+  const subs = [];
+  let cur = "";
+  let quote = "";
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === "\\" && quote !== "'") {
+      if (line[i + 1] === "\n") cur += " ";
+      else cur += ch + (line[i + 1] ?? "");
+      i++;
+    } else if (quote === "'") {
+      if (ch === "'") quote = "";
+      cur += ch;
+    } else if (quote === '"') {
+      if (ch === '"') quote = "";
+      cur += ch;
+      if (ch === "`") {
+        const end = line.indexOf("`", i + 1);
+        const stop = end < 0 ? line.length : end;
+        subs.push(line.slice(i + 1, stop));
+        cur += line.slice(i + 1, stop + 1);
+        i = stop;
+      } else if (ch === "$" && line[i + 1] === "(") {
+        let depth = 0;
+        let j = i + 1;
+        for (; j < line.length; j++) {
+          if (line[j] === "(") depth++;
+          else if (line[j] === ")" && --depth === 0) break;
+        }
+        subs.push(line.slice(i + 2, j));
+        cur += line.slice(i + 1, j + 1);
+        i = j;
+      }
+    } else if (ch === "'" || ch === '"') {
+      quote = ch;
+      cur += ch;
+    } else if ("\n;&|(`".includes(ch)) {
+      segs.push(cur);
+      cur = "";
+    } else {
+      cur += ch;
+    }
+  }
+  segs.push(cur);
+  return { segs, subs };
+}
+
 // Splits a shell line into commands: each segment, the command after `--` in
 // a `rex` call, and the quoted script of `sh -c`.
 function commands(line) {
   const out = [];
-  for (let seg of line.split(/\n|;|&&|\|\||\||&|\(|`/)) {
+  const { segs, subs } = split(line);
+  for (const sub of subs) out.push(...commands(sub));
+  for (let seg of segs) {
     seg = seg.trim().replace(/^(?:(?:\w+=\S*|sudo|env|command|exec|time|nohup)\s+)+/, "");
     if (!seg) continue;
     out.push(seg);
