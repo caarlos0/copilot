@@ -3,12 +3,12 @@
 // plugins/factory/hooks/stop-hook.ts
 import { spawnSync } from "node:child_process";
 import { readFileSync, statSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { resolveFactory, waiterPid } from "../skills/lifecycle/broker.mjs";
 import { factoryFile, isCoordinator } from "../skills/lifecycle/gate.mjs";
 var here = dirname(fileURLToPath(import.meta.url));
-var lifecycle = join(here, "..", "skills", "lifecycle");
+var lifecycle = basename(here) === "hooks" ? join(here, "..", "skills", "lifecycle") : here;
 var maxReason = 4000;
 function block(reason) {
   process.stdout.write(`${JSON.stringify({ decision: "block", reason: reason.slice(0, maxReason) })}

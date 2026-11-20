@@ -596,7 +596,7 @@ or scheduled rule remains actionable.
 
 `default-branch`, `state-dir`, `worker-name`, `gate`, `proposals`, `sessions`,
 `usage`, `session-metrics`, `shot`, `archive`, `attention`, `migrate`,
-`reconcile`, `pr-watch`, `worktree`, `factory-data`, `factory`, `broker` and
+`reconcile`, `pr-watch`, `worktree`, `factory-data`, `factory`, `tasks`, `conflict`, `broker` and
 `serve` in
 `skills/lifecycle/`, and `guard`, `attention` and `stop-hook` in `hooks/`, are
 TypeScript, checked with `strict` on. Edit the `.ts`, run `bun run build` in `plugins/factory`, and
@@ -613,6 +613,22 @@ bundles it for the browser with `factory-data`, `marked` and `dompurify` inlined
 `Task`, `Worker`, and the others). `factory-data.mjs` stays, because the Node
 bundles import it. The dashboard loads only `dashboard.mjs` in the browser. So
 `factory-data.ts` and the other sources of `dashboard.ts` must not import `node:` modules.
+
+`factory.ts` is a dispatcher: `factory.mjs COMMAND ARGS`. It loads the module of
+each command with `await import()` only when the command runs. The commands are
+`write` (the writer, in `tasks.ts`), `broker`, `reconcile`, `serve`, `worktree`,
+`worker-name`, `shot`, `archive`, `session-metrics`, `migrate` and `pr-watch`.
+`hook guard|attention|stop` runs a hook. Each module exports `main(argv)`. If the
+first argument is not a command, `factory.mjs FILE ARGS` runs `write`, as the old
+writer did. The old bundles stay and the consumers still call them. Only
+`factory.mjs` is new for them. `serve.mjs` imports `update` and `ConflictError`
+from it, so `factory.mjs` exports both (`factory.d.mts` has their types). `update`
+loads the writer when it is first called. The build of `factory.ts` bundles the
+`.ts` source of each `.mjs` import, so the file does not need its siblings. It
+removes the final `if (process.argv[1] ...)` guard of every module, because
+inside `factory.mjs` the guard of each module would be true. The waiter check of
+`broker.ts` accepts `broker.mjs wait` and `factory.mjs broker wait`.
+`dispatcher.test.ts` runs every command and hook.
 
 ## Validation
 

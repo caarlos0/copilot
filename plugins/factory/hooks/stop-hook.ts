@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync, statSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { resolveFactory, waiterPid } from "../skills/lifecycle/broker.mjs";
 import { factoryFile, isCoordinator } from "../skills/lifecycle/gate.mjs";
@@ -9,7 +9,8 @@ import { factoryFile, isCoordinator } from "../skills/lifecycle/gate.mjs";
 // the run is not finished and no waiter is armed, or reconcile.mjs has findings.
 // Anything unexpected allows the stop: a broken hook must never trap the session.
 const here = dirname(fileURLToPath(import.meta.url));
-const lifecycle = join(here, "..", "skills", "lifecycle");
+// The hook bundle sits in hooks/; inside factory.mjs it sits in skills/lifecycle/ itself.
+const lifecycle = basename(here) === "hooks" ? join(here, "..", "skills", "lifecycle") : here;
 const maxReason = 4000;
 
 function block(reason: string) {

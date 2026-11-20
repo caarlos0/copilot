@@ -33,7 +33,38 @@ var __toESM = (mod, isNodeMode, target) => {
   return to;
 };
 var __commonJS = (cb, mod) => () => (mod || cb((mod = { exports: {} }).exports, mod), mod.exports);
+var __returnValue = (v) => v;
+function __exportSetter(name, newValue) {
+  this[name] = __returnValue.bind(null, newValue);
+}
+var __export = (target, all) => {
+  for (var name in all)
+    __defProp(target, name, {
+      get: all[name],
+      enumerable: true,
+      configurable: true,
+      set: __exportSetter.bind(all, name)
+    });
+};
+var __esm = (fn, res, err) => () => {
+  if (fn)
+    try {
+      res = fn(fn = 0);
+    } catch (e) {
+      err = [e];
+    }
+  if (err)
+    throw err[0];
+  return res;
+};
 var __require = /* @__PURE__ */ createRequire(import.meta.url);
+
+// plugins/factory/skills/lifecycle/conflict.ts
+var ConflictError;
+var init_conflict = __esm(() => {
+  ConflictError = class ConflictError extends Error {
+  };
+});
 
 // plugins/factory/node_modules/signal-exit/dist/cjs/signals.js
 var require_signals = __commonJS(function(exports) {
@@ -464,36 +495,1383 @@ var require_lib = __commonJS(function(exports, module) {
   }
 });
 
-// plugins/factory/skills/lifecycle/factory.ts
-var import_write_file_atomic = __toESM(require_lib(), 1);
-import { randomUUID } from "node:crypto";
-import { open, readFile, realpath, rm, stat } from "node:fs/promises";
-import { basename, extname, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
-import { parseArgs } from "node:util";
-import { archiveDirectory, findArchived, readArchive, removeArchived, saveArchive } from "./archive.mjs";
-import { emit, resolveFactory } from "./broker.mjs";
-import {
-  checkTransition,
-  defaultBudget,
-  defaultLimits,
-  format,
-  isObject,
-  keepFirst,
-  maxRoleLimit,
-  mergeRefusal,
-  operatorOutcomes,
-  outcomes,
-  parseBlocker,
-  resourceId,
-  sortReferences,
-  validate
-} from "./factory-data.mjs";
-import { findSessions, recordSessions, registryFile, sessionID, sessionStateDirectory } from "./sessions.mjs";
-import { alive } from "./state-dir.mjs";
-
-class ConflictError extends Error {
+// plugins/factory/skills/lifecycle/factory-data.ts
+function isObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
+function text(value, field) {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error(`${field} must be a non-empty string.`);
+  }
+  return value;
+}
+function nullableText(value, field) {
+  if (value != null)
+    text(value, field);
+}
+function oneOf(value, values, field) {
+  if (!values.includes(value))
+    throw new Error(`${field} must be one of: ${values.join(", ")}.`);
+}
+function timestamp(value, field) {
+  text(value, field);
+  if (!/(Z|[+-]\d{2}:\d{2})$/.test(value) || !Number.isFinite(Date.parse(value))) {
+    throw new Error(`${field} must be a timestamp with a timezone.`);
+  }
+}
+function artifactName(value, field = "artifact") {
+  text(value, field);
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(value)) {
+    throw new Error(`${field} must be a filename in the state directory.`);
+  }
+  return value;
+}
+function githubURL(value, field = "link") {
+  const url = new URL(text(value, field));
+  if (url.origin !== "https://github.com" || url.username || url.password || !/^\/[^/]+\/[^/]+\/(issues|pull)\/\d+$/.test(url.pathname)) {
+    throw new Error(`${field} must be an HTTPS GitHub issue or pull request URL.`);
+  }
+  return url;
+}
+function advisoryURL(value) {
+  const match = /^https:\/\/github\.com\/(?:[^/?#]+\/[^/?#]+\/security\/)?advisories\/GHSA((?:-[23456789cfghjmpqrvwx]{4}){3})(?:[?#].*)?$/i.exec(value);
+  return match && `https://github.com/advisories/GHSA${match[1].toLowerCase()}`;
+}
+function sortReferences(hrefs) {
+  const key = (href) => {
+    if (advisoryURL(href))
+      return [2, 0];
+    const [, , , kind, number] = githubURL(href).pathname.split("/");
+    return [kind === "issues" ? 0 : 1, Number(number)];
+  };
+  const seen = new Set;
+  const unique = [...hrefs].map((href) => advisoryURL(href) ?? href).filter((href) => {
+    const identity = advisoryURL(href) ?? githubResourceURL(href).toLowerCase();
+    return !seen.has(identity) && seen.add(identity);
+  });
+  return unique.sort((a, b) => {
+    const [kindA, numberA] = key(a);
+    const [kindB, numberB] = key(b);
+    return kindA - kindB || (kindA === 2 ? a.localeCompare(b) : numberA - numberB);
+  });
+}
+function githubResourceURL(value, field = "link") {
+  const url = githubURL(value, field);
+  return `${url.origin}${url.pathname}`;
+}
+function resourceId(value) {
+  try {
+    return githubResourceURL(value).toLowerCase();
+  } catch {
+    return null;
+  }
+}
+function sharesWork(a, b) {
+  const named = [namedIds(a), namedIds(b)];
+  return ownIds(a).some((id) => named[1].has(id)) || ownIds(b).some((id) => named[0].has(id));
+}
+function mergeRefusal(task) {
+  if (task.resolution?.outcome === "merged")
+    return `Task ${task.id} was merged and is final.`;
+  if (task.details?.merged_into != null)
+    return `Task ${task.id} was already merged into ${task.details.merged_into}.`;
+  return null;
+}
+function keepFirst(a, b) {
+  return stage(b) - stage(a) || Number(b.pr != null) - Number(a.pr != null) || Date.parse(a.history[0].at) - Date.parse(b.history[0].at) || a.id.localeCompare(b.id);
+}
+function githubKind(value, kind, field) {
+  const url = githubURL(value, field);
+  if (url.pathname.split("/")[3] !== kind) {
+    throw new Error(`${field} must be an HTTPS GitHub ${kind === "pull" ? "pull request" : "issue"} URL.`);
+  }
+  return url.href;
+}
+function fullSHA(value, field) {
+  if (value != null && !/^[a-f0-9]{40}$/.test(value)) {
+    throw new Error(`${field} must be a full 40-character lowercase commit SHA or null.`);
+  }
+}
+function operatorStates(task) {
+  const open = ["initial", "investigation", "implementation", "review"];
+  if (task.state === "resolved")
+    return task.resolution?.outcome === "merged" ? [] : ["initial"];
+  const candidates = task.state === "blocked" ? open : open.slice(0, open.indexOf(task.state));
+  return [...candidates.filter((state) => state !== "review" || !needsPR(task)), "resolved"];
+}
+function validateBlockerOwner(owner, field) {
+  if (typeof owner !== "string" || !blockerOwner.test(owner)) {
+    throw new Error(`${field} must be a GitHub login or operator.`);
+  }
+}
+function validateBlockerOptions(options, field) {
+  if (!Array.isArray(options) || !options.length || options.length > maxBlockerOptions) {
+    throw new Error(`${field} must be an array of 1 to ${maxBlockerOptions} options.`);
+  }
+  let recommended = 0;
+  for (const option of options) {
+    if (!isObject(option))
+      throw new Error(`${field} entries must be objects.`);
+    text(option.label, `${field} label`);
+    if (option.label.length > maxOptionLabel) {
+      throw new Error(`${field} label must be at most ${maxOptionLabel} characters.`);
+    }
+    if (option.state !== undefined)
+      oneOf(option.state, openStates, `${field} state`);
+    if (option.recommended !== undefined) {
+      if (typeof option.recommended !== "boolean")
+        throw new Error(`${field} recommended must be a boolean.`);
+      if (option.recommended)
+        recommended += 1;
+    }
+  }
+  if (recommended > 1)
+    throw new Error(`${field} may have at most one recommended option.`);
+}
+function parseBlocker(value) {
+  const input = typeof value === "string" ? value.trim() : "";
+  let parsed;
+  if (input.startsWith("{")) {
+    try {
+      parsed = JSON.parse(input);
+    } catch {}
+  }
+  if (!isObject(parsed))
+    return { reason: value };
+  const extra = Object.keys(parsed).filter((key) => !["reason", "options", "class", "owner"].includes(key));
+  if (extra.length)
+    throw new Error(`--blocker JSON has unknown keys: ${extra.join(", ")}.`);
+  text(parsed.reason, "--blocker reason");
+  const meta = {};
+  if (parsed.class !== undefined) {
+    oneOf(parsed.class, blockerClasses, "--blocker class");
+    meta.class = parsed.class;
+  }
+  if (parsed.owner !== undefined) {
+    validateBlockerOwner(parsed.owner, "--blocker owner");
+    meta.owner = parsed.owner;
+  }
+  if (parsed.options === undefined)
+    return { reason: parsed.reason, ...meta };
+  const options = Array.isArray(parsed.options) ? parsed.options.map((option) => isObject(option) && typeof option.label === "string" ? { ...option, label: stripRecommended(option.label) } : option) : parsed.options;
+  validateBlockerOptions(options, "--blocker options");
+  return { reason: parsed.reason, ...meta, options };
+}
+function checkTransition(task, to, operator = false) {
+  if (task.state === to && !operator)
+    return;
+  const allowed = operator ? operatorStates(task) : [...transitions[task.state]];
+  if (!operator && task.state === "initial" && task.pr != null)
+    allowed.push("review");
+  if (!allowed.includes(to)) {
+    throw new Error(`Task ${task.id} cannot move from ${task.state} to ${to}. Allowed: ${allowed.join(", ") || "none"}.`);
+  }
+  if (task.state === "resolved" && task.resolution?.outcome === "merged") {
+    throw new Error(`Task ${task.id} was merged. Create a new task instead of reopening it.`);
+  }
+}
+function validateWorker(field, worker) {
+  if (!isObject(worker))
+    throw new Error(`${field} must be an object or null.`);
+  oneOf(worker.status, workerStatuses, `${field}.status`);
+  if (worker.mode != null)
+    oneOf(worker.mode, workerModes, `${field}.mode`);
+  for (const key of ["session", "pane", "window", "name"])
+    nullableText(worker[key], `${field}.${key}`);
+  for (const key of ["brief", "result"]) {
+    if (worker[key] != null)
+      artifactName(worker[key], `${field}.${key}`);
+  }
+  if (worker.summary != null) {
+    text(worker.summary, `${field}.summary`);
+    if (worker.summary.length > maxWorkerSummary) {
+      throw new Error(`${field}.summary must be at most ${maxWorkerSummary} characters.`);
+    }
+  }
+  if (worker.summary_at != null)
+    timestamp(worker.summary_at, `${field}.summary_at`);
+}
+function validateTask(task, seen) {
+  if (!isObject(task))
+    throw new Error("Each task must be a JSON object.");
+  for (const field of ["id", "title", "next_action"])
+    text(task[field], `task.${field}`);
+  const at = `Task ${task.id}`;
+  if (seen.ids.has(task.id))
+    throw new Error(`Duplicate task ID: ${task.id}`);
+  seen.ids.add(task.id);
+  oneOf(task.state, states, `${at} state`);
+  timestamp(task.updated_at, `${at} updated_at`);
+  if (task.revision !== undefined && (!Number.isSafeInteger(task.revision) || task.revision < 0)) {
+    throw new Error(`${at} revision must be a non-negative safe integer.`);
+  }
+  for (const [field, check] of [["issue", issueURL], ["pr", prURL]]) {
+    if (task[field] == null)
+      continue;
+    const href = check(task[field], `${at} ${field}`);
+    const identity = githubResourceURL(href, `${at} ${field}`);
+    if (seen[field].has(identity))
+      throw new Error(`Duplicate ${field} URL across tasks: ${href}`);
+    seen[field].add(identity);
+  }
+  fullSHA(task.head, `${at} head`);
+  fullSHA(task.reviewed_head, `${at} reviewed_head`);
+  if (!Array.isArray(task.links))
+    throw new Error(`${at} links must be an array.`);
+  for (const value of task.links)
+    if (!advisoryURL(value))
+      githubURL(value, `${at} links[]`);
+  if (!Array.isArray(task.history) || !task.history.length) {
+    throw new Error(`${at} history must be a non-empty array.`);
+  }
+  const feedbackIds = [];
+  for (const item of task.history) {
+    if (!isObject(item))
+      throw new Error(`${at} history entries must be objects.`);
+    oneOf(item.state, states, `${at} history state`);
+    timestamp(item.at, `${at} history at`);
+    nullableText(item.note, `${at} history note`);
+    if (item.source !== undefined) {
+      oneOf(item.source, ["dashboard"], `${at} history source`);
+      text(item.note, `${at} dashboard comment`);
+      text(item.feedback_id, `${at} history feedback_id`);
+      if (feedbackIds.includes(item.feedback_id))
+        throw new Error(`${at}: duplicate feedback ID.`);
+      feedbackIds.push(item.feedback_id);
+    } else if (item.feedback_id !== undefined) {
+      throw new Error(`${at}: feedback history needs source dashboard.`);
+    }
+  }
+  if (task.history.at(-1).state !== task.state) {
+    throw new Error(`${at}: the last history entry must match state ${task.state}.`);
+  }
+  if (task.feedback != null) {
+    if (!isObject(task.feedback))
+      throw new Error(`${at} feedback must be an object or null.`);
+    text(task.feedback.id, `${at} feedback.id`);
+    if (task.feedback.id !== feedbackIds.at(-1)) {
+      throw new Error(`${at}: feedback must reference the latest dashboard history entry.`);
+    }
+    if (task.feedback.acknowledged_id !== null && !feedbackIds.includes(task.feedback.acknowledged_id)) {
+      throw new Error(`${at}: feedback acknowledgement must reference dashboard history.`);
+    }
+  } else if (feedbackIds.length) {
+    throw new Error(`${at}: dashboard history needs a feedback record.`);
+  }
+  if (task.state === "blocked") {
+    if (!isObject(task.blocker))
+      throw new Error(`${at}: a blocked task needs a blocker object.`);
+    oneOf(task.blocker.from, states.filter((state) => state !== "blocked" && state !== "resolved"), `${at} blocker.from`);
+    text(task.blocker.reason, `${at} blocker.reason`);
+    timestamp(task.blocker.since, `${at} blocker.since`);
+    if (task.blocker.class !== undefined)
+      oneOf(task.blocker.class, blockerClasses, `${at} blocker.class`);
+    if (task.blocker.owner !== undefined)
+      validateBlockerOwner(task.blocker.owner, `${at} blocker.owner`);
+    if (task.blocker.options !== undefined)
+      validateBlockerOptions(task.blocker.options, `${at} blocker.options`);
+  } else if (task.blocker != null) {
+    throw new Error(`${at}: blocker is allowed only in the blocked state.`);
+  }
+  if (task.state === "resolved") {
+    if (!isObject(task.resolution))
+      throw new Error(`${at}: a resolved task needs a resolution object.`);
+    oneOf(task.resolution.outcome, outcomes, `${at} resolution.outcome`);
+    timestamp(task.resolution.at, `${at} resolution.at`);
+    nullableText(task.resolution.note, `${at} resolution.note`);
+  } else if (task.resolution != null) {
+    throw new Error(`${at}: resolution is allowed only in the resolved state.`);
+  }
+  if (task.state === "review" && needsPR(task)) {
+    throw new Error(`${at}: a task with an issue needs a pr in review.`);
+  }
+  if (task.merge != null) {
+    if (!isObject(task.merge))
+      throw new Error(`${at} merge must be an object or null.`);
+    if (needsPR(task))
+      throw new Error(`${at}: a merge decision for a task with an issue needs a pr.`);
+    text(task.merge.authorized_by, `${at} merge.authorized_by`);
+    oneOf(task.merge.source, mergeSources, `${at} merge.source`);
+    text(task.merge.evidence, `${at} merge.evidence`);
+    timestamp(task.merge.authorized_at, `${at} merge.authorized_at`);
+    if (task.merge.requested_at != null)
+      timestamp(task.merge.requested_at, `${at} merge.requested_at`);
+    if (task.merge.head == null)
+      throw new Error(`${at} merge.head is required.`);
+    fullSHA(task.merge.head, `${at} merge.head`);
+    if (task.state !== "resolved" && task.head !== task.merge.head) {
+      throw new Error(`${at}: merge decision is for head ${task.merge.head}, not the current head. Clear it with --merge null.`);
+    }
+  }
+  if (!isObject(task.workers))
+    throw new Error(`${at} workers must be an object.`);
+  for (const [role, worker] of Object.entries(task.workers)) {
+    oneOf(role, workerRoles, `${at} worker role`);
+    if (worker != null)
+      validateWorker(`${at} workers.${role}`, worker);
+  }
+  if (task.worktree != null) {
+    if (!isObject(task.worktree))
+      throw new Error(`${at} worktree must be an object or null.`);
+    text(task.worktree.path, `${at} worktree.path`);
+    if (typeof task.worktree.created_by_run !== "boolean") {
+      throw new Error(`${at} worktree.created_by_run must be a boolean.`);
+    }
+  }
+  if (task.details != null && !isObject(task.details)) {
+    throw new Error(`${at} details must be an object or null.`);
+  }
+}
+function validateArchive(data, project, day) {
+  if (!isObject(data))
+    throw new Error("Archive must be a JSON object.");
+  if (data.format !== archiveFormat)
+    throw new Error(`format must be "${archiveFormat}".`);
+  if (data.project !== project)
+    throw new Error(`project must be "${project}".`);
+  if (data.day !== day)
+    throw new Error(`day must be "${day}".`);
+  if (!Array.isArray(data.tasks))
+    throw new Error("tasks must be an array.");
+  const ids = new Set;
+  for (const task of data.tasks)
+    validateTask(task, { ids, issue: new Set, pr: new Set });
+}
+function intervalMs(every) {
+  const match = /^([1-9]\d{0,3})([mhd])$/.exec(every);
+  if (!match)
+    throw new Error(`every must look like 30m, 6h, or 1d (up to 9999 units), not ${JSON.stringify(every)}.`);
+  return Number(match[1]) * everyUnits[match[2]];
+}
+function nextRun(rule) {
+  if (!rule.enabled || !rule.every)
+    return null;
+  return rule.last_run_at == null ? 0 : Date.parse(rule.last_run_at) + intervalMs(rule.every);
+}
+function dueRules(data, now = Date.now()) {
+  if (data.status !== "active")
+    return [];
+  return data.rules.filter((rule) => (nextRun(rule) ?? Infinity) <= now).map((rule) => rule.id);
+}
+function nextDue(data) {
+  if (data.status !== "active")
+    return null;
+  const times = data.rules.map(nextRun).filter((time) => time !== null);
+  return times.length ? Math.min(...times) : null;
+}
+function validateRule(rule) {
+  if (!isObject(rule))
+    throw new Error("Each rule must be a JSON object.");
+  text(rule.id, "rule.id");
+  const at = `Rule ${rule.id}`;
+  text(rule.description, `${at} description`);
+  nullableText(rule.query, `${at} query`);
+  if (typeof rule.enabled !== "boolean")
+    throw new Error(`${at} enabled must be a boolean.`);
+  if (rule.last_run_at != null)
+    timestamp(rule.last_run_at, `${at} last_run_at`);
+  if (rule.kind !== undefined)
+    oneOf(rule.kind, ruleKinds, `${at} kind`);
+  if (rule.kind === "search")
+    text(rule.query, `${at} query`);
+  if (rule.every != null)
+    intervalMs(rule.every);
+  nullableText(rule.prompt, `${at} prompt`);
+  if (rule.worker != null)
+    validateWorker(`${at} worker`, rule.worker);
+}
+function validate(data) {
+  if (!isObject(data))
+    throw new Error("Factory must be a JSON object.");
+  if (data.format !== format)
+    throw new Error(`format must be "${format}".`);
+  for (const field of ["id", "project", "goal"])
+    text(data[field], field);
+  oneOf(data.status, runStatuses, "status");
+  timestamp(data.updated_at, "updated_at");
+  nullableText(data.rex_session, "rex_session");
+  if (!Array.isArray(data.rules))
+    throw new Error("rules must be an array.");
+  const ruleIds = new Set;
+  for (const rule of data.rules) {
+    validateRule(rule);
+    if (ruleIds.has(rule.id))
+      throw new Error(`Duplicate rule ID: ${rule.id}`);
+    ruleIds.add(rule.id);
+  }
+  if (data.ignored !== undefined) {
+    if (!Array.isArray(data.ignored))
+      throw new Error("ignored must be an array.");
+    for (const item of data.ignored) {
+      if (!isObject(item))
+        throw new Error("Each ignored entry must be a JSON object.");
+      githubURL(item.url, "ignored.url");
+      timestamp(item.at, "ignored.at");
+      text(item.reason, "ignored.reason");
+    }
+  }
+  if (!isObject(data.limits))
+    throw new Error("limits must be an object.");
+  for (const [role, limit] of Object.entries(data.limits)) {
+    oneOf(role, ["investigation", "implementation"], "limits key");
+    if (!Number.isInteger(limit) || limit < 1)
+      throw new Error(`limits.${role} must be a positive integer.`);
+  }
+  if (data.budget !== undefined)
+    validateBudget(data.budget);
+  if (data.lever !== undefined)
+    validateLever(data.lever);
+  if (!Array.isArray(data.tasks))
+    throw new Error("tasks must be an array.");
+  const seen = { ids: new Set, issue: new Set, pr: new Set };
+  for (const task of data.tasks)
+    validateTask(task, seen);
+}
+function validateBudget(budget) {
+  if (!isObject(budget))
+    throw new Error("budget must be an object.");
+  for (const key of Object.keys(budget))
+    oneOf(key, ["max_parallel_workers"], "budget key");
+  const value = budget.max_parallel_workers;
+  if (!Number.isInteger(value) || value < 1 || value > maxParallelWorkers) {
+    throw new Error(`budget.max_parallel_workers must be an integer from 1 to ${maxParallelWorkers}.`);
+  }
+}
+function validateLever(lever) {
+  if (!isObject(lever))
+    throw new Error("lever must be an object.");
+  for (const [key, value] of Object.entries(lever)) {
+    oneOf(key, ["spend", "autonomy_cap"], "lever key");
+    if (value !== null)
+      oneOf(value, key === "spend" ? leverSpends : leverAutonomyCaps, `lever.${key}`);
+  }
+}
+function countByState(tasks) {
+  const counts = Object.fromEntries(states.map((state) => [state, 0]));
+  for (const task of tasks)
+    counts[task.state] += 1;
+  return counts;
+}
+var format = "factory/v1", archiveFormat = "factory-archive/v1", states, transitions, runStatuses, outcomes, operatorOutcomes, mergeSources, workerRoles, workerModes, workerStatuses, ruleKinds, everyUnits, defaultLimits, maxWorkerSummary = 2000, defaultBudget, maxParallelWorkers = 100, maxRoleLimit = 100, leverSpends, leverAutonomyCaps, ownIds = (task) => [task.issue, task.pr].map(resourceId).filter(Boolean), namedIds = (task) => new Set([...ownIds(task), ...(task.links ?? []).map(resourceId).filter(Boolean)]), stageRank, stage = (task) => task.state === "resolved" ? -1 : stageRank[task.state === "blocked" ? task.blocker.from : task.state], issueURL = (value, field = "issue") => githubKind(value, "issues", field), prURL = (value, field = "pr") => githubKind(value, "pull", field), needsPR = (task) => task.issue != null && task.pr == null, openStates, maxBlockerOptions = 8, blockerClasses, blockerOwner, maxOptionLabel = 300, stripRecommended = (label) => label.replace(/\s*[(\[]\s*recommended\s*[)\]]\s*$/i, "");
+var init_factory_data = __esm(() => {
+  states = ["initial", "investigation", "implementation", "review", "blocked", "resolved"];
+  transitions = {
+    initial: ["investigation", "blocked", "resolved"],
+    investigation: ["implementation", "blocked", "resolved"],
+    implementation: ["review", "blocked", "resolved"],
+    review: ["implementation", "blocked", "resolved"],
+    blocked: ["initial", "investigation", "implementation", "review", "resolved"],
+    resolved: ["initial"]
+  };
+  runStatuses = ["active", "paused", "blocked", "finished"];
+  outcomes = ["merged", "already-fixed", "duplicate", "invalid", "cancelled", "completed"];
+  operatorOutcomes = outcomes.filter((outcome) => outcome !== "merged");
+  mergeSources = ["lever", "comment", "factory-session"];
+  workerRoles = ["investigation", "implementation", "review"];
+  workerModes = ["one-shot", "continuous"];
+  workerStatuses = ["running", "idle", "closed", "unknown"];
+  ruleKinds = ["search", "backlog", "improve"];
+  everyUnits = { m: 60000, h: 3600000, d: 86400000 };
+  defaultLimits = { investigation: 3, implementation: 3 };
+  defaultBudget = { max_parallel_workers: 10 };
+  leverSpends = ["standard", "high", "max"];
+  leverAutonomyCaps = ["L0", "L1", "L2", "L3", "L4", "L5"];
+  stageRank = { initial: 0, investigation: 1, implementation: 2, review: 3 };
+  openStates = ["initial", "investigation", "implementation", "review"];
+  blockerClasses = ["user-decision", "outside-action", "external-wait", "ci-infra", "approval"];
+  blockerOwner = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
+});
+
+// plugins/factory/skills/lifecycle/archive.ts
+var exports_archive = {};
+__export(exports_archive, {
+  archiveDirectory: () => archiveDirectory,
+  clean: () => clean,
+  findArchived: () => findArchived,
+  main: () => main,
+  readArchive: () => readArchive,
+  removeArchived: () => removeArchived,
+  saveArchive: () => saveArchive
+});
+import { mkdir, readdir, readFile, rm, stat } from "node:fs/promises";
+import { basename, dirname, extname, join, resolve } from "node:path";
+import { parseArgs } from "node:util";
+async function writeDay(directory, data) {
+  const file = join(directory, `${data.day}.json`);
+  await import_write_file_atomic.default(file, `${JSON.stringify(data, null, 2)}
+`, { mode: 384 });
+}
+async function readArchive(directory, project) {
+  let names;
+  try {
+    names = await readdir(directory);
+  } catch (error) {
+    if (errorCode(error) === "ENOENT")
+      return [];
+    throw error;
+  }
+  const days = [];
+  for (const name of names.filter((item) => dayFile.test(item)).sort()) {
+    const file = join(directory, name);
+    try {
+      const data = JSON.parse(await readFile(file, "utf8"));
+      validateArchive(data, project, name.slice(0, 10));
+      days.push(data);
+    } catch (error) {
+      throw new Error(`${file}: ${errorMessage(error)}`);
+    }
+  }
+  return days;
+}
+function findArchived(days, { id, issue, pr }) {
+  const newest = new Map;
+  for (const { day, tasks } of days) {
+    for (const task of tasks) {
+      if (task.id !== id && !(issue && task.issue && githubResourceURL(task.issue) === githubResourceURL(issue)) && !(pr && task.pr && githubResourceURL(task.pr) === githubResourceURL(pr)))
+        continue;
+      const known = newest.get(task.id);
+      if (!known || Date.parse(task.updated_at) >= Date.parse(known.task.updated_at)) {
+        newest.set(task.id, { task, day });
+      }
+    }
+  }
+  return [...newest.values()];
+}
+async function saveArchive(directory, project, tasks) {
+  await mkdir(directory, { recursive: true, mode: 448 });
+  const existing = new Map((await readArchive(directory, project)).map((data) => [data.day, data]));
+  const changed = new Map;
+  for (const task of tasks) {
+    const day = dayOf(task);
+    const data = changed.get(day) ?? existing.get(day) ?? { format: archiveFormat, project, day, tasks: [] };
+    data.tasks = [...data.tasks.filter((item) => item.id !== task.id), task];
+    changed.set(day, data);
+  }
+  for (const data of changed.values())
+    await writeDay(directory, data);
+}
+async function removeArchived(directory, project, id) {
+  for (const data of await readArchive(directory, project)) {
+    if (!data.tasks.some((task) => task.id === id))
+      continue;
+    data.tasks = data.tasks.filter((task) => task.id !== id);
+    if (data.tasks.length)
+      await writeDay(directory, data);
+    else
+      await rm(join(directory, `${data.day}.json`));
+  }
+}
+function parseAge(value) {
+  const match = /^(\d+)([dh])$/.exec(value);
+  if (!match)
+    throw new Error(`--older-than must look like 14d or 36h. The value is "${value}".`);
+  return Number(match[1]) * (match[2] === "d" ? day : hour);
+}
+async function clean(file, { olderThan = 14 * day, run = false, now = Date.now() } = {}) {
+  const directory = dirname(file);
+  const current = JSON.parse(await readFile(file, "utf8"));
+  const project = basename(file, extname(file)).replace(/-factory$/, "");
+  const archived = (await readArchive(archiveDirectory(file), current.project)).flatMap((data) => data.tasks);
+  const live = new Set(current.tasks.map((task) => task.id));
+  const resolved = [...current.tasks, ...archived.filter((task) => !live.has(task.id))].filter((task) => task.state === "resolved");
+  const expired = resolved.filter((task) => Date.parse(task.updated_at) < now - olderThan && !pendingFeedback(task));
+  const rules = current.rules ?? [];
+  const idle = rules.filter((rule) => rule.worker?.status !== "running");
+  const open = JSON.stringify(current.tasks.filter((task) => task.state !== "resolved" || pendingFeedback(task)));
+  const busy = JSON.stringify(rules.filter((rule) => rule.worker?.status === "running"));
+  const entries = await readdir(directory, { withFileTypes: true });
+  const roles = workerRoles2.join("|");
+  const files = new RegExp(`^(${roles})-(brief|result)([.-].*)?\\.(md|json)$`);
+  const dirs = new RegExp(`^(${roles})-instructions$`);
+  const ruleFiles = /^(brief|result)([.-].*)?\.(md|json)$/;
+  const prefixes = new Map(expired.map((task) => [`${project}-${task.id}-`, task.id]));
+  const rulePrefixes = new Map(idle.map((rule) => [`${project}-${rule.id}-`, rule.id]));
+  const artifacts = new Map;
+  for (const entry of entries) {
+    if (workerScratch.test(entry.name) && entry.isFile()) {
+      artifacts.set(entry.name, { category: "worker", age: olderThan });
+      continue;
+    }
+    const pattern = entry.isFile() ? files : entry.isDirectory() ? dirs : null;
+    for (let at = entry.name.indexOf("-");at !== -1; at = entry.name.indexOf("-", at + 1)) {
+      const prefix = entry.name.slice(0, at + 1);
+      const rest = entry.name.slice(at + 1);
+      const task = prefixes.get(prefix);
+      const rule = rulePrefixes.get(prefix);
+      if (task !== undefined && pattern?.test(rest))
+        artifacts.set(entry.name, { category: "task", task, age: 0 });
+      else if (rule !== undefined && entry.isFile() && ruleFiles.test(rest) && !artifacts.has(entry.name)) {
+        artifacts.set(entry.name, { category: "rule", rule, age: olderThan });
+      }
+    }
+  }
+  const remove = [];
+  const kept = [];
+  for (const [name, { category, age, ...owner }] of artifacts) {
+    const path = join(directory, name);
+    const modified = now - (await stat(path)).mtimeMs;
+    if (category !== "task" && modified < Math.max(day, age))
+      continue;
+    const reason = open.includes(name) ? "referenced by an open task" : busy.includes(name) ? "referenced by a running rule worker" : modified < day ? "modified in the last 24 hours" : null;
+    if (reason)
+      kept.push({ path, category, ...owner, reason });
+    else
+      remove.push({ path, category, ...owner });
+  }
+  const counts = {};
+  for (const { category } of remove)
+    counts[category] = (counts[category] ?? 0) + 1;
+  const factories = entries.filter((entry) => entry.isFile() && entry.name.endsWith("-factory.json")).map((entry) => entry.name);
+  const references = (await Promise.all(factories.map((name) => readFile(join(directory, name), "utf8")))).join(`
+`);
+  const large = [];
+  for (const entry of entries) {
+    if (!entry.isFile() || factories.includes(entry.name))
+      continue;
+    const info = await stat(join(directory, entry.name));
+    if (info.size > largeFile && now - info.mtimeMs >= day && !references.includes(entry.name)) {
+      large.push({ path: join(directory, entry.name), size: info.size });
+    }
+  }
+  if (run)
+    for (const { path } of remove)
+      await rm(path, { recursive: true, force: true });
+  const unique = (key) => [...new Set(remove.map((item) => item[key]).filter((value) => value !== undefined))];
+  return { run, tasks: unique("task"), rules: unique("rule"), counts, delete: remove, kept, "stale-large": large };
+}
+async function main(argv) {
+  try {
+    const { values, positionals } = parseArgs({
+      args: argv,
+      allowPositionals: true,
+      options: { "older-than": { type: "string", default: "14d" }, run: { type: "boolean", default: false } }
+    });
+    if (positionals.length !== 2 || positionals[0] !== "clean")
+      throw new Error(usage);
+    const result = await clean(resolve(positionals[1]), { olderThan: parseAge(values["older-than"]), run: values.run });
+    console.log(JSON.stringify(result, null, 2));
+  } catch (error) {
+    console.error(errorMessage(error));
+    process.exitCode = errorMessage(error) === usage ? 2 : 1;
+  }
+}
+var import_write_file_atomic, errorCode = (error) => error.code, errorMessage = (error) => error.message, dayFile, archiveDirectory = (file) => join(dirname(file), `${basename(file, extname(file))}-archive`), dayOf = (task) => new Date(task.updated_at).toISOString().slice(0, 10), day = 86400000, hour = 3600000, largeFile, workerRoles2, workerScratch, usage = "Usage: node archive.mjs clean FACTORY_FILE [--older-than 14d] [--run]", pendingFeedback = (task) => task.feedback && task.feedback.acknowledged_id !== task.feedback.id;
+var init_archive = __esm(() => {
+  init_factory_data();
+  import_write_file_atomic = __toESM(require_lib(), 1);
+  dayFile = /^\d{4}-\d{2}-\d{2}\.json$/;
+  largeFile = 100 * 1024 * 1024;
+  workerRoles2 = ["investigation", "implementation", "review"];
+  workerScratch = /^(completion\d|discovery[-\d]|queue-).*\.(json|txt)$/;
+});
+
+// plugins/factory/skills/lifecycle/default-branch.ts
+import { execFileSync } from "node:child_process";
+function defaultBranch(cwd, override) {
+  if (override)
+    return override;
+  let head = "";
+  try {
+    head = git(cwd, "symbolic-ref", "--short", "refs/remotes/origin/HEAD").replace(/^origin\//, "");
+  } catch {}
+  return [head, "main", "master"].find((branch) => {
+    if (!branch)
+      return false;
+    try {
+      git(cwd, "show-ref", "--verify", "--quiet", `refs/heads/${branch}`);
+      return true;
+    } catch {
+      return false;
+    }
+  }) ?? null;
+}
+var git = (cwd, ...args) => execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+var init_default_branch = () => {};
+
+// plugins/factory/skills/lifecycle/state-dir.ts
+import { statSync } from "node:fs";
+import { readFile as readFile2 } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join as join2 } from "node:path";
+async function readJSON(file) {
+  try {
+    return JSON.parse(await readFile2(file, "utf8"));
+  } catch (error) {
+    if (error.code === "ENOENT" || error instanceof SyntaxError)
+      return null;
+    throw error;
+  }
+}
+function alive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === "EPERM";
+  }
+}
+function stateDirectories(home = homedir()) {
+  const existing = candidates(home).filter(exists);
+  return existing.length ? existing : candidates(home).slice(0, 1);
+}
+function stateFile(name, home = homedir()) {
+  const paths = candidates(home).map((directory) => join2(directory, name));
+  return paths.find(exists) ?? paths[0];
+}
+var exists = (path) => {
+  try {
+    statSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+}, candidates = (home) => [
+  join2(home, ".local/state/copilot-factory"),
+  join2(home, ".local/state/copilot-coordinator")
+];
+var init_state_dir = () => {};
+
+// plugins/factory/skills/lifecycle/broker.ts
+var exports_broker = {};
+__export(exports_broker, {
+  emit: () => emit,
+  eventsFile: () => eventsFile,
+  main: () => main2,
+  resolveFactory: () => resolveFactory,
+  waitForEvents: () => waitForEvents,
+  waiterPid: () => waiterPid
+});
+import { execFileSync as execFileSync2 } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { fstatSync, readFileSync, statSync as statSync2, unlinkSync, watch } from "node:fs";
+import { link, open, readFile as readFile3, realpath, rm as rm2, stat as stat2, writeFile } from "node:fs/promises";
+import { basename as basename2, dirname as dirname2, extname as extname2, join as join3, resolve as resolve2 } from "node:path";
+import { parseArgs as parseArgs2 } from "node:util";
+function isWaiter(pid) {
+  if (!alive(pid))
+    return false;
+  try {
+    const line = execFileSync2("ps", ["-o", "ppid=,command=", "-p", String(pid)], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    const [, ppid, command] = line.match(/^\s*(\d+)\s+(.*)$/s) ?? [];
+    return command !== undefined && /(?:broker\.mjs|factory\.mjs\s+broker)\s+wait\b/.test(command) && Number(ppid) > 1;
+  } catch {
+    return true;
+  }
+}
+function stdoutUnread() {
+  try {
+    const out = fstatSync(1);
+    return out.isFile() || out.isCharacterDevice() && out.rdev === statSync2("/dev/null").rdev;
+  } catch {
+    return false;
+  }
+}
+async function waiterPid(factory) {
+  let text;
+  try {
+    text = await readFile3(waiterFile(factory), "utf8");
+  } catch (error) {
+    if (error.code === "ENOENT")
+      return null;
+    throw error;
+  }
+  const pid = Number.parseInt(text, 10);
+  return Number.isInteger(pid) && pid > 0 && isWaiter(pid) ? pid : null;
+}
+async function claimWaiter(factory) {
+  const path = waiterFile(factory);
+  const temp = `${path}.${process.pid}.tmp`;
+  await writeFile(temp, `${process.pid}
+`, { mode: 384 });
+  try {
+    for (let attempt = 0;attempt < 2; attempt++) {
+      try {
+        await link(temp, path);
+        return;
+      } catch (error) {
+        if (error.code !== "EEXIST")
+          throw error;
+      }
+      const pid = await waiterPid(factory);
+      if (pid !== null) {
+        throw new Error(`A waiter (pid ${pid}) is already armed for this factory. Keep only one waiter. Wait for it to exit, or stop it.`);
+      }
+      await rm2(path, { force: true });
+    }
+    throw new Error("Another waiter claimed this factory at the same time. Keep only one waiter.");
+  } finally {
+    await rm2(temp, { force: true });
+  }
+}
+function releaseWaiter(factory) {
+  const path = waiterFile(factory);
+  try {
+    if (readFileSync(path, "utf8").trim() === String(process.pid))
+      unlinkSync(path);
+  } catch {}
+}
+function validateEvent({ type, task, source, data }) {
+  const schema = eventTypes[type];
+  if (!schema)
+    throw new UsageError(`Unknown event type ${type}. Use one of: ${Object.keys(eventTypes).join(", ")}.`);
+  if (!/^[a-z][a-z0-9-]*$/.test(source))
+    throw new UsageError("--source must be lowercase letters, digits, and hyphens.");
+  if (schema.task && !task)
+    throw new UsageError(`${type} needs --task ID.`);
+  if (!isObject(data))
+    throw new UsageError("--data must be a JSON object.");
+  for (const key of schema.data) {
+    if (data[key] === undefined)
+      throw new UsageError(`${type} data needs "${key}".`);
+  }
+  if (type === "worker.result" && !workerOutcomes.includes(data.outcome)) {
+    throw new UsageError(`worker.result outcome must be one of: ${workerOutcomes.join(", ")}.`);
+  }
+  if (type.startsWith("attention."))
+    validateAttention(type, data);
+  if (type.startsWith("improve."))
+    validateImprove(type, data);
+}
+function validateImprove(type, data) {
+  const text = (key) => {
+    if (typeof data[key] !== "string" || data[key] === "")
+      throw new UsageError(`${type} data "${key}" must be a non-empty string.`);
+  };
+  text("proposal_id");
+  if (type === "improve.decided") {
+    if (!decisions.includes(data.decision))
+      throw new UsageError(`${type} decision must be one of: ${decisions.join(", ")}.`);
+    if (data.note !== undefined && typeof data.note !== "string")
+      throw new UsageError(`${type} data "note" must be a string.`);
+    return;
+  }
+  for (const key of ["rule", "title", "result"])
+    text(key);
+  if (typeof data.evidence !== "string")
+    throw new UsageError(`${type} data "evidence" must be a string.`);
+  if (data.evidence.length > maxAttentionText)
+    throw new UsageError(`${type} data "evidence" must have at most ${maxAttentionText} characters.`);
+  if (!changeKinds.includes(data.change))
+    throw new UsageError(`${type} change must be one of: ${changeKinds.join(", ")}.`);
+  if (data.result !== basename2(data.result) || data.result.startsWith(".")) {
+    throw new UsageError(`${type} data "result" must name a file in the state directory.`);
+  }
+  if (!answers.includes(data.recommended))
+    throw new UsageError(`${type} recommended must be one of: ${answers.join(", ")}.`);
+}
+function validateAttention(type, data) {
+  const text = (key) => {
+    if (typeof data[key] !== "string")
+      throw new UsageError(`${type} data "${key}" must be a string.`);
+  };
+  text("session");
+  if (data.session === "")
+    throw new UsageError(`${type} data "session" must not be empty.`);
+  for (const key of ["role", "pane"]) {
+    if (data[key] !== undefined)
+      text(key);
+  }
+  if (type === "attention.resolved")
+    return;
+  text("text");
+  if (data.text.length > maxAttentionText)
+    throw new UsageError(`${type} data "text" must have at most ${maxAttentionText} characters.`);
+  if (!attentionKinds.includes(data.kind))
+    throw new UsageError(`${type} kind must be one of: ${attentionKinds.join(", ")}.`);
+  if (data.options !== undefined && !(Array.isArray(data.options) && data.options.every((option) => typeof option === "string"))) {
+    throw new UsageError(`${type} data "options" must be an array of strings.`);
+  }
+}
+async function checkResult(factory, { type, task, data }) {
+  const name = data.result;
+  if (typeof name !== "string" || name !== basename2(name) || name.startsWith(".")) {
+    throw new Error(`${type} data "result" must name a result file in the state directory.`);
+  }
+  let saved;
+  try {
+    saved = JSON.parse(await readFile3(join3(dirname2(factory), name), "utf8"));
+  } catch (error) {
+    throw new Error(`Result file ${name} is not readable JSON in the state directory: ${error.message}`);
+  }
+  const outcome = type === "worker.blocked" ? "blocked" : data.outcome;
+  for (const [key, want] of [["task", task], ["role", data.role], ["outcome", outcome]]) {
+    if (saved?.[key] !== want)
+      throw new Error(`Result file ${name} has ${key} ${JSON.stringify(saved?.[key])}, but the event has ${JSON.stringify(want)}.`);
+  }
+}
+async function checkHead(factory, task, head) {
+  const record = JSON.parse(await readFile3(factory, "utf8")).tasks?.find(({ id }) => id === task);
+  const worktree = record?.worktree;
+  if (!worktree?.path)
+    return;
+  const at = git2(worktree.path, "rev-parse", "HEAD");
+  if (at !== head)
+    throw new Error(`The worktree ${worktree.path} is at ${at}, not at head ${head}. Commit the changes. Then report the correct head.`);
+  if (git2(worktree.path, "status", "--porcelain"))
+    throw new Error(`The worktree ${worktree.path} has uncommitted changes. Commit them. Then emit the event again.`);
+  if (record.pr)
+    return;
+  const base = defaultBranch(worktree.path) ?? "main";
+  try {
+    git2(worktree.path, "merge-base", "--is-ancestor", base, head);
+  } catch (error) {
+    if (error.status !== 1)
+      throw error;
+    throw new Error(`Head ${head} does not descend from ${base}. Run git rebase ${base}. Then emit the event again.`);
+  }
+}
+async function checkEvent(factory, event) {
+  const { type, task, data } = event;
+  if (type === "worker.result" || type === "worker.blocked" && data.result !== undefined) {
+    await checkResult(factory, event);
+  }
+  if (type === "worker.result" && data.role === "implementation" && data.outcome === "complete" && typeof data.head === "string") {
+    await checkHead(factory, task, data.head);
+  }
+  if (type === "pr.merged" && !/^[0-9a-f]{40}$/.test(data.merge_commit)) {
+    throw new Error("pr.merged data merge_commit must be a full 40-character SHA.");
+  }
+}
+async function resolveFactory(file) {
+  return join3(await realpath(dirname2(resolve2(file))), basename2(file));
+}
+async function size(file) {
+  try {
+    return (await stat2(file)).size;
+  } catch (error) {
+    if (error.code === "ENOENT")
+      return 0;
+    throw error;
+  }
+}
+async function emit(factory, { type, task = null, source, data = {} }) {
+  validateEvent({ type, task, source, data });
+  await checkEvent(factory, { type, task, data });
+  const event = { id: randomUUID(), at: new Date().toISOString(), type, task, source, data };
+  const line = `${JSON.stringify(event)}
+`;
+  if (Buffer.byteLength(line) > maxLine)
+    throw new Error("Event is larger than 64 KiB. Keep long evidence in the result file.");
+  const handle = await open(eventsFile(factory), "a", 384);
+  try {
+    await handle.write(line);
+  } finally {
+    await handle.close();
+  }
+  return event;
+}
+async function readEvents(file, offset) {
+  let handle;
+  try {
+    handle = await open(file, "r");
+  } catch (error) {
+    if (error.code === "ENOENT" && offset === 0)
+      return { events: [], cursor: 0 };
+    throw error;
+  }
+  try {
+    const { size: length } = await handle.stat();
+    if (offset > length)
+      throw new Error(`Cursor ${offset} is past the end of the log (${length} bytes).`);
+    const buffer = Buffer.alloc(length - offset);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, offset);
+    const text = buffer.subarray(0, bytesRead);
+    const end = text.lastIndexOf(10) + 1;
+    const events = [];
+    for (const line of text.subarray(0, end).toString("utf8").split(`
+`)) {
+      if (!line)
+        continue;
+      try {
+        events.push(JSON.parse(line));
+      } catch {
+        console.error(`Skipped an invalid event line: ${line.slice(0, 80)}`);
+      }
+    }
+    return { events, cursor: offset + end };
+  } finally {
+    await handle.close();
+  }
+}
+async function waitForEvents(factory, { since, timeout, exclude = [], due = false, reconcile = reconcileMs }) {
+  await claimWaiter(factory);
+  const release = () => releaseWaiter(factory);
+  process.on("exit", release);
+  for (const [signal, code] of [["SIGINT", 130], ["SIGTERM", 143]])
+    process.once(signal, () => process.exit(code));
+  try {
+    return await armedWait(factory, { since, timeout, exclude, due, reconcile });
+  } finally {
+    release();
+    process.off("exit", release);
+  }
+}
+async function armedWait(factory, { since, timeout, exclude, due, reconcile }) {
+  const file = eventsFile(factory);
+  let cursor = since ?? await size(file);
+  const state = async () => JSON.parse(await readFile3(factory, "utf8"));
+  const watchers = [];
+  const timers = [];
+  let dueTimers = [];
+  let dueAt = null;
+  const reconcileTimers = [];
+  let reconcileAt = Date.now() + reconcile;
+  let stopped = false;
+  try {
+    return await new Promise((complete, fail) => {
+      let dirty = false;
+      let checking = false;
+      const finish = (result) => {
+        stopped = true;
+        complete(result);
+      };
+      const abort = (error) => {
+        stopped = true;
+        fail(error);
+      };
+      const armDue = (next) => {
+        if (next === dueAt)
+          return;
+        dueAt = next;
+        for (const timer of dueTimers)
+          clearTimeout(timer);
+        dueTimers = [];
+        if (next !== null)
+          after(Math.max(next - Date.now(), 0), () => void check(next), dueTimers);
+      };
+      const armReconcile = () => {
+        for (const timer of reconcileTimers.splice(0))
+          clearTimeout(timer);
+        const at = reconcileAt;
+        after(Math.max(at - Date.now(), 0), () => void check(at), reconcileTimers);
+      };
+      async function check(now = Date.now()) {
+        dirty = true;
+        if (checking || stopped)
+          return;
+        checking = true;
+        try {
+          while (dirty && !stopped) {
+            dirty = false;
+            const read = await readEvents(file, cursor);
+            cursor = read.cursor;
+            const events = read.events.filter((event) => !exclude.includes(event.source));
+            if (due) {
+              const data = await state();
+              armDue(nextDue(data));
+              const rules = dueRules(data, now);
+              if (rules.length) {
+                events.push({ id: null, at: new Date(now).toISOString(), type: "rule.due", task: null, source: "broker", data: { rules } });
+              }
+              const tick = Math.max(now, Date.now());
+              if (tick >= reconcileAt) {
+                if (data.status === "active") {
+                  events.push({ id: null, at: new Date(now).toISOString(), type: "reconcile.due", task: null, source: "broker", data: { every: reconcileEvery } });
+                }
+                reconcileAt = tick + reconcile;
+                armReconcile();
+              }
+            }
+            if (events.length)
+              finish({ events, cursor: String(cursor) });
+          }
+        } catch (error) {
+          abort(error);
+        } finally {
+          checking = false;
+        }
+      }
+      const directory = dirname2(file);
+      const watched = [basename2(file), basename2(factory)];
+      const watcher = watch(directory, (_, name) => {
+        if (name === null || watched.includes(name))
+          check();
+      });
+      watcher.on("error", abort);
+      watcher.on("close", () => {
+        if (!stopped)
+          abort(new Error(`Event watcher closed unexpectedly: ${directory}`));
+      });
+      watchers.push(watcher);
+      function after(ms, action, list = timers) {
+        const tick = (left) => {
+          list.push(setTimeout(() => left > maxTimer ? tick(left - maxTimer) : action(), Math.min(left, maxTimer)));
+        };
+        tick(ms);
+      }
+      if (timeout !== undefined)
+        after(timeout * 1000, () => finish({ events: [], cursor: String(cursor), timeout: true }));
+      if (due)
+        armReconcile();
+      console.error("Watching events.");
+      check();
+    });
+  } finally {
+    stopped = true;
+    for (const timer of [...timers, ...dueTimers, ...reconcileTimers])
+      clearTimeout(timer);
+    for (const watcher of watchers)
+      watcher.close();
+  }
+}
+async function main2(argv) {
+  let command = "";
+  let factory = "";
+  let event = { type: "", source: "" };
+  let waitOptions = {};
+  try {
+    const { values, positionals } = parseArgs2({
+      args: argv,
+      options: {
+        help: { type: "boolean", short: "h" },
+        since: { type: "string" },
+        timeout: { type: "string" },
+        "exclude-source": { type: "string", multiple: true },
+        due: { type: "boolean" },
+        task: { type: "string" },
+        source: { type: "string" },
+        data: { type: "string" }
+      },
+      allowPositionals: true
+    });
+    if (values.help || positionals.length === 0) {
+      console.log(usage2);
+      process.exitCode = values.help ? 0 : 2;
+      return;
+    }
+    const [name, file, ...args] = positionals;
+    if (!["wait", "emit", "cursor", "armed"].includes(name))
+      throw new Error(`Unknown command ${name}.`);
+    if (!file)
+      throw new Error("A factory FILE is required.");
+    command = name;
+    factory = file;
+    if (command === "emit") {
+      if (args.length !== 1)
+        throw new Error("emit needs exactly one TYPE.");
+      event = {
+        type: args[0],
+        task: values.task ?? null,
+        source: values.source ?? "worker",
+        data: values.data === undefined ? {} : JSON.parse(values.data)
+      };
+    } else {
+      if (args.length)
+        throw new Error(`Unexpected argument: ${args[0]}.`);
+      if (command === "wait") {
+        if (values.since !== undefined && !/^\d+$/.test(values.since))
+          throw new Error("--since must be a cursor printed by wait or cursor.");
+        const timeout = values.timeout === undefined ? undefined : Number(values.timeout);
+        if (timeout !== undefined && !(timeout > 0))
+          throw new Error("--timeout must be a positive number of seconds.");
+        waitOptions = {
+          since: values.since === undefined ? undefined : Number(values.since),
+          timeout,
+          exclude: values["exclude-source"] ?? [],
+          due: values.due === true
+        };
+      }
+    }
+  } catch (error) {
+    console.error(`${error.message}
+Run with --help for usage.`);
+    process.exitCode = 2;
+    return;
+  }
+  try {
+    factory = await resolveFactory(factory);
+    if (command === "emit") {
+      console.log(JSON.stringify(await emit(factory, event)));
+    } else if (command === "cursor") {
+      console.log(JSON.stringify({ cursor: String(await size(eventsFile(factory))) }));
+    } else if (command === "armed") {
+      const pid = await waiterPid(factory);
+      console.log(JSON.stringify(pid === null ? { armed: false } : { armed: true, pid }));
+      if (pid === null)
+        process.exitCode = 1;
+    } else {
+      if (stdoutUnread()) {
+        throw new UsageError("wait refuses to run with stdout sent to a file or /dev/null. Nobody would read the wake. Run wait as async bash and read its output. Never run it in the background with & or nohup.");
+      }
+      console.log(JSON.stringify(await waitForEvents(factory, waitOptions)));
+    }
+  } catch (error) {
+    console.error(error.message);
+    process.exitCode = error instanceof UsageError ? 2 : 1;
+  }
+}
+var maxTimer, maxLine, reconcileEvery = "5m", reconcileMs, workerOutcomes, attentionKinds, maxAttentionText = 2000, changeKinds, answers, decisions, eventTypes, eventsFile = (file) => join3(dirname2(file), `${basename2(file, extname2(file))}-events.jsonl`), waiterFile = (file) => join3(dirname2(file), `${basename2(file, extname2(file))}-waiter.pid`), UsageError, git2 = (cwd, ...args) => execFileSync2("git", ["-C", cwd, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim(), usage2;
+var init_broker = __esm(() => {
+  init_default_branch();
+  init_factory_data();
+  init_state_dir();
+  maxTimer = 2 ** 31 - 1;
+  maxLine = 64 * 1024;
+  reconcileMs = 5 * 60000;
+  workerOutcomes = ["working", "waiting", "complete", "blocked"];
+  attentionKinds = ["permission", "sandbox-bypass", "ask-user", "other"];
+  changeKinds = ["rule", "limit", "budget", "process", "skill"];
+  answers = ["accept", "decline"];
+  decisions = ["accepted", "declined"];
+  eventTypes = {
+    "task.moved": { task: true, data: ["to"] },
+    "task.updated": { task: true, data: ["revision"] },
+    "worker.result": { task: true, data: ["role", "outcome"] },
+    "worker.blocked": { task: true, data: ["role", "reason"] },
+    "pr.merged": { task: true, data: ["pr", "merge_commit"] },
+    "feedback.pending": { task: true, data: ["feedback_id"] },
+    "budget.updated": { task: false, data: ["max_parallel_workers"] },
+    "limits.updated": { task: false, data: ["investigation", "implementation"] },
+    "lever.updated": { task: false, data: ["spend", "autonomy_cap"] },
+    "attention.requested": { task: false, data: ["session", "kind", "text"] },
+    "attention.resolved": { task: false, data: ["session"] },
+    "improve.proposed": { task: false, data: ["rule", "change", "title", "evidence", "recommended", "proposal_id", "result"] },
+    "improve.decided": { task: false, data: ["proposal_id", "decision"] }
+  };
+  UsageError = class UsageError extends Error {
+  };
+  usage2 = `Factory event broker: a durable event log that only grows, with a waiter that wakes at once.
+
+Usage: node broker.mjs wait FACTORY_FILE [--since CURSOR] [--timeout SECONDS]
+                       [--exclude-source SOURCE ...] [--due]
+       node broker.mjs emit FACTORY_FILE TYPE [--task ID] [--source SOURCE] [--data JSON]
+       node broker.mjs cursor FACTORY_FILE
+       node broker.mjs armed FACTORY_FILE
+
+The log is <owner.repo>-factory-events.jsonl beside FACTORY_FILE (mode 0600). A cursor is a
+byte offset in the log. Events are notifications. The factory JSON file stays the source of truth.
+
+wait    Waits until an event exists after the cursor, prints {"events":[...],"cursor":"N"},
+        and exits. Give the printed cursor to the next wait. Then no event is lost between calls.
+        Without --since, wait starts at the current end of the log ("cursor" prints that end).
+        --exclude-source skips events from a source (repeatable), so the factory ignores its
+        own writes. Skipped events still advance the cursor.
+        --timeout S exits 0 with "events":[] and "timeout":true after S seconds.
+        --due also returns a synthetic rule.due event (data.rules = rule IDs) when an enabled
+        rule with "every" is due. It follows the factory file, so edits of run-status and rules
+        move the due time while it waits. Set last_run_at with factory.mjs --rule ID --ran.
+        If you do not, the next wait returns the event again. Do not use --due while no
+        slot is free for the rule.
+        --due also returns a synthetic reconcile.due event (data.every = "5m") every 5 minutes
+        after the waiter starts, while the run is active. The window is per waiter, so a wake
+        does not start it at once. After this event, run reconcile.mjs and arm the waiter again.
+emit    Appends one event and prints it. Types: ${Object.keys(eventTypes).join(", ")}.
+        Needed data keys: ${Object.entries(eventTypes).map(([type, { data }]) => `${type}: ${data.join(", ")}`).join("; ")}.
+        worker.result outcome: ${workerOutcomes.join(", ")}. --source defaults to worker.
+        emit refuses a worker.result (exit 1, nothing appended) when data.result is not a JSON
+        file in the state directory with the same task, role, and outcome. A worker.blocked with
+        data.result gets the same check with outcome blocked. A complete implementation
+        worker.result with data.head must match HEAD of the worktree of the task. For a task
+        without a PR, the head must also descend from main. emit skips these checks when the
+        task has no worktree record.
+        pr.merged needs a full merge_commit SHA.
+        attention.requested and attention.resolved need no --task (a rule worker or the
+        coordinator has none). A hook emits them with --source attention when a Copilot session
+        waits for the user. attention.requested data: session (the Copilot session ID, a string),
+        kind (${attentionKinds.join(", ")}), text (a string of at most ${maxAttentionText} characters), and
+        optional role, pane (strings) and options (an array of strings). attention.resolved needs
+        only session. Wait with --exclude-source attention, so these events never wake the factory.
+        improve.proposed (--source improve, no --task) puts one proposed change of an improve rule
+        in the "Waiting for you" list of the dashboard. data: rule, change (${changeKinds.join(", ")}), title,
+        evidence (a string of at most ${maxAttentionText} characters), recommended (${answers.join(", ")}),
+        proposal_id (unique), and result (the name of the result file). The dashboard server appends
+        improve.decided (--source dashboard; data proposal_id, decision ${decisions.join(" or ")}, optional note)
+        when the user clicks. Wait with --exclude-source improve, so a proposal never wakes the
+        factory. The decision always wakes it.
+        pr.merged is a hint from the implementation worker (role, pr, merge_commit, head). The
+        factory verifies the merge on GitHub before it resolves the task.
+        factory.mjs emits task.moved, task.updated, and feedback.pending after every task write.
+        It emits budget.updated, limits.updated, or lever.updated (no --task) after every write
+        of that setting.
+cursor  Prints {"cursor":"N"} for the current end of the log.
+armed   Read-only. Prints {"armed":true,"pid":N} and exits 0 when a waiter for this factory is
+        alive. Prints {"armed":false} and exits 1 when no waiter is alive. wait records its PID in
+        <owner.repo>-factory-waiter.pid and removes it on exit. A PID file is stale in these cases:
+        the process is gone; the command line of the process (ps -o command=) is not
+        "broker.mjs wait" (a reused PID); or the parent of the process is gone (ppid 1), so
+        the process is an orphan that nobody reads. wait refuses to start when stdout goes to
+        a file or to /dev/null. Without a usable ps, a live PID counts as the waiter.
+        A second wait for the same factory exits 1 unless the first waiter is stale, so only one
+        waiter exists. A turn must never end while armed exits 1.
+
+The command prints progress and errors to stderr. Exit: 0 success, 1 operational failure, 2 invalid usage.`;
+});
+
+// plugins/factory/skills/lifecycle/sessions.ts
+import { appendFile, readFile as readFile4, readdir as readdir2, realpath as realpath2, stat as stat3 } from "node:fs/promises";
+import { homedir as homedir2 } from "node:os";
+import { basename as basename3, dirname as dirname3, extname as extname3, join as join4, resolve as resolve3 } from "node:path";
+function entry(line, file, number) {
+  let item;
+  try {
+    item = JSON.parse(line);
+  } catch {
+    throw new Error(`${file} line ${number} is not valid JSON.`);
+  }
+  if (item === null || typeof item !== "object" || sessionID(item.id) !== item.id || !sessionRoles.includes(item.role) || Number.isNaN(Date.parse(item.at))) {
+    throw new Error(`${file} line ${number} is not a session entry {id, role, at}.`);
+  }
+  return item;
+}
+async function readSessions(file) {
+  let text;
+  try {
+    text = await readFile4(file, "utf8");
+  } catch (error) {
+    if (error.code === "ENOENT")
+      return [];
+    throw error;
+  }
+  return text.split(`
+`).flatMap((line, index) => line ? [entry(line, file, index + 1)] : []);
+}
+async function recordSessions(file, entries) {
+  if (!entries.length)
+    return;
+  const known = new Set((await readSessions(file)).map((item) => item.id));
+  const fresh = entries.filter((item) => !known.has(item.id) && known.add(item.id));
+  if (fresh.length) {
+    await appendFile(file, fresh.map((item) => `${JSON.stringify(item)}
+`).join(""), { mode: 384 });
+  }
+}
+async function findSessions(directory, cwd, since) {
+  const from = Date.parse(since);
+  const names = await readdir2(directory).catch(() => []);
+  const wanted = await real(cwd);
+  const found = [];
+  await Promise.all(names.filter((name) => sessionID(name) === name).map(async (name) => {
+    try {
+      if ((await stat3(join4(directory, name))).mtimeMs < from)
+        return;
+      const yaml = await readFile4(join4(directory, name, "workspace.yaml"), "utf8");
+      const field = (key) => yaml.match(new RegExp(`^${key}: *["']?(.+?)["']?$`, "m"))?.[1];
+      const sessionCwd = field("cwd");
+      if (!(Date.parse(field("created_at")) >= from) || !sessionCwd)
+        return;
+      if (await real(sessionCwd) === wanted)
+        found.push(name);
+    } catch {}
+  }));
+  return found;
+}
+var sessionRoles, uuid, registryFile = (file) => join4(dirname3(file), `${basename3(file, extname3(file))}-sessions.jsonl`), sessionID = (value) => (typeof value === "string" ? value.match(uuid)?.[0].toLowerCase() : null) ?? null, sessionStateDirectory = () => process.env.FACTORY_SESSION_STATE ?? join4(homedir2(), ".copilot", "session-state"), real = (path) => realpath2(path).catch(() => resolve3(path));
+var init_sessions = __esm(() => {
+  sessionRoles = ["factory", "investigation", "implementation", "review", "producer", "improver"];
+  uuid = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+});
+
+// plugins/factory/skills/lifecycle/tasks.ts
+var exports_tasks = {};
+__export(exports_tasks, {
+  ConflictError: () => ConflictError,
+  main: () => main3,
+  update: () => update
+});
+import { randomUUID as randomUUID2 } from "node:crypto";
+import { open as open2, readFile as readFile5, realpath as realpath3, rm as rm3, stat as stat4 } from "node:fs/promises";
+import { basename as basename4, extname as extname4, resolve as resolve4 } from "node:path";
+import { parseArgs as parseArgs3 } from "node:util";
 function merge(current, patch) {
   if (!isObject(current) || !isObject(patch))
     return patch;
@@ -507,7 +1885,7 @@ function merge(current, patch) {
 }
 async function readOptional(file) {
   try {
-    return await readFile(file, "utf8");
+    return await readFile5(file, "utf8");
   } catch (error) {
     if (error.code === "ENOENT")
       return null;
@@ -520,8 +1898,6 @@ function json(value, option, check) {
     throw new Error(`--${option} has the wrong JSON type.`);
   return parsed;
 }
-var nullable = (value) => value === "null" ? null : value;
-var nullableObject = (value, option) => value === "null" ? null : json(value, option, isObject);
 function normalizedURL(value) {
   if (value == null || value === "null")
     return null;
@@ -585,7 +1961,6 @@ function checkNotLinked(tasks, values) {
     }
   }
 }
-var running = (task) => Object.values(task.workers ?? {}).some((worker) => worker?.status === "running");
 function mergeTasks(tasks, values, at) {
   const { "merge-task": keepId, from: otherId } = values;
   if (otherId === undefined)
@@ -721,7 +2096,6 @@ function checkInvestigation(patch, state) {
     throw new Error("A task in investigation has no worktree. Move the task to implementation first.");
   }
 }
-var settingOptions = ["budget", "expected-budget", "limits", "expected-limits", "lever", "expected-lever"];
 function checkExpected(name, patch, expectedJson, present, operator) {
   if (expectedJson === undefined) {
     if (operator)
@@ -755,7 +2129,7 @@ async function writeFactory(file, values, operator, source) {
   }
   let current = isNew ? {
     format,
-    id: basename(file, extname(file)),
+    id: basename4(file, extname4(file)),
     project: values.project,
     goal: values["run-goal"],
     status: values["run-status"] ?? "active",
@@ -965,7 +2339,7 @@ async function writeFactory(file, values, operator, source) {
         launches.add(`${task.id}:${role}`);
     }
     if (operator) {
-      const id = randomUUID();
+      const id = randomUUID2();
       Object.assign(task.history.at(-1), { source: "dashboard", feedback_id: id });
       task.feedback = { id, acknowledged_id: before.feedback?.acknowledged_id ?? null };
       task.merge = null;
@@ -1012,7 +2386,7 @@ async function writeFactory(file, values, operator, source) {
   if (stale.length)
     await saveArchive(directory, current.project, stale);
   await recordSessions(registryFile(file), sessions);
-  await import_write_file_atomic.default(file, `${JSON.stringify(current, null, 2)}
+  await import_write_file_atomic2.default(file, `${JSON.stringify(current, null, 2)}
 `, { mode: 384 });
   await announce(file, source, events);
   if (archived) {
@@ -1054,13 +2428,12 @@ async function locateSessions(current, previous, launches, now, track) {
     await find(rule.worker, `rule:${rule.id}`, before?.last_run_at ?? previous.updated_at ?? now, process.cwd(), rule.kind === "improve" ? "improver" : "producer", { rule: rule.id });
   }
 }
-var lockMaxAge = 10 * 60 * 1000;
 async function lockOwner(lockFile) {
   try {
-    const pid = Number.parseInt(await readFile(lockFile, "utf8"), 10);
+    const pid = Number.parseInt(await readFile5(lockFile, "utf8"), 10);
     if (Number.isInteger(pid) && pid > 0)
       return alive(pid) ? { pid } : null;
-    return Date.now() - (await stat(lockFile)).mtimeMs > lockMaxAge ? null : { pid: null };
+    return Date.now() - (await stat4(lockFile)).mtimeMs > lockMaxAge ? null : { pid: null };
   } catch (error) {
     if (error.code === "ENOENT")
       return null;
@@ -1070,7 +2443,7 @@ async function lockOwner(lockFile) {
 async function takeLock(lockFile) {
   for (let attempt = 0;attempt < 2; attempt++) {
     try {
-      const lock = await open(lockFile, "wx", 384);
+      const lock = await open2(lockFile, "wx", 384);
       await lock.writeFile(`${process.pid}
 `);
       return lock;
@@ -1082,13 +2455,13 @@ async function takeLock(lockFile) {
     if (owner) {
       throw new ConflictError(`Factory write is locked${owner.pid ? ` by pid ${owner.pid}` : ""}. Read the factory again before you try again. Remove a .write.lock with no pid only after you verify that no writer is active.`);
     }
-    await rm(lockFile, { force: true });
+    await rm3(lockFile, { force: true });
   }
   throw new ConflictError("Factory write is locked by another writer. Read the factory again before you try again.");
 }
 async function update(file, values, { operator = false, source = operator ? "dashboard" : "coordinator" } = {}) {
   try {
-    file = await realpath(file);
+    file = await realpath3(file);
   } catch (error) {
     if (error.code !== "ENOENT")
       throw error;
@@ -1102,37 +2475,16 @@ async function update(file, values, { operator = false, source = operator ? "das
     try {
       await lock.close();
     } finally {
-      await rm(lockFile);
+      await rm3(lockFile);
     }
   }
 }
-var taskOptions = [
-  "title",
-  "issue",
-  "pr",
-  "head",
-  "reviewed-head",
-  "state",
-  "note",
-  "next-action",
-  "blocker",
-  "resolution",
-  "links",
-  "workers",
-  "worktree",
-  "merge",
-  "details",
-  "task-updated-at",
-  "expected-revision",
-  "feedback-id",
-  "ack-feedback"
-];
-async function main(argv) {
+async function main3(argv) {
   let file;
   let values;
   let positionals;
   try {
-    ({ values, positionals } = parseArgs({
+    ({ values, positionals } = parseArgs3({
       args: argv,
       options: {
         help: { type: "boolean", short: "h" },
@@ -1310,7 +2662,7 @@ A conflict is an error. The command never tries again.`);
     if (values.task === undefined && Object.keys(values).length === 0) {
       throw new Error("Give run options or --task ID.");
     }
-    file = resolve(file);
+    file = resolve4(file);
   } catch (error) {
     console.error(`${error.message}
 Run with --help for usage.`);
@@ -1325,10 +2677,3358 @@ Run with --help for usage.`);
     process.exitCode = 1;
   }
 }
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href)
-  await main(process.argv.slice(2));
+var import_write_file_atomic2, nullable = (value) => value === "null" ? null : value, nullableObject = (value, option) => value === "null" ? null : json(value, option, isObject), running = (task) => Object.values(task.workers ?? {}).some((worker) => worker?.status === "running"), settingOptions, lockMaxAge, taskOptions;
+var init_tasks = __esm(() => {
+  init_archive();
+  init_broker();
+  init_conflict();
+  init_factory_data();
+  init_sessions();
+  init_state_dir();
+  import_write_file_atomic2 = __toESM(require_lib(), 1);
+  settingOptions = ["budget", "expected-budget", "limits", "expected-limits", "lever", "expected-lever"];
+  lockMaxAge = 10 * 60 * 1000;
+  taskOptions = [
+    "title",
+    "issue",
+    "pr",
+    "head",
+    "reviewed-head",
+    "state",
+    "note",
+    "next-action",
+    "blocker",
+    "resolution",
+    "links",
+    "workers",
+    "worktree",
+    "merge",
+    "details",
+    "task-updated-at",
+    "expected-revision",
+    "feedback-id",
+    "ack-feedback"
+  ];
+});
+
+// plugins/factory/skills/lifecycle/attention.ts
+import { execFile } from "node:child_process";
+import { open as open3, readFile as readFile6, stat as stat5 } from "node:fs/promises";
+import { homedir as homedir3 } from "node:os";
+import { join as join5 } from "node:path";
+import { promisify } from "node:util";
+async function tailEvents(file, since) {
+  let handle;
+  try {
+    handle = await open3(file, "r");
+  } catch (error) {
+    if (errorCode2(error) === "ENOENT")
+      return [];
+    throw error;
+  }
+  try {
+    const { size } = await handle.stat();
+    for (let bytes = tailBytes;; bytes *= 4) {
+      const start = Math.max(0, size - bytes);
+      const buffer = Buffer.alloc(size - start);
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, start);
+      const lines = buffer.subarray(0, bytesRead).toString("utf8").split(`
+`);
+      if (start > 0)
+        lines.shift();
+      const events = [];
+      for (const line of lines) {
+        try {
+          events.push(JSON.parse(line));
+        } catch {}
+      }
+      const oldest = events.map(({ timestamp }) => Date.parse(timestamp)).find(Number.isFinite);
+      if (start === 0 || bytes >= maxTailBytes || oldest !== undefined && oldest < since - lookBackMs)
+        return events;
+    }
+  } finally {
+    await handle.close();
+  }
+}
+async function lastEvent(session) {
+  if (!/^[\w-]+$/.test(session))
+    return null;
+  const events = await tailEvents(join5(sessionState(), session, "events.jsonl"), Date.now());
+  const event = events.at(-1);
+  return event ? { type: event.type, at: Date.parse(event.timestamp) } : null;
+}
+async function answerTimes(session, since) {
+  if (!/^[\w-]+$/.test(session))
+    return [];
+  const events = await tailEvents(join5(sessionState(), session, "events.jsonl"), since);
+  const askUser = new Set(events.filter(({ type, data }) => type === "tool.execution_start" && data?.toolName === "ask_user").map(({ data }) => data?.toolCallId));
+  return events.filter(({ type, data }) => type === "permission.completed" || type === "tool.execution_complete" && askUser.has(data?.toolCallId)).map(({ timestamp }) => Date.parse(timestamp)).filter(Number.isFinite);
+}
+async function scanStamp(file, sessions = []) {
+  const paths = [eventsFile(file), ...sessions.filter((session) => /^[\w-]+$/.test(session)).map((session) => join5(sessionState(), session, "events.jsonl"))];
+  return (await Promise.all(paths.map(async (path) => {
+    try {
+      const { size, mtimeMs } = await stat5(path);
+      return `${size}:${mtimeMs}`;
+    } catch (error) {
+      if (errorCode2(error) === "ENOENT")
+        return "none";
+      throw error;
+    }
+  }))).join(",");
+}
+async function liveBlocks() {
+  try {
+    const sessions = await rexLines("session:", ["ls", "-q", "--short=false"]);
+    const blocks = (await Promise.all(sessions.map(async (session) => (await rexLines("block:", ["block", "ls", "-s", session, "-q", "--short=false"])).map((id) => ({ id, session }))))).flat();
+    return blocks.length > 0 ? blocks : null;
+  } catch {
+    return null;
+  }
+}
+async function scanAttention(file, { now = Date.now(), panes } = {}) {
+  let text;
+  try {
+    text = await readFile6(eventsFile(file), "utf8");
+  } catch (error) {
+    if (errorCode2(error) === "ENOENT")
+      return { open: [], resolved: [] };
+    throw error;
+  }
+  const requests = new Map;
+  for (const line of text.split(`
+`)) {
+    if (!line.includes('"attention.'))
+      continue;
+    let event;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    const session = event?.data?.session;
+    if (typeof session !== "string")
+      continue;
+    if (event.type === "attention.requested") {
+      if (event.data.kind !== "other")
+        requests.set(event.id, event);
+    } else if (event.type === "attention.resolved") {
+      for (const [id, request] of requests)
+        if (request.data.session === session)
+          requests.delete(id);
+    }
+  }
+  if (requests.size === 0)
+    return { open: [], resolved: [] };
+  const titles = new Map((await readJSON(file))?.tasks?.map((task) => [task.id, task.title]));
+  const firstAsked = new Map;
+  for (const { at, data } of requests.values()) {
+    firstAsked.set(data.session, Math.min(firstAsked.get(data.session) ?? Infinity, Date.parse(at)));
+  }
+  const answers = new Map;
+  let live = panes ? panes.map((id) => ({ id, session: null })) : panes;
+  const open = [];
+  const resolved = [];
+  for (const event of requests.values()) {
+    const { session, kind, text: message, role = null, pane = null, options = [] } = event.data;
+    const task = event.task ?? event.data.task ?? null;
+    const item = { id: event.id, at: event.at, session, task, role, kind, text: message, options, pane, title: titles.get(task) ?? null };
+    const at = Date.parse(event.at);
+    if (!answers.has(session))
+      answers.set(session, await answerTimes(session, firstAsked.get(session)));
+    let reason = null;
+    if (answers.get(session).some((time) => time > at))
+      reason = "answered";
+    else if (now - at > expireMs)
+      reason = "expired";
+    else if (pane) {
+      if (live === undefined)
+        live = await liveBlocks();
+      const block = live?.find(({ id }) => sameId(id, pane));
+      if (live && !block)
+        reason = "pane-gone";
+      else if (block?.session)
+        item.rex_session = block.session;
+    }
+    if (reason)
+      resolved.push({ item, reason });
+    else
+      open.push(item);
+  }
+  return { open, resolved };
+}
+async function resolveAttention(file, { source, ...options }) {
+  const scan = await scanAttention(file, options);
+  const waiting = new Set(scan.open.map((item) => item.session));
+  const recorded = new Set;
+  for (const { item, reason } of scan.resolved) {
+    if (waiting.has(item.session) || recorded.has(item.session))
+      continue;
+    recorded.add(item.session);
+    await emit(await resolveFactory(file), { type: "attention.resolved", source, data: { session: item.session, reason } });
+  }
+  return scan;
+}
+async function sendAnswer(item, index) {
+  if (item.kind !== "ask-user" || !item.options?.length) {
+    throw fail(409, "This prompt has no options to pick here. Answer it in its pane.");
+  }
+  if (!Number.isSafeInteger(index) || index < 0 || index >= item.options.length) {
+    throw fail(400, `Option must be a whole number from 0 to ${item.options.length - 1}.`);
+  }
+  const { pane } = item;
+  if (typeof pane !== "string" || !/^block:[\w-]+$/.test(pane)) {
+    throw fail(409, "This prompt has no pane to answer in.");
+  }
+  const live = await liveBlocks();
+  if (!live)
+    throw fail(502, "Rex did not list the panes, so the answer was not sent.");
+  const block = live.find(({ id }) => sameId(id, pane));
+  if (!block)
+    throw fail(409, "The pane of this prompt no longer exists, so it was not answered.");
+  try {
+    await run("rex", ["--autostart=false", "send-key", "-s", block.session, "-b", block.id, ...answerKeys(index)], { timeout: 1e4 });
+  } catch (error) {
+    const { stderr, message } = error;
+    const reason = String(stderr ?? message).trim().split(`
+`)[0];
+    throw fail(502, `Rex could not send the answer: ${reason}`);
+  }
+}
+var errorCode2 = (error) => error.code, run, tailBytes, maxTailBytes, lookBackMs = 60000, expireMs, bare = (id) => id.replace(/^\w+:/, ""), sameId = (a, b) => bare(a).endsWith(bare(b)) || bare(b).endsWith(bare(a)), sessionState = () => process.env.FACTORY_SESSION_STATE ?? join5(homedir3(), ".copilot", "session-state"), rexLines = async (prefix, args) => {
+  const { stdout } = await run("rex", ["--autostart=false", ...args], { timeout: 1e4 });
+  return stdout.split(`
+`).map((line) => line.trim()).filter((line) => line.startsWith(prefix));
+}, fail = (status, message) => Object.assign(new Error(message), { status }), answerKeys = (index) => [...Array(index).fill("down"), "enter"];
+var init_attention = __esm(() => {
+  init_broker();
+  init_state_dir();
+  run = promisify(execFile);
+  tailBytes = 256 * 1024;
+  maxTailBytes = 64 * 1024 * 1024;
+  expireMs = 24 * 3600000;
+});
+
+// plugins/factory/skills/lifecycle/gate.ts
+import { spawnSync } from "node:child_process";
+import { readFileSync as readFileSync2 } from "node:fs";
+import { basename as basename5, dirname as dirname4, join as join6 } from "node:path";
+function factoryFile(cwd, env = process.env) {
+  if (env.FACTORY_FILE)
+    return env.FACTORY_FILE;
+  const remote = spawnSync("git", ["-C", cwd, "remote", "get-url", "origin"], { encoding: "utf8", timeout: 5000 });
+  const match = remote.status === 0 && remote.stdout.trim().match(/[:/]([^/:]+)\/([^/]+?)(?:\.git)?\/?$/);
+  return match ? stateFile(`${match[1]}.${match[2]}-factory.json`) : null;
+}
+function lockSession(lock) {
+  try {
+    const session = JSON.parse(read(join6(lock, "owner.json")) ?? "null")?.copilot_session;
+    if (typeof session === "string" && session)
+      return session;
+  } catch {}
+  return read(join6(lock, "owner"))?.match(/\bsession\s+([\w-]+)/)?.[1] ?? null;
+}
+function ownsLock(file, sessionId) {
+  return Boolean(file && sessionId && lockSession(lockPath(file)) === sessionId);
+}
+function isCoordinator(input, env = process.env) {
+  if (env.FACTORY_COORDINATOR === "0")
+    return false;
+  if (env.FACTORY_COORDINATOR === "1")
+    return true;
+  const sessionId = hookSession(input);
+  return sessionId !== null && ownsLock(factoryFile(input?.cwd ?? process.cwd(), env), sessionId);
+}
+function hooksInactive(file, env = process.env) {
+  const lock = lockPath(file);
+  if (!read(join6(lock, "owner.json")) && !read(join6(lock, "owner")))
+    return null;
+  if (env.FACTORY_COORDINATOR === "0")
+    return "FACTORY_COORDINATOR=0 turns the hooks off";
+  if (env.FACTORY_COORDINATOR === "1")
+    return null;
+  const owner = lockSession(lock);
+  if (!owner)
+    return `${lock} records no Copilot session. Write owner.json with copilot_session.`;
+  const session = env.COPILOT_AGENT_SESSION_ID;
+  return session && session !== owner ? `${lock} records session ${owner}, not this session ${session}` : null;
+}
+var lockPath = (file) => join6(dirname4(file), `${basename5(file, ".json")}.lock`), read = (path) => {
+  try {
+    return readFileSync2(path, "utf8");
+  } catch {
+    return null;
+  }
+}, hookSession = (input) => input?.sessionId ?? input?.session_id ?? null;
+var init_gate = __esm(() => {
+  init_state_dir();
+});
+
+// plugins/factory/skills/lifecycle/proposals.ts
+import { readFile as readFile7 } from "node:fs/promises";
+async function scanProposals(file) {
+  let text;
+  try {
+    text = await readFile7(eventsFile(file), "utf8");
+  } catch (error) {
+    if (error.code === "ENOENT")
+      return { open: [], decided: [] };
+    throw error;
+  }
+  const proposals = new Map;
+  const decisions = new Map;
+  for (const line of text.split(`
+`)) {
+    if (!line.includes('"improve.'))
+      continue;
+    let event;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    const id = event?.data?.proposal_id;
+    if (typeof id !== "string")
+      continue;
+    if (event.type === "improve.proposed")
+      proposals.set(id, event);
+    else if (event.type === "improve.decided" && !decisions.has(id))
+      decisions.set(id, event);
+  }
+  const open = [];
+  const decided = [];
+  for (const [id, event] of proposals) {
+    const { rule, change, title, evidence, recommended, result } = event.data;
+    const proposal = { id, rule, kind: change, title, evidence, recommended, result, at: event.at };
+    const decision = decisions.get(id);
+    if (decision)
+      decided.push({ ...proposal, decision: decision.data.decision, decided_at: decision.at });
+    else
+      open.push(proposal);
+  }
+  const byTime = (a, b) => Date.parse(a.at) - Date.parse(b.at);
+  return { open: open.sort(byTime), decided };
+}
+async function decideProposal(file, id, decision, note) {
+  const { open, decided } = await scanProposals(file);
+  const done = decided.find((proposal) => proposal.id === id);
+  if (done)
+    return { recorded: false, decision: done.decision };
+  if (!open.some((proposal) => proposal.id === id))
+    return null;
+  const data = { proposal_id: id, decision, ...note ? { note } : {} };
+  await emit(await resolveFactory(file), { type: "improve.decided", source: "dashboard", data });
+  return { recorded: true, decision };
+}
+var init_proposals = __esm(() => {
+  init_broker();
+});
+
+// plugins/factory/skills/lifecycle/reconcile.ts
+var exports_reconcile = {};
+__export(exports_reconcile, {
+  main: () => main4
+});
+import { execFile as execFile2, execFileSync as execFileSync3 } from "node:child_process";
+import { existsSync } from "node:fs";
+import { readFile as readFile8, stat as stat6 } from "node:fs/promises";
+import { dirname as dirname5, join as join7 } from "node:path";
+import { fileURLToPath } from "node:url";
+import { parseArgs as parseArgs4, promisify as promisify2 } from "node:util";
+function isAncestor(cwd, branch) {
+  try {
+    git3(cwd, "merge-base", "--is-ancestor", "HEAD", branch);
+    return true;
+  } catch (error) {
+    if (error.status === 1)
+      return false;
+    throw error;
+  }
+}
+async function closedIssues(pr) {
+  try {
+    const { stdout } = await promisify2(execFile2)("gh", ["pr", "view", pr, "--json", "closingIssuesReferences,body"], { timeout: 1e4 });
+    const { closingIssuesReferences, body } = JSON.parse(stdout);
+    const repo = pr.replace(/\/pull\/\d+.*$/, "");
+    return [
+      ...closingIssuesReferences.map((issue) => issue.url),
+      ...[...body.matchAll(closes)].map(([, number]) => `${repo}/issues/${number}`)
+    ];
+  } catch {
+    return [];
+  }
+}
+async function duplicateTasks(file, tasks) {
+  const candidates = tasks.filter((task) => !mergeRefusal(task));
+  const pairs = candidates.flatMap((a, i) => candidates.slice(i + 1).filter((b) => sharesWork(a, b)).map((b) => [a, b]));
+  const open = candidates.filter((task) => task.state !== "resolved" && task.pr && !pairs.some((pair) => pair.includes(task)));
+  const closed = await Promise.all(open.map((task) => closedIssues(task.pr)));
+  open.forEach((task, i) => {
+    for (const url of closed[i].filter(resourceId)) {
+      for (const other of candidates.filter((item) => item !== task && sharesWork({ issue: url, links: [] }, item))) {
+        pairs.push([task, other]);
+      }
+    }
+  });
+  const groups = [];
+  for (const pair of pairs) {
+    const touched = groups.filter((group) => pair.some((task) => group.has(task)));
+    const joined = new Set([...pair, ...touched.flatMap((group) => [...group])]);
+    groups.splice(0, groups.length, ...groups.filter((group) => !touched.includes(group)), joined);
+  }
+  return groups.map((group) => {
+    const [keep, ...rest] = [...group].sort(keepFirst);
+    return {
+      kind: "duplicate-task",
+      keep: keep.id,
+      merge: rest.map((task) => task.id),
+      command: rest.map((task) => `node ${join7(import.meta.dirname, "factory.mjs")} ${file} --merge-task ${keep.id} --from ${task.id}`).join(" && ")
+    };
+  });
+}
+function liveState(session) {
+  const sessions = rexJSON("ls").sessions.map((s) => s.session_id);
+  if (!sessions.some((id) => sameId(id, session)))
+    return { sessionGone: true, windows: [] };
+  return { sessionGone: false, windows: rexJSON("window", "ls", "-s", session).windows.map((w) => w.window_id) };
+}
+async function quietMinutes(worker, resultTime) {
+  if (worker?.status !== "running" || !worker.session)
+    return null;
+  if (resultTime !== null && resultTime > (Date.parse(worker.launched_at ?? "") || 0))
+    return null;
+  const event = await lastEvent(worker.session);
+  if (event?.type !== "assistant.turn_end" || !(Date.now() - event.at > quietAfter))
+    return null;
+  return Math.floor((Date.now() - event.at) / 60000);
+}
+async function reconcile(file, branchOverride, blockedAfter = intervalMs("24h"), attentionAfter = intervalMs("30m")) {
+  const factory = JSON.parse(await readFile8(file, "utf8"));
+  const directory = dirname5(file);
+  const findings = [];
+  const errors = [];
+  const open = factory.tasks.filter((task) => task.state !== "resolved");
+  if ((factory.status === "active" || open.length > 0) && await waiterPid(await resolveFactory(file)) === null) {
+    findings.push({ kind: "no-waiter", status: factory.status ?? null, open: open.length });
+  }
+  const inactive = hooksInactive(file);
+  if (inactive)
+    findings.push({ kind: "hooks-inactive", reason: inactive });
+  findings.push(...await duplicateTasks(file, factory.tasks));
+  let live;
+  const rex = () => {
+    if (live === undefined) {
+      try {
+        live = factory.rex_session ? liveState(factory.rex_session) : null;
+      } catch (error) {
+        errors.push(`rex: ${error.message.split(`
+`)[0]}`);
+        live = null;
+      }
+    }
+    return live;
+  };
+  const openWindows = () => rex()?.windows ?? [];
+  const missing = [];
+  const checkMissing = (worker, finding) => {
+    if (worker?.status !== "running" || !rex())
+      return;
+    if (!worker.window || !openWindows().some((id) => sameId(id, worker.window))) {
+      missing.push({
+        ...finding,
+        window: worker.window ?? null,
+        pane: worker.pane ?? null,
+        brief: worker.brief ?? null,
+        result: worker.result ?? null
+      });
+    }
+  };
+  for (const task of open) {
+    for (const [role, worker] of Object.entries(task.workers ?? {})) {
+      const result = worker?.result ? await readJSON(join7(directory, worker.result)) : null;
+      if (result?.outcome === "complete" && Date.parse(result.updated_at) > Date.parse(task.updated_at)) {
+        findings.push({
+          kind: "unprocessed-result",
+          task: task.id,
+          state: task.state,
+          role,
+          result: worker?.result,
+          head: result.head ?? null
+        });
+      } else {
+        checkMissing(worker, { kind: "worker-missing", task: task.id, role, worktree: task.worktree?.path ?? null });
+      }
+      const resultFile = worker?.result ? join7(directory, worker.result) : null;
+      const resultTime = resultFile ? await stat6(resultFile).then(({ mtimeMs }) => mtimeMs, () => null) : null;
+      const idle = await quietMinutes(worker, resultTime);
+      if (idle !== null)
+        findings.push({ kind: "worker-quiet", task: task.id, role, idle_minutes: idle });
+    }
+    const blocked = task.state === "blocked" ? task.blocker : null;
+    if (blocked && Date.now() - Date.parse(blocked.since) > blockedAfter) {
+      findings.push({
+        kind: "stale-blocked",
+        task: task.id,
+        class: blocked.class ?? null,
+        owner: blocked.owner ?? null,
+        since: blocked.since,
+        reason: blocked.reason
+      });
+    }
+    if (!task.worktree?.path || task.issue || task.pr)
+      continue;
+    try {
+      const ahead = Number(git3(task.worktree.path, "rev-list", "--count", `${defaultBranch(task.worktree.path, branchOverride) ?? "main"}..HEAD`));
+      if (ahead > 0) {
+        findings.push({
+          kind: "branch-ahead",
+          task: task.id,
+          state: task.state,
+          branch: git3(task.worktree.path, "rev-parse", "--abbrev-ref", "HEAD"),
+          ahead
+        });
+      }
+    } catch {
+      errors.push(`${task.id}: cannot read worktree ${task.worktree.path}.`);
+    }
+  }
+  const resolved = factory.tasks.filter((task) => task.state === "resolved");
+  for (const task of resolved) {
+    const worktree = task.worktree;
+    if (task.resolution?.outcome !== "merged" || !worktree?.path || !existsSync(worktree.path))
+      continue;
+    try {
+      if (git3(worktree.path, "status", "--porcelain") !== "" || !(task.pr || isAncestor(worktree.path, defaultBranch(worktree.path, branchOverride) ?? "main")))
+        continue;
+      const finding = {
+        kind: "merged-worktree",
+        task: task.id,
+        path: worktree.path,
+        created_by_run: worktree.created_by_run
+      };
+      if (task.pr) {
+        const branch = git3(worktree.path, "rev-parse", "--abbrev-ref", "HEAD");
+        finding.command = `node ${worktreeScript} delete ${branch} --merged-pr ${task.pr}`;
+      }
+      findings.push(finding);
+    } catch {
+      errors.push(`${task.id}: cannot read worktree ${worktree.path}.`);
+    }
+  }
+  for (const task of resolved) {
+    for (const [role, worker] of Object.entries(task.workers ?? {})) {
+      if (worker?.status !== "running")
+        continue;
+      findings.push({
+        kind: "stale-running",
+        task: task.id,
+        role,
+        window: worker.window ?? null,
+        fix: `node ${join7(import.meta.dirname, "factory.mjs")} ${file} --task ${task.id} --workers '${JSON.stringify({ [role]: { status: "closed" } })}'`
+      });
+    }
+  }
+  if (resolved.some((task) => Object.values(task.workers ?? {}).some((w) => w?.window))) {
+    for (const task of resolved) {
+      for (const [role, worker] of Object.entries(task.workers ?? {})) {
+        const window = openWindows().find((id) => worker?.window && sameId(id, worker.window));
+        if (window)
+          findings.push({ kind: "open-window", task: task.id, role, window });
+      }
+    }
+  }
+  for (const rule of factory.rules ?? []) {
+    const worker = rule.worker;
+    const file = worker?.result ? join7(directory, worker.result) : null;
+    const result = file ? await readJSON(file) : null;
+    const at = result && (Date.parse(result.updated_at) || (await stat6(file)).mtimeMs);
+    const finished = result?.outcome === "complete" && (!rule.last_run_at || at > Date.parse(rule.last_run_at));
+    if (!finished) {
+      checkMissing(worker, { kind: "worker-missing", rule: rule.id, role: "rule", worktree: null });
+      continue;
+    }
+    const window = worker?.window ? openWindows().find((id) => sameId(id, worker.window)) : undefined;
+    if (window || worker?.status === "running") {
+      findings.push({ kind: "rule-worker-done", rule: rule.id, window: window ?? null, result: worker?.result });
+    }
+  }
+  try {
+    const { open: waiting } = await resolveAttention(file, { source: "reconcile" });
+    for (const item of waiting) {
+      if (Date.now() - Date.parse(item.at) <= attentionAfter)
+        continue;
+      findings.push({
+        kind: "attention-stale",
+        task: item.task,
+        title: item.title,
+        role: item.role,
+        attention: item.kind,
+        text: item.text,
+        pane: item.pane,
+        since: item.at
+      });
+    }
+  } catch (error) {
+    errors.push(`attention: ${error.message.split(`
+`)[0]}`);
+  }
+  try {
+    const { open: proposed, decided } = await scanProposals(await resolveFactory(file));
+    const newest = (proposal) => ![...proposed, ...decided].some(({ result, at }) => result === proposal.result && Date.parse(at) > Date.parse(proposal.at));
+    for (const proposal of decided.filter(newest)) {
+      const result = await readJSON(join7(directory, proposal.result));
+      if (!result?.change || result.decision)
+        continue;
+      findings.push({
+        kind: "improve-decided-unapplied",
+        rule: proposal.rule,
+        proposal_id: proposal.id,
+        change: proposal.kind,
+        title: proposal.title,
+        decision: proposal.decision,
+        decided_at: proposal.decided_at,
+        result: proposal.result
+      });
+    }
+  } catch (error) {
+    errors.push(`improve: ${error.message.split(`
+`)[0]}`);
+  }
+  if (missing.length > 0 && rex()?.sessionGone) {
+    findings.push({ kind: "rex-session-missing", session: factory.rex_session, workers: missing.length });
+  }
+  findings.push(...missing);
+  return { findings, errors };
+}
+async function main4(argv) {
+  try {
+    const { values, positionals } = parseArgs4({
+      args: argv,
+      allowPositionals: true,
+      options: {
+        "default-branch": { type: "string" },
+        "blocked-after": { type: "string", default: "24h" },
+        "attention-after": { type: "string", default: "30m" }
+      }
+    });
+    if (positionals.length !== 1)
+      throw new Error(usage3);
+    const duration = (flag) => {
+      try {
+        return intervalMs(values[flag]);
+      } catch {
+        throw new Error(`--${flag} must look like 30m, 24h, or 2d, not ${JSON.stringify(values[flag])}.`);
+      }
+    };
+    console.log(JSON.stringify(await reconcile(positionals[0], values["default-branch"], duration("blocked-after"), duration("attention-after")), null, 2));
+  } catch (error) {
+    console.error(error.message);
+    process.exitCode = 1;
+  }
+}
+var usage3 = "Usage: node reconcile.mjs FACTORY_FILE [--default-branch NAME] [--blocked-after 24h] [--attention-after 30m]", git3 = (cwd, ...args) => execFileSync3("git", ["-C", cwd, ...args], {
+  encoding: "utf8",
+  stdio: ["ignore", "pipe", "ignore"]
+}).trim(), worktreeScript, closes, rexJSON = (...args) => JSON.parse(execFileSync3("rex", ["--autostart=false", ...args, "--json"], {
+  encoding: "utf8",
+  stdio: ["ignore", "pipe", "pipe"],
+  timeout: 1e4
+})), quietAfter;
+var init_reconcile = __esm(() => {
+  init_attention();
+  init_broker();
+  init_factory_data();
+  init_default_branch();
+  init_gate();
+  init_proposals();
+  init_state_dir();
+  worktreeScript = join7(dirname5(fileURLToPath(import.meta.url)), "worktree.mjs");
+  closes = /\b(?:fix(?:e[sd])?|close[sd]?|resolve[sd]?)\s*:?\s+#(\d+)/gi;
+  quietAfter = intervalMs("10m");
+});
+
+// plugins/factory/skills/lifecycle/session-metrics.ts
+var exports_session_metrics = {};
+__export(exports_session_metrics, {
+  main: () => main5,
+  measureFile: () => measureFile,
+  report: () => report
+});
+import { createReadStream } from "node:fs";
+import { homedir as homedir4 } from "node:os";
+import { join as join8, resolve as resolve6 } from "node:path";
+import { createInterface } from "node:readline";
+import { parseArgs as parseArgs5 } from "node:util";
+async function measure(lines, from = null) {
+  const tools = {};
+  const calls = new Map;
+  const commands = { sleep: 0, gh_wait: 0, watch: 0, status_reads: 0 };
+  const usage = { cost: 0, nano_aiu: 0, input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, model_seconds: 0 };
+  const models = new Set;
+  const idle = { ms: 0, over_10_minutes: 0, longest: 0 };
+  let userMessages = 0;
+  let turns = 0;
+  let waitingSince = null;
+  let began = null;
+  let first = null;
+  let last = null;
+  let skipped = 0;
+  let events = 0;
+  const endIdle = (at) => {
+    if (waitingSince === null)
+      return;
+    const gap = at - waitingSince;
+    idle.ms += gap;
+    idle.longest = Math.max(idle.longest, gap);
+    if (gap > idleOver)
+      idle.over_10_minutes += 1;
+    waitingSince = null;
+  };
+  for await (const line of lines) {
+    if (!line)
+      continue;
+    let event;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      skipped += 1;
+      continue;
+    }
+    const at = Date.parse(event.timestamp);
+    if (Number.isNaN(at))
+      continue;
+    began ??= at;
+    if (from !== null && at < from)
+      continue;
+    events += 1;
+    first ??= at;
+    last = at;
+    const data = event.data ?? {};
+    if (event.type === "user.message") {
+      userMessages += 1;
+      endIdle(at);
+    } else if (event.type === "assistant.turn_start") {
+      turns += 1;
+      endIdle(at);
+    } else if (event.type === "assistant.turn_end") {
+      waitingSince = at;
+    } else if (event.type === "tool.execution_start") {
+      const toolName = data.toolName;
+      calls.set(data.toolCallId, toolName);
+      tools[toolName] ??= { calls: 0, failures: 0 };
+      tools[toolName].calls += 1;
+      const command = data.arguments?.command;
+      if (typeof command === "string") {
+        for (const [name, pattern] of Object.entries(commandPatterns)) {
+          if (pattern.test(command))
+            commands[name] += 1;
+        }
+        if (statusRead.test(command) && !commandPatterns.watch.test(command))
+          commands.status_reads += 1;
+      }
+    } else if (event.type === "tool.execution_complete") {
+      if (data.success === false && calls.has(data.toolCallId))
+        tools[calls.get(data.toolCallId)].failures += 1;
+    } else if (event.type === "session.usage_record" && data.usage) {
+      const item = data.usage;
+      usage.cost += item.cost ?? 0;
+      usage.nano_aiu += item.copilotUsage?.totalNanoAiu ?? 0;
+      usage.input_tokens += item.inputTokens ?? 0;
+      usage.output_tokens += item.outputTokens ?? 0;
+      usage.cache_read_tokens += item.cacheReadTokens ?? 0;
+      usage.model_seconds += (item.duration ?? 0) / 1000;
+      if (item.model)
+        models.add(item.model);
+    }
+  }
+  return {
+    events,
+    skipped_lines: skipped,
+    started_at: first === null ? null : new Date(first).toISOString(),
+    ended_at: last === null ? null : new Date(last).toISOString(),
+    wall_minutes: first === null ? 0 : minutes(last - first),
+    user_messages: userMessages,
+    turns,
+    idle: { minutes: minutes(idle.ms), over_10_minutes: idle.over_10_minutes, longest_minutes: minutes(idle.longest) },
+    tools,
+    commands,
+    usage: { ...usage, model_seconds: Math.round(usage.model_seconds), models: [...models].sort() },
+    ...from === null ? {} : { started_before_window: began !== null && began < from }
+  };
+}
+function sum(sessions) {
+  const total = {
+    sessions: sessions.length,
+    wall_minutes: 0,
+    user_messages: 0,
+    turns: 0,
+    idle_minutes: 0,
+    idle_over_10_minutes: 0,
+    ask_user_calls: 0,
+    commands: { sleep: 0, gh_wait: 0, watch: 0, status_reads: 0 },
+    usage: { cost: 0, nano_aiu: 0, input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, model_seconds: 0 }
+  };
+  for (const item of sessions) {
+    total.wall_minutes += item.wall_minutes;
+    total.user_messages += item.user_messages;
+    total.turns += item.turns;
+    total.idle_minutes += item.idle.minutes;
+    total.idle_over_10_minutes += item.idle.over_10_minutes;
+    total.ask_user_calls += item.tools.ask_user?.calls ?? 0;
+    for (const key of Object.keys(total.commands))
+      total.commands[key] += item.commands[key];
+    for (const key of Object.keys(total.usage))
+      total.usage[key] += item.usage[key];
+  }
+  for (const key of ["wall_minutes", "idle_minutes"])
+    total[key] = minutes(total[key] * 60000);
+  return total;
+}
+async function measureFile(file, from = null) {
+  const input = createReadStream(file, "utf8");
+  return measure(createInterface({ input, crlfDelay: Infinity }), from);
+}
+async function report(entries, directory, activeSince = null) {
+  const from = activeSince === null ? null : Date.parse(activeSince);
+  const sessions = [];
+  const missing = [];
+  for (const entry of entries) {
+    try {
+      const metrics = await measureFile(join8(directory, entry.id, "events.jsonl"), from);
+      if (from !== null && metrics.events === 0)
+        continue;
+      sessions.push({ id: entry.id, role: entry.role, task: entry.task, rule: entry.rule, ...metrics });
+    } catch (error) {
+      if (error.code !== "ENOENT")
+        throw error;
+      missing.push(entry.id);
+    }
+  }
+  const window = from === null ? {} : {
+    active_since: new Date(from).toISOString(),
+    started_before_window: sessions.filter((item) => item.started_before_window).map((item) => item.id)
+  };
+  return { ...window, totals: sum(sessions), missing, sessions };
+}
+async function main5(argv) {
+  let values;
+  let positionals;
+  try {
+    ({ values, positionals } = parseArgs5({
+      args: argv,
+      options: {
+        help: { type: "boolean", short: "h" },
+        registry: { type: "string" },
+        since: { type: "string" },
+        "active-since": { type: "string" },
+        directory: { type: "string", default: join8(homedir4(), ".copilot", "session-state") }
+      },
+      allowPositionals: true
+    }));
+    if (values.help) {
+      console.log(`Measure Copilot sessions without reading their content.
+
+Usage: node session-metrics.mjs --registry FILE [--since ISO | --active-since ISO] [--directory DIR]
+       node session-metrics.mjs [--directory DIR] [--active-since ISO] SESSION_UUID...
+
+FILE is the <owner.repo>-factory-sessions.jsonl registry that factory.mjs keeps beside the
+factory file. --since keeps sessions registered at or after that time, and always keeps the
+long-lived factory session (role factory). Their totals are cumulative over the whole session.
+--active-since keeps every session with an event at or after that time, however early it
+started, and counts only the events in the window (window-only deltas). Output then lists
+started_before_window: the sessions that began earlier, and each session has the same flag. A
+tool call that began before the window is not counted as a failure when it ends inside it. DIR defaults to
+~/.copilot/session-state. Prints JSON: totals, missing session IDs, and per-session wall
+minutes, model seconds, user messages, turns, idle time (turn end to the next user message or turn),
+tool call and failure counts, wait/watch command counts, and usage. Tool run times are not
+reported: the event log does not record them reliably.
+Exit: 0 success, 1 I/O or invalid registry, 2 usage.`);
+      return;
+    }
+    if (values.registry === undefined && !positionals.length)
+      throw new Error("Pass --registry FILE or session IDs.");
+    if (values.registry !== undefined && positionals.length)
+      throw new Error("Pass --registry or session IDs, not both.");
+    if (values.since !== undefined && Number.isNaN(Date.parse(values.since)))
+      throw new Error("--since must be an ISO 8601 time.");
+    if (values["active-since"] !== undefined && Number.isNaN(Date.parse(values["active-since"])))
+      throw new Error("--active-since must be an ISO 8601 time.");
+    if (values["active-since"] !== undefined && values.since !== undefined)
+      throw new Error("Pass --since or --active-since, not both.");
+    for (const id of positionals) {
+      if (sessionID(id) !== id)
+        throw new Error(`Not a session UUID: ${id}`);
+    }
+  } catch (error) {
+    console.error(`${error.message}
+Run with --help for usage.`);
+    process.exitCode = 2;
+    return;
+  }
+  try {
+    const entries = values.registry === undefined ? positionals.map((id) => ({ id })) : (await readSessions(resolve6(values.registry))).filter((entry) => values.since === undefined || entry.role === "factory" || Date.parse(entry.at) >= Date.parse(values.since));
+    console.log(JSON.stringify(await report(entries, resolve6(values.directory), values["active-since"] ?? null), null, 2));
+  } catch (error) {
+    console.error(error.message);
+    process.exitCode = 1;
+  }
+}
+var idleOver, minutes = (ms) => Math.round(ms / 600) / 100, commandPatterns, statusRead;
+var init_session_metrics = __esm(() => {
+  init_sessions();
+  idleOver = 10 * 60000;
+  commandPatterns = {
+    sleep: /\bsleep\s+\d/,
+    gh_wait: /\bgh\s+wait\b|\bpr-watch\.mjs\b/,
+    watch: /--watch\b|\bgh\s+run\s+watch\b/
+  };
+  statusRead = /\bgh\s+(?:pr\s+(?:view|checks)|run\s+(?:view|list))\b/;
+});
+
+// plugins/factory/skills/lifecycle/usage.ts
+import { stat as stat7 } from "node:fs/promises";
+import { join as join9 } from "node:path";
+function remember(file, entry) {
+  cache.delete(file);
+  cache.set(file, entry);
+  if (cache.size > maxCached)
+    cache.delete(cache.keys().next().value);
+}
+async function readLog(file) {
+  try {
+    const { mtimeMs, size } = await stat7(file);
+    if (size > maxLogBytes)
+      return null;
+    const stamp = `${mtimeMs}-${size}`;
+    const hit = cache.get(file);
+    if (hit && (hit.stamp === stamp || Date.now() - hit.at < refreshMs))
+      return hit.usage;
+    if (!reading.has(file)) {
+      reading.set(file, measureFile(file).then((metrics) => {
+        const { usage } = metrics;
+        const credits = usage.nano_aiu > 0 ? Math.round(usage.nano_aiu / 1e7) / 100 : null;
+        const value = metrics.events === 0 ? null : {
+          models: usage.models,
+          credits,
+          usd: usdOf(credits),
+          input_tokens: usage.input_tokens,
+          output_tokens: usage.output_tokens,
+          active_minutes: metrics.wall_minutes
+        };
+        remember(file, { stamp, at: Date.now(), usage: value });
+        return value;
+      }).finally(() => reading.delete(file)));
+    }
+    return await reading.get(file);
+  } catch {
+    return null;
+  }
+}
+function total(items) {
+  const found = items.filter((item) => Boolean(item));
+  if (!found.length)
+    return null;
+  const credited = found.every((item) => item.credits !== null);
+  const credits = credited ? Math.round(found.reduce((sum, item) => sum + item.credits, 0) * 100) / 100 : null;
+  return {
+    models: [...new Set(found.flatMap((item) => item.models))].sort(),
+    credits,
+    usd: usdOf(credits),
+    input_tokens: found.reduce((sum, item) => sum + item.input_tokens, 0),
+    output_tokens: found.reduce((sum, item) => sum + item.output_tokens, 0),
+    active_minutes: Math.round(found.reduce((sum, item) => sum + item.active_minutes, 0) * 100) / 100
+  };
+}
+async function taskUsage(task, directory, read = sessionUsage) {
+  const workers = {};
+  const seen = new Map;
+  for (const [role, worker] of Object.entries(task.workers)) {
+    if (!worker)
+      continue;
+    const id = sessionID(worker.session);
+    workers[role] = id === null ? null : await read(id, directory);
+    if (id !== null)
+      seen.set(id, workers[role]);
+  }
+  return {
+    started_at: task.history[0].at,
+    ended_at: task.state === "resolved" ? task.history.at(-1).at : null,
+    workers,
+    total: total([...seen.values()])
+  };
+}
+async function mapLimit(items, limit, fn) {
+  const results = new Array(items.length);
+  let next = 0;
+  const run = async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await fn(items[index]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, run));
+  return results;
+}
+async function factoryUsage(data, directory) {
+  const ids = new Set;
+  for (const task of data.tasks) {
+    for (const worker of Object.values(task.workers)) {
+      const id = worker && sessionID(worker.session);
+      if (id)
+        ids.add(id);
+    }
+  }
+  const list = [...ids];
+  const results = await mapLimit(list, readers, (id) => sessionUsage(id, directory));
+  const measured = new Map(list.map((id, index) => [id, results[index]]));
+  const read = (id) => measured.get(id);
+  const usage = {};
+  for (const task of data.tasks)
+    usage[task.id] = await taskUsage(task, directory, read);
+  return usage;
+}
+var maxLogBytes, refreshMs = 30000, readers = 4, maxCached = 1024, usdPerCredit = 0.01, usdOf = (credits) => credits === null ? null : Math.round(credits * usdPerCredit * 1e4) / 1e4, cache, reading, sessionUsage = (session, directory) => {
+  const id = sessionID(session);
+  return id === null ? null : readLog(join9(directory, id, "events.jsonl"));
+};
+var init_usage = __esm(() => {
+  init_session_metrics();
+  init_sessions();
+  maxLogBytes = 512 * 1024 * 1024;
+  cache = new Map;
+  reading = new Map;
+});
+
+// plugins/factory/skills/lifecycle/serve.ts
+var exports_serve = {};
+__export(exports_serve, {
+  main: () => main6
+});
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createServer } from "node:http";
+import { readFile as readFile9, readdir as readdir3, realpath as realpath4, stat as stat8 } from "node:fs/promises";
+import { homedir as homedir5, networkInterfaces } from "node:os";
+import { dirname as dirname6, join as join10, resolve as resolve7 } from "node:path";
+import { fileURLToPath as fileURLToPath2 } from "node:url";
+import { parseArgs as parseArgs6 } from "node:util";
+import { gzipSync } from "node:zlib";
+function lanAddresses() {
+  return Object.values(networkInterfaces()).flat().filter((entry) => entry && entry.family === "IPv4" && !entry.internal).map((entry) => entry.address);
+}
+async function persistedToken(path) {
+  try {
+    const saved = (await readFile9(path, "utf8")).trim();
+    if (tokenPattern.test(saved))
+      return saved;
+  } catch (error) {
+    if (errorCode3(error) !== "ENOENT")
+      throw error;
+  }
+  const token = randomBytes(24).toString("base64url");
+  await import_write_file_atomic3.default(path, `${token}
+`, { mode: 384 });
+  return token;
+}
+async function serve(argv) {
+  let options;
+  try {
+    options = parseArgs6({
+      args: argv,
+      options: {
+        help: { type: "boolean", short: "h" },
+        directory: { type: "string" },
+        port: { type: "string", default: "8766" },
+        host: { type: "string", default: "127.0.0.1" },
+        token: { type: "string" }
+      }
+    }).values;
+    if (!/^\d+$/.test(options.port) || Number(options.port) > 65535) {
+      throw new Error("--port must be an integer from 0 to 65535.");
+    }
+    options.host = options.host.toLowerCase();
+    if (options.token !== undefined && !tokenPattern.test(options.token)) {
+      throw new Error("--token must be at least 16 characters from A-Z a-z 0-9 . _ ~ -");
+    }
+  } catch (error) {
+    console.error(`${errorMessage2(error)}
+Run with --help for usage.`);
+    process.exitCode = 2;
+    return;
+  }
+  if (options.help) {
+    console.log(`Serve the factory dashboard on 127.0.0.1 (no token) or on --host (token required).
+
+Usage: node serve.mjs [--directory PATH] [--port PORT] [--host ADDR] [--token TOKEN]
+       bun serve.mjs [--directory PATH] [--port PORT] [--host ADDR] [--token TOKEN]
+
+  --directory PATH  Use only this state directory. Default: both
+                    ~/.local/state/copilot-factory and the legacy
+                    ~/.local/state/copilot-coordinator, if they exist.
+                    The new directory wins when a name is in both.
+  --port PORT       Port to listen on (default: 8766; 0 chooses a free port)
+  --host ADDR       Address to bind (default: 127.0.0.1). A non-loopback address,
+                    such as 0.0.0.0, makes every request need an access token.
+                    The page uses plain HTTP, so the token travels in clear text.
+                    Use only a trusted network.
+  --token TOKEN     Access token for a non-loopback --host (at least 16 characters
+                    from A-Z a-z 0-9 . _ ~ -). Default: a random token. The server
+                    saves it (mode 0600) as dashboard-token in the state directory
+                    and uses it again at the next start. The server does not save a
+                    --token value. A loopback host ignores the token.
+  -h, --help        Show this help
+
+Open the printed HTTP URL. The page lists every <owner.repo>-factory.json in the directories.
+To stop the server, press Ctrl+C. The server needs no packages.
+An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
+    return;
+  }
+  const checked = options.directory ? [resolve7(options.directory)] : candidates(homedir5());
+  let directories = [];
+  async function resolveDirectories() {
+    const found = [];
+    for (const configured of options.directory ? checked : stateDirectories()) {
+      try {
+        found.push({ configured, directory: await realpath4(configured) });
+      } catch (error) {
+        if (errorCode3(error) !== "ENOENT")
+          throw error;
+      }
+    }
+    directories = found;
+  }
+  await resolveDirectories();
+  if (!directories.length)
+    throw new Error(`No state directory exists. Checked: ${checked.join(", ")}`);
+  const assets = dirname6(fileURLToPath2(import.meta.url));
+  async function localFile(value) {
+    if (!value || value.includes("\x00"))
+      throw new HttpError(400, "A filename is required.");
+    for (const { configured, directory } of directories) {
+      const candidate = resolve7(configured, value);
+      if (dirname6(candidate) !== directory && dirname6(candidate) !== configured) {
+        throw new HttpError(403, "File must be directly inside the configured state directory.");
+      }
+      let target;
+      try {
+        target = await realpath4(candidate);
+      } catch (error) {
+        if (errorCode3(error) === "ENOENT")
+          continue;
+        throw error;
+      }
+      if (dirname6(target) !== directory || !(await stat8(target)).isFile()) {
+        throw new HttpError(403, "File must be a regular file inside the state directory.");
+      }
+      return target;
+    }
+    throw new HttpError(404, `${value} is not in the state directory.`);
+  }
+  const parsed = new Map;
+  async function factoryTag(file) {
+    if (!file || !factoryFile2.test(file) || file.includes("/")) {
+      throw new HttpError(400, "Choose a <owner.repo>-factory.json file.");
+    }
+    const target = await localFile(file);
+    const { mtimeNs, size, ino } = await stat8(target, { bigint: true });
+    return { file, target, tag: `"${[mtimeNs, size, ino].map((value) => value.toString(36)).join("-")}"` };
+  }
+  async function readFactory({ file, target, tag }) {
+    const cached = parsed.get(target);
+    if (cached?.tag === tag)
+      return cached.data;
+    const data = JSON.parse(await readFile9(target, "utf8"));
+    try {
+      validate(data);
+    } catch (error) {
+      throw new HttpError(400, `${file}: ${errorMessage2(error)}`);
+    }
+    parsed.set(target, { tag, data });
+    return data;
+  }
+  const scans = new Map;
+  const scanned = new Map;
+  const scanTtlMs = 60000;
+  function pendingAttention(target) {
+    if (!scans.has(target)) {
+      scans.set(target, (async () => {
+        const last = scanned.get(target);
+        if (last && Date.now() - last.at < scanTtlMs && last.stamp === await scanStamp(target, last.sessions)) {
+          return last.open;
+        }
+        const { open } = await resolveAttention(target, { source: "attention" });
+        const sessions = [...new Set(open.map((item) => item.session))];
+        scanned.set(target, { at: Date.now(), sessions, stamp: await scanStamp(target, sessions), open });
+        return open;
+      })().finally(() => scans.delete(target)));
+    }
+    return scans.get(target);
+  }
+  const proposalScans = new Map;
+  async function openProposals(target) {
+    const stamp = await scanStamp(target);
+    if (proposalScans.get(target)?.stamp !== stamp) {
+      proposalScans.set(target, { stamp, open: (await scanProposals(target)).open });
+    }
+    return proposalScans.get(target).open;
+  }
+  const briefName = (file, task, role, worker) => worker.brief ?? `${file.replace(factoryFile2, "")}-${task.id}-${role}-brief.md`;
+  async function taskBriefs(file, data) {
+    const briefs = {};
+    for (const task of data.tasks) {
+      for (const [role, worker] of Object.entries(task.workers)) {
+        if (!worker)
+          continue;
+        const name = briefName(file, task, role, worker);
+        if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(name))
+          continue;
+        try {
+          await localFile(name);
+        } catch {
+          continue;
+        }
+        (briefs[task.id] ??= {})[role] = name;
+      }
+    }
+    return briefs;
+  }
+  async function factoryView(entry) {
+    const attention = (await pendingAttention(entry.target)).map(({ id, session, kind, text, options, role, pane, rex_session, task, at }) => ({ id, session, kind, text, options, role, pane, rex_session: rex_session ?? null, task, at })).sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+    const proposals = await openProposals(entry.target);
+    const data = await readFactory(entry);
+    const usage = await factoryUsage(data, sessionStateDirectory());
+    const briefs = await taskBriefs(entry.file, data);
+    const digest = createHash("sha1").update(JSON.stringify([attention, proposals, usage, briefs])).digest("base64url");
+    return {
+      tag: `${entry.tag.slice(0, -1)}-${digest}"`,
+      body: async () => ({ ...await readFactory(entry), attention, proposals, usage, briefs })
+    };
+  }
+  async function loadFactory(file) {
+    return readFactory(await factoryTag(file));
+  }
+  const listings = new Map;
+  async function factoryNamesIn(directory) {
+    const { mtimeMs } = await stat8(directory);
+    const cached = listings.get(directory);
+    if (cached?.mtimeMs === mtimeMs)
+      return cached.names;
+    const names = [];
+    for (const entry of await readdir3(directory, { withFileTypes: true })) {
+      if (!entry.isFile() && !entry.isSymbolicLink() || !factoryFile2.test(entry.name) || entry.name.startsWith("."))
+        continue;
+      names.push(entry.name);
+    }
+    listings.set(directory, { mtimeMs, names });
+    return names;
+  }
+  async function factoryNames() {
+    await resolveDirectories();
+    const names = new Set;
+    for (const { directory } of directories) {
+      for (const name of await factoryNamesIn(directory))
+        names.add(name);
+    }
+    return [...names].sort();
+  }
+  async function listingTags() {
+    const entries = await Promise.all((await factoryNames()).map(async (file) => {
+      try {
+        return await factoryTag(file);
+      } catch (error) {
+        return { file, error };
+      }
+    }));
+    const tag = createHash("sha1").update(JSON.stringify(entries.map((entry) => [entry.file, "tag" in entry ? entry.tag : errorMessage2(entry.error)]))).digest("base64url");
+    return { entries, tag: `"${tag}"` };
+  }
+  async function listFactories(entries) {
+    const factories = [];
+    const errors = [];
+    for (const entry of entries) {
+      try {
+        if ("error" in entry)
+          throw entry.error;
+        const data = await readFactory(entry);
+        factories.push({
+          file: entry.file,
+          id: data.id,
+          project: data.project,
+          goal: data.goal,
+          status: data.status,
+          updated_at: data.updated_at,
+          task_count: data.tasks.length,
+          counts: countByState(data.tasks)
+        });
+      } catch (error) {
+        errors.push({ file: entry.file, error: errorMessage2(error) });
+      }
+    }
+    factories.sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at) || a.file.localeCompare(b.file));
+    errors.sort((a, b) => a.file.localeCompare(b.file));
+    return { directories: directories.map(({ directory }) => directory), factories, errors };
+  }
+  function send(response, status, body, type = "application/json; charset=utf-8", headers = {}) {
+    response.writeHead(status, {
+      "Content-Type": type,
+      "Cache-Control": "no-store",
+      "X-Content-Type-Options": "nosniff",
+      ...headers
+    });
+    response.end(typeof body === "object" && !Buffer.isBuffer(body) ? JSON.stringify(body) : body);
+  }
+  const acceptsGzip = (request) => (request.headers["accept-encoding"] ?? "").split(",").some((part) => {
+    const [name, ...params] = part.trim().toLowerCase().split(";");
+    return name === "gzip" && !params.some((param) => /^\s*q=0(\.0*)?\s*$/.test(param));
+  });
+  const compressed = new Map;
+  async function sendBody(request, response, key, tag, body, type, headers = {}) {
+    headers = { ...headers, Vary: "Accept-Encoding" };
+    if (!acceptsGzip(request))
+      return send(response, 200, await body(), type, headers);
+    let entry = compressed.get(key);
+    if (entry?.tag !== tag) {
+      const data = await body();
+      entry = { tag, gzip: gzipSync(typeof data === "object" && !Buffer.isBuffer(data) ? JSON.stringify(data) : data, { level: 1 }) };
+      compressed.set(key, entry);
+    }
+    send(response, 200, entry.gzip, type, { ...headers, "Content-Encoding": "gzip" });
+  }
+  async function sendAsset(request, response, name, type) {
+    const body = await readFile9(join10(assets, name));
+    await sendBody(request, response, name, createHash("sha1").update(body).digest("base64url"), () => body, type);
+  }
+  async function sendTagged(request, response, key, tag, body) {
+    const seen = request.headers["if-none-match"]?.split(",").map((value) => value.trim().replace(/^W\//, ""));
+    if (seen?.includes(tag) || seen?.includes("*")) {
+      response.writeHead(304, { "Cache-Control": "no-store", ETag: tag, "X-Content-Type-Options": "nosniff" });
+      response.end();
+    } else {
+      await sendBody(request, response, key, tag, body, undefined, { ETag: tag });
+    }
+  }
+  async function readBody(request, type) {
+    if (request.headers.origin !== `http://${request.headers.host}` || request.headers["sec-fetch-site"] && request.headers["sec-fetch-site"] !== "same-origin") {
+      throw new HttpError(403, "State changes must come from this dashboard.");
+    }
+    if (request.headers["content-type"]?.split(";")[0].trim() !== type) {
+      throw new HttpError(415, `State changes require ${type}.`);
+    }
+    if (Number(request.headers["content-length"]) > maxBody) {
+      throw new HttpError(413, "State change is too large (maximum 16 KiB).");
+    }
+    const chunks = [];
+    let size = 0;
+    for await (const chunk of request) {
+      size += chunk.length;
+      if (size > maxBody)
+        throw new HttpError(413, "State change is too large (maximum 16 KiB).");
+      chunks.push(chunk);
+    }
+    return Buffer.concat(chunks).toString("utf8");
+  }
+  const readJSONBody = async (request) => JSON.parse(await readBody(request, "application/json"));
+  async function write(file, values) {
+    try {
+      return await update(await localFile(file), values, { operator: true });
+    } catch (error) {
+      if (error instanceof ConflictError)
+        throw new HttpError(409, error.message);
+      if (errorCode3(error))
+        throw error;
+      throw new HttpError(400, errorMessage2(error));
+    }
+  }
+  async function moveTask(request, file) {
+    const body = await readJSONBody(request);
+    if (!isObject(body) || Object.keys(body).some((key) => !["task", "state", "comment", "revision", "resolution"].includes(key)) || !["task", "state", "comment"].every((key) => typeof body[key] === "string" && body[key].trim()) || !Number.isSafeInteger(body.revision) || body.revision < 0) {
+      throw new HttpError(400, "The request needs task, state, a comment that is not empty, and a task revision that is not negative.");
+    }
+    const data = await loadFactory(file);
+    if (!data.tasks.some((task) => task.id === body.task))
+      throw new HttpError(404, "Task not found.");
+    return write(file, {
+      task: body.task,
+      state: body.state,
+      note: body.comment,
+      "expected-revision": String(body.revision),
+      resolution: body.resolution
+    });
+  }
+  const answering = new Set;
+  async function answerAttention(request, file) {
+    const body = await readJSONBody(request);
+    if (!isObject(body) || Object.keys(body).some((key) => !["id", "index"].includes(key)) || typeof body.id !== "string" || !Number.isSafeInteger(body.index) || body.index < 0) {
+      throw new HttpError(400, "The request needs the id of the waiting item and an option index of 0 or more.");
+    }
+    const { target } = await factoryTag(file);
+    const item = (await pendingAttention(target)).find(({ id }) => id === body.id);
+    if (!item)
+      throw new HttpError(409, "The prompt is closed.");
+    if (answering.has(item.id))
+      throw new HttpError(409, "The factory already sends an answer for this prompt.");
+    answering.add(item.id);
+    try {
+      await sendAnswer(item, body.index);
+    } catch (error) {
+      scanned.delete(target);
+      throw error;
+    } finally {
+      answering.delete(item.id);
+    }
+    return { sent: true };
+  }
+  let deciding = Promise.resolve();
+  async function decideImprove(request, file) {
+    const body = await readJSONBody(request);
+    if (!isObject(body) || Object.keys(body).some((key) => !["proposal_id", "decision", "note"].includes(key)) || typeof body.proposal_id !== "string" || !["accepted", "declined"].includes(body.decision) || !(body.note === undefined || typeof body.note === "string")) {
+      throw new HttpError(400, "The request needs proposal_id and decision (accepted or declined). The note is optional.");
+    }
+    const { target } = await factoryTag(file);
+    const run = deciding.then(() => decideProposal(target, body.proposal_id, body.decision, body.note));
+    deciding = run.catch(() => {});
+    const result = await run;
+    if (!result)
+      throw new HttpError(404, "The proposal does not exist.");
+    return result;
+  }
+  async function setSettings(request, file) {
+    const body = await readJSONBody(request);
+    const known = (value, keys) => isObject(value) && Object.keys(value).every((key) => keys.includes(key));
+    const fields = { limits: ["investigation", "implementation"], lever: ["spend", "autonomy_cap"] };
+    const sections = isObject(body?.set) ? Object.keys(body.set) : [];
+    if (!known(body, ["set", "expected"]) || !known(body.expected, ["budget", ...Object.keys(fields)]) || !sections.length || !known(body.set, ["budget", ...Object.keys(fields)]) || sections.some((section) => !Object.hasOwn(body.expected, section)) || sections.includes("budget") && !Number.isSafeInteger(body.set.budget) || !(body.expected.budget === undefined || body.expected.budget === null || Number.isSafeInteger(body.expected.budget)) || Object.entries(fields).some(([section, keys]) => sections.includes(section) && !(known(body.set[section], keys) && known(body.expected[section], keys) && Object.keys(body.set[section]).length && Object.keys(body.set[section]).every((key) => Object.hasOwn(body.expected[section], key))))) {
+      throw new HttpError(400, "The request needs set (budget, limits, or lever values). It also needs expected, with the value that the browser saw for each field.");
+    }
+    await loadFactory(file);
+    const values = {};
+    if (sections.includes("budget")) {
+      values.budget = JSON.stringify({ max_parallel_workers: body.set.budget });
+      values["expected-budget"] = body.expected.budget === null ? "none" : String(body.expected.budget);
+    }
+    for (const section of Object.keys(fields)) {
+      if (!sections.includes(section))
+        continue;
+      values[section] = JSON.stringify(body.set[section]);
+      values[`expected-${section}`] = JSON.stringify(body.expected[section]);
+    }
+    return write(file, values);
+  }
+  const requireToken = !isLoopback(options.host);
+  const token = requireToken ? options.token ?? await persistedToken(join10(directories[0].directory, "dashboard-token")) : undefined;
+  function allowedHosts(port) {
+    const hosts = new Set;
+    const add = (addr) => {
+      hosts.add(`${bracket(addr)}:${port}`);
+      if (port === 80)
+        hosts.add(bracket(addr));
+    };
+    if (isWildcard(options.host)) {
+      add("127.0.0.1");
+      add("localhost");
+      add("::1");
+      for (const addr of lanAddresses())
+        add(addr);
+    } else {
+      add(options.host);
+      if (isLoopback(options.host))
+        add("localhost");
+    }
+    return hosts;
+  }
+  function cookieToken(header) {
+    for (const part of (header ?? "").split(";")) {
+      const at = part.indexOf("=");
+      if (at !== -1 && part.slice(0, at).trim() === "token") {
+        try {
+          return decodeURIComponent(part.slice(at + 1).trim());
+        } catch {
+          return null;
+        }
+      }
+    }
+    return null;
+  }
+  const bearerToken = (header) => /^Bearer (.+)$/.exec(header ?? "")?.[1] ?? null;
+  function checkToken(request, response, url) {
+    if (!requireToken)
+      return false;
+    const queryToken = url.searchParams.get("token");
+    if (queryToken !== null) {
+      if (!sameToken(queryToken, token))
+        throw new HttpError(401, "Missing or invalid access token.");
+      if (request.method !== "GET")
+        return false;
+      url.searchParams.delete("token");
+      response.writeHead(302, {
+        "Set-Cookie": sessionCookie,
+        Location: url.pathname + url.search
+      });
+      response.end();
+      return true;
+    }
+    if (!sameToken(cookieToken(request.headers.cookie) ?? bearerToken(request.headers.authorization), token)) {
+      throw new HttpError(401, "Missing or invalid access token.");
+    }
+    return false;
+  }
+  const sessionCookie = `token=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${60 * 60 * 24 * 30}`;
+  const escapeHTML = (value) => value.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
+  const isPage = (request, url) => request.method === "GET" && /text\/html/.test(request.headers.accept ?? "") && ["/", "/dashboard.html", "/login"].includes(url.pathname);
+  function safeNext(value) {
+    if (typeof value !== "string" || !/^\/(?![/\\])[^\s\\]*$/.test(value))
+      return "/";
+    const target = new URL(value, "http://login.invalid");
+    return target.origin === "http://login.invalid" ? target.pathname + target.search : "/";
+  }
+  function loginPage(response, next, wrong) {
+    send(response, 401, `<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Factory dashboard login</title>
+<style>
+body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;font:16px system-ui,sans-serif;background:#111;color:#eee}
+form{width:min(22rem,100% - 2rem);display:flex;flex-direction:column;gap:1rem}
+input,button{font:inherit;font-size:16px;padding:.9rem;border-radius:.5rem;border:1px solid #555;box-sizing:border-box;width:100%}
+input{background:#222;color:inherit}
+button{background:#3b82f6;border-color:#3b82f6;color:#fff;font-weight:600;cursor:pointer}
+p{margin:0;color:#f87171}
+</style></head><body>
+<form method="post" action="/login">
+<h1>Factory dashboard</h1>${wrong ? `
+<p role="alert">Wrong token</p>` : ""}
+<input type="password" name="token" placeholder="Access token" autocomplete="current-password" autofocus required>
+<input type="hidden" name="next" value="${escapeHTML(next)}">
+<button type="submit">Log in</button>
+</form></body></html>
+`, "text/html; charset=utf-8", {
+      "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'"
+    });
+  }
+  async function login(request, response) {
+    const form = new URLSearchParams(await readBody(request, "application/x-www-form-urlencoded"));
+    const next = safeNext(form.get("next"));
+    if (!sameToken(form.get("token"), token)) {
+      await new Promise((done) => setTimeout(done, 500));
+      return loginPage(response, next, true);
+    }
+    response.writeHead(303, { "Set-Cookie": sessionCookie, Location: next, "Cache-Control": "no-store" });
+    response.end();
+  }
+  const server = createServer(async (request, response) => {
+    try {
+      const port = server.address().port;
+      if (!allowedHosts(port).has(request.headers.host)) {
+        throw new HttpError(403, "Use the printed URL.");
+      }
+      const url = new URL(request.url, `http://127.0.0.1:${port}`);
+      if (requireToken && request.method === "POST" && url.pathname === "/login")
+        return await login(request, response);
+      try {
+        if (checkToken(request, response, url))
+          return;
+      } catch (error) {
+        if (error.status !== 401 || !isPage(request, url))
+          throw error;
+        const queryToken = url.searchParams.has("token");
+        url.searchParams.delete("token");
+        return loginPage(response, url.pathname === "/login" ? "/" : safeNext(url.pathname + url.search), queryToken);
+      }
+      if (request.method === "POST" && url.pathname === "/api/move") {
+        send(response, 200, await moveTask(request, url.searchParams.get("file")));
+      } else if (request.method === "POST" && url.pathname === "/api/settings") {
+        send(response, 200, await setSettings(request, url.searchParams.get("file")));
+      } else if (request.method === "POST" && url.pathname === "/api/attention/answer") {
+        send(response, 200, await answerAttention(request, url.searchParams.get("file")));
+      } else if (request.method === "POST" && url.pathname === "/api/improve/decide") {
+        send(response, 200, await decideImprove(request, url.searchParams.get("file")));
+      } else if (request.method !== "GET") {
+        throw new HttpError(405, "Use GET. To change the dashboard, use POST /api/move, /api/settings, /api/attention/answer or /api/improve/decide.");
+      } else if (url.pathname === "/" || url.pathname === "/dashboard.html") {
+        await sendAsset(request, response, "dashboard.html", "text/html; charset=utf-8");
+      } else if (url.pathname === "/dashboard.mjs") {
+        await sendAsset(request, response, "dashboard.mjs", "text/javascript; charset=utf-8");
+      } else if (url.pathname === "/api/factories") {
+        const { entries, tag } = await listingTags();
+        await sendTagged(request, response, "listing", tag, () => listFactories(entries));
+      } else if (url.pathname === "/api/factory") {
+        const entry = await factoryTag(url.searchParams.get("file"));
+        const view = await factoryView(entry);
+        await sendTagged(request, response, `factory:${entry.target}`, view.tag, view.body);
+      } else if (url.pathname === "/api/artifact") {
+        const file = url.searchParams.get("file");
+        const data = await loadFactory(file);
+        const name = url.searchParams.get("name");
+        const referenced = data.tasks.some((task) => Object.entries(task.workers).some(([role, worker]) => worker && (briefName(file, task, role, worker) === name || worker.result === name))) || data.rules.some((rule) => rule.worker && (rule.worker.brief === name || rule.worker.result === name));
+        if (!name || !referenced) {
+          throw new HttpError(403, "Artifact is not referenced by the selected factory.");
+        }
+        send(response, 200, await readFile9(await localFile(name)), "text/plain; charset=utf-8");
+      } else {
+        throw new HttpError(404, "Not found.");
+      }
+    } catch (error) {
+      const status = error.status || { ENOENT: 404, EACCES: 403, EPERM: 403 }[errorCode3(error) ?? ""] || (error instanceof SyntaxError ? 400 : 500);
+      if (status === 500)
+        console.error(errorMessage2(error));
+      send(response, status, { error: errorMessage2(error) });
+    }
+  });
+  await new Promise((ready, reject) => {
+    server.once("error", reject);
+    server.listen(Number(options.port), options.host, () => ready(undefined));
+  });
+  const port = server.address().port;
+  if (!requireToken) {
+    console.log(`http://127.0.0.1:${port}/`);
+  } else {
+    const addresses = isWildcard(options.host) ? lanAddresses() : [options.host];
+    for (const addr of addresses.length ? addresses : ["127.0.0.1"]) {
+      console.log(`http://${bracket(addr)}:${port}/?token=${token}`);
+    }
+    console.log("The page uses plain HTTP. The token travels in clear text on this network. Use only a trusted network.");
+  }
+  process.on("SIGINT", () => server.close(() => {
+    process.exitCode = 130;
+  }));
+  process.on("SIGTERM", () => server.close());
+}
+function main6(argv) {
+  return serve(argv).catch((error) => {
+    console.error(errorMessage2(error));
+    process.exitCode = 1;
+  });
+}
+var import_write_file_atomic3, factoryFile2, maxBody = 16384, tokenPattern, errorCode3 = (error) => error.code, errorMessage2 = (error) => error.message, bracket = (host) => host.includes(":") ? `[${host}]` : host, isWildcard = (host) => host === "0.0.0.0" || host === "::", isLoopback = (host) => host === "localhost" || host === "::1" || /^127\./.test(host), digest = (value) => createHash("sha256").update(value).digest(), sameToken = (value, expected) => typeof value === "string" && timingSafeEqual(digest(value), digest(expected)), HttpError;
+var init_serve = __esm(() => {
+  init_factory_data();
+  init_attention();
+  init_tasks();
+  init_proposals();
+  init_sessions();
+  init_usage();
+  init_state_dir();
+  import_write_file_atomic3 = __toESM(require_lib(), 1);
+  factoryFile2 = /-factory\.json$/i;
+  tokenPattern = /^[\w.~-]{16,}$/;
+  HttpError = class HttpError extends Error {
+    status;
+    constructor(status, message) {
+      super(message);
+      this.status = status;
+    }
+  };
+});
+
+// plugins/factory/skills/lifecycle/worktree.ts
+var exports_worktree = {};
+__export(exports_worktree, {
+  main: () => main7
+});
+import { execFileSync as execFileSync4, spawn } from "node:child_process";
+import { existsSync as existsSync2, readFileSync as readFileSync3, realpathSync } from "node:fs";
+import { constants, homedir as homedir6 } from "node:os";
+import { basename as basename6, join as join11, resolve as resolve8 } from "node:path";
+import { parseArgs as parseArgs7 } from "node:util";
+function run2(cmd, args, cwd) {
+  try {
+    return execFileSync4(cmd, args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  } catch (error) {
+    const failure = error;
+    if (failure.code === "ENOENT")
+      throw new Fail("git-failed", `${cmd} is not installed.`);
+    const detail = String(failure.stderr ?? "").trim() || failure.message;
+    throw new Fail("git-failed", `${cmd} ${args.join(" ")} failed: ${detail}`);
+  }
+}
+function listWorktrees(cwd) {
+  const entries = [];
+  for (const block of git4(cwd, "worktree", "list", "--porcelain").split(`
+
+`)) {
+    const entry = { path: "", branch: null };
+    for (const line of block.split(`
+`)) {
+      if (line.startsWith("worktree "))
+        entry.path = line.slice(9);
+      else if (line.startsWith("branch refs/heads/"))
+        entry.branch = line.slice(18);
+    }
+    if (entry.path)
+      entries.push(entry);
+  }
+  return entries;
+}
+function readTemplate() {
+  const file = join11(process.env.COPILOT_HOME || join11(homedir6(), ".copilot"), "settings.json");
+  let settings;
+  try {
+    settings = JSON.parse(readFileSync3(file, "utf8"));
+  } catch (error) {
+    if (error.code === "ENOENT")
+      return DEFAULT_TEMPLATE;
+    throw new Fail("usage", `Cannot read ${file}: ${error.message}`);
+  }
+  const value = settings?.worktreePathTemplate;
+  if (value === undefined || value === null)
+    return DEFAULT_TEMPLATE;
+  if (typeof value !== "string" || value === "") {
+    throw new Fail("usage", `worktreePathTemplate in ${file} must be a non-empty string.`);
+  }
+  return value;
+}
+function context(cwd) {
+  const worktrees = listWorktrees(cwd);
+  const repoPath = worktrees[0].path;
+  return { cwd, worktrees, repoPath, template: readTemplate() };
+}
+function templatePath({ repoPath, template }, name) {
+  const fields = { repoPath, repo: basename6(repoPath), branch: name, branchSlug: name.replaceAll("/", "-") };
+  const expanded = template.replace(/\{(repoPath|repo|branch|branchSlug)\}/g, (_, key) => fields[key]).replace(/^~(?=\/|$)/, homedir6());
+  return resolve8(repoPath, expanded);
+}
+function validName(cwd, name) {
+  if (!name || name.startsWith("-") || !gitOk(cwd, "check-ref-format", "--branch", name) || /^@\{/.test(name)) {
+    throw new Fail("usage", `Invalid branch name: ${name ?? ""}`);
+  }
+}
+function find(ctx, name, path) {
+  return ctx.worktrees.find((w) => w.branch === name) ?? ctx.worktrees.find((w) => real2(w.path) === real2(path));
+}
+function repoSlug(cwd) {
+  const url = git4(cwd, "remote", "get-url", "origin");
+  return url.replace(/\.git$/, "").split(/[:/]/).slice(-2).join("/");
+}
+function create(ctx, name, { pr, base }) {
+  const path = templatePath(ctx, name);
+  const existing = find(ctx, name, path);
+  if (existing) {
+    if (existing.branch !== name) {
+      throw new Fail("refused", `${existing.path} is a worktree of ${existing.branch ?? "a detached HEAD"}, not ${name}.`);
+    }
+    return { path: existing.path, branch: name, created_by_run: false };
+  }
+  if (existsSync2(path))
+    throw new Fail("refused", `${path} exists and is not a worktree of ${name}.`);
+  if (pr) {
+    const info = JSON.parse(run2("gh", ["pr", "view", pr, "--json", "url"], ctx.cwd));
+    if (!info.url.includes(`github.com/${repoSlug(ctx.cwd)}/pull/`)) {
+      throw new Fail("refused", `PR ${pr} (${info.url}) is not in this repository.`);
+    }
+    git4(ctx.cwd, "worktree", "add", "--detach", path);
+    try {
+      run2("gh", ["pr", "checkout", pr, "--branch", name, "--force"], path);
+    } catch (error) {
+      git4(ctx.cwd, "worktree", "remove", "--force", path);
+      throw error;
+    }
+    return { path: real2(path), branch: name, created_by_run: true };
+  }
+  if (gitOk(ctx.cwd, "show-ref", "--verify", "--quiet", `refs/heads/${name}`)) {
+    git4(ctx.cwd, "worktree", "add", path, name);
+    return { path: real2(path), branch: name, created_by_run: true };
+  }
+  git4(ctx.cwd, "worktree", "add", "-b", name, path, base);
+  return { path: real2(path), branch: name, created_by_run: true, base };
+}
+function mergedPR(ctx, path, tip, ref) {
+  const slug = repoSlug(ctx.cwd);
+  const match = /^(?:https:\/\/github\.com\/([^/]+\/[^/]+)\/pull\/)?(\d+)\/?$/.exec(ref);
+  if (!match || match[1] && match[1].toLowerCase() !== slug.toLowerCase()) {
+    throw new Fail("usage", `--merged-pr needs a PR number or a URL in ${slug}.`);
+  }
+  const pr = JSON.parse(run2("gh", ["api", `repos/${slug}/pulls/${match[2]}`], ctx.cwd));
+  const head = pr.head?.sha ?? "";
+  return pr.merged === true && head !== "" && (head === tip || gitOk(path, "merge-base", "--is-ancestor", head, tip));
+}
+function remove(ctx, name, { force, defaultBranch: override, mergedPr }) {
+  const wt = find(ctx, name, templatePath(ctx, name));
+  if (!wt)
+    throw new Fail("not-found", `No worktree for ${name}.`);
+  const { path, branch } = wt;
+  const info = { path, branch };
+  if (real2(path) === real2(ctx.repoPath))
+    throw new Fail("refused", "Cannot remove the main checkout.", info);
+  if (real2(path) === real2(git4(ctx.cwd, "rev-parse", "--show-toplevel"))) {
+    throw new Fail("refused", "Cannot remove the current worktree.", info);
+  }
+  const tip = git4(path, "rev-parse", "HEAD");
+  const target = defaultBranch(ctx.cwd, override);
+  const merged = target !== null && gitOk(path, "merge-base", "--is-ancestor", tip, target) || git4(path, "branch", "-r", "--contains", tip) !== "";
+  let prMerged = false;
+  if (!force) {
+    if (git4(path, "status", "--porcelain") !== "") {
+      throw new Fail("refused", `${path} has uncommitted changes.`, { ...info, removed: false, reason: "dirty" });
+    }
+    if (mergedPr !== undefined) {
+      prMerged = mergedPR(ctx, path, tip, mergedPr);
+      if (!prMerged) {
+        throw new Fail("refused", `PR ${mergedPr} is not merged, or its head is not in ${branch ?? tip}.`, { ...info, removed: false, reason: "pr-not-merged" });
+      }
+    }
+    if (!merged && !prMerged) {
+      throw new Fail("refused", `${branch ?? tip} is not in ${target ?? "the default branch"} and not in a remote branch.`, { ...info, removed: false, reason: "unmerged" });
+    }
+  }
+  git4(ctx.cwd, "worktree", "remove", ...force ? ["--force"] : [], path);
+  const branchDeleted = (merged || prMerged) && branch !== null && gitOk(ctx.cwd, "branch", prMerged && !merged ? "-D" : "-d", branch);
+  return { ...info, removed: true, branch_deleted: branchDeleted };
+}
+function plan(argv) {
+  const dash = argv.indexOf("--");
+  const [args, command] = dash === -1 ? [argv, []] : [argv.slice(0, dash), argv.slice(dash + 1)];
+  let parsed;
+  try {
+    parsed = parseArgs7({
+      args,
+      allowPositionals: true,
+      options: {
+        pr: { type: "string" },
+        base: { type: "string", default: "HEAD" },
+        force: { type: "boolean", default: false },
+        "default-branch": { type: "string" },
+        "merged-pr": { type: "string" },
+        help: { type: "boolean", short: "h", default: false }
+      }
+    });
+  } catch (error) {
+    throw new Fail("usage", error.message);
+  }
+  const { values, positionals } = parsed;
+  if (values.help)
+    return { out: usage4 };
+  const [subcommand, name, ...rest] = positionals;
+  if (!["create", "delete", "path"].includes(subcommand) || rest.length > 0)
+    throw new Fail("usage", usage4);
+  if (values["merged-pr"] !== undefined && subcommand !== "delete")
+    throw new Fail("usage", "--merged-pr works only with delete.");
+  if (command.length > 0 && subcommand !== "create")
+    throw new Fail("usage", "-- CMD works only with create.");
+  if (values.pr !== undefined && !/^\d+$/.test(values.pr))
+    throw new Fail("usage", "--pr needs a PR number.");
+  const cwd = process.cwd();
+  const ctx = context(cwd);
+  validName(cwd, name);
+  if (subcommand === "path") {
+    const path = templatePath(ctx, name);
+    const existing = find(ctx, name, path);
+    return { result: { path: existing?.path ?? path, branch: name, exists: existing !== undefined } };
+  }
+  if (subcommand === "delete") {
+    return { result: remove(ctx, name, {
+      force: values.force,
+      defaultBranch: values["default-branch"],
+      mergedPr: values["merged-pr"]
+    }) };
+  }
+  const result = create(ctx, name, { pr: values.pr, base: values.base });
+  return { result, command };
+}
+function exitWith(error) {
+  const { message } = error;
+  const code = error instanceof Fail ? error.error : "git-failed";
+  process.stdout.write(`${JSON.stringify({ error: code, message, ...error.extra })}
+`);
+  if (code !== "usage" || !message.startsWith("Usage:"))
+    process.stderr.write(`${message}
+`);
+  process.exit(CODES[code]);
+}
+function main7(argv) {
+  let outcome;
+  try {
+    outcome = plan(argv);
+  } catch (error) {
+    exitWith(error);
+  }
+  if ("out" in outcome) {
+    process.stdout.write(`${outcome.out}
+`);
+  } else if (outcome.command?.length) {
+    process.stderr.write(`${JSON.stringify(outcome.result)}
+`);
+    const [cmd, ...args] = outcome.command;
+    const child = spawn(cmd, args, { cwd: outcome.result.path, stdio: "inherit" });
+    for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"])
+      process.on(signal, () => child.kill(signal));
+    child.on("error", (error) => {
+      process.stderr.write(`${cmd}: ${error.message}
+`);
+      process.exit(127);
+    });
+    child.on("exit", (code, signal) => process.exit(code ?? 128 + constants.signals[signal]));
+  } else {
+    process.stdout.write(`${JSON.stringify(outcome.result)}
+`);
+  }
+}
+var usage4 = `Usage:
+  node worktree.mjs create NAME [--pr N] [--base REF] [-- CMD...]
+  node worktree.mjs delete NAME [--force] [--default-branch NAME] [--merged-pr URL_OR_NUMBER]
+  node worktree.mjs path NAME
+
+Run the command in the project checkout. NAME is the branch name. The output is
+JSON on stdout. With "-- CMD", create prints its JSON to stderr, runs CMD in the
+worktree, and exits with the exit code of CMD.
+
+The path comes from "worktreePathTemplate" in $COPILOT_HOME/settings.json
+(default ~/.copilot). The fields are {repoPath}, {repo}, {branch}, and
+{branchSlug}. A leading "~" is the home directory. If the template is not set,
+the path is ~/Developer/worktrees/{repo}/{branch}.
+
+create makes a branch from local HEAD (or from --base REF). If a worktree
+already has the branch, create uses that worktree. delete removes a clean
+worktree whose tip is in the default branch or in a remote branch. --force
+skips both checks. A squash-merged branch is in neither. For that case, use
+--merged-pr. Then delete asks gh if the PR is merged and if its head is the
+worktree tip or an ancestor of it. If both are true, delete removes the clean
+worktree and deletes the branch. It never asks the user.
+Exit codes: 1 usage, 2 refused, 3 not found, 4 git or gh failed.`, DEFAULT_TEMPLATE = "~/Developer/worktrees/{repo}/{branch}", CODES, Fail, git4 = (cwd, ...args) => run2("git", args, cwd), gitOk = (cwd, ...args) => {
+  try {
+    execFileSync4("git", args, { cwd, stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}, real2 = (path) => {
+  try {
+    return realpathSync(path);
+  } catch {
+    return resolve8(path);
+  }
+};
+var init_worktree = __esm(() => {
+  init_default_branch();
+  CODES = { usage: 1, refused: 2, "not-found": 3, "git-failed": 4 };
+  Fail = class Fail extends Error {
+    error;
+    extra;
+    constructor(error, message, extra = {}) {
+      super(message);
+      this.error = error;
+      this.extra = extra;
+    }
+  };
+});
+
+// plugins/factory/skills/lifecycle/worker-name.ts
+var exports_worker_name = {};
+__export(exports_worker_name, {
+  main: () => main8,
+  workerName: () => workerName
+});
+import { parseArgs as parseArgs8 } from "node:util";
+function workerName({ role, ref, summary }) {
+  const verb = VERBS[role];
+  if (!verb)
+    throw new Error(`unknown role "${role}"; use ${Object.keys(VERBS).join(", ")}`);
+  let id = clean2(ref);
+  if (!id)
+    throw new Error("ref is required");
+  if (/^\d+$/.test(id))
+    id = `#${id}`;
+  const head = `${verb} ${id}`;
+  if (Array.from(head).length > MAX)
+    throw new Error(`"${head}" is longer than ${MAX} characters`);
+  const chars = Array.from(clean2(summary));
+  const room = MAX - Array.from(`${head}: `).length;
+  if (!chars.length || room < 1)
+    return head;
+  const text = chars.length <= room ? chars.join("") : `${chars.slice(0, room - 1).join("").trimEnd()}…`;
+  return `${head}: ${text}`;
+}
+function main8(argv) {
+  try {
+    const { values } = parseArgs8({
+      args: argv,
+      options: { role: { type: "string" }, ref: { type: "string" }, summary: { type: "string" } },
+      strict: true
+    });
+    console.log(workerName(values));
+  } catch (error) {
+    console.error(`${error.message}
+
+${usage5}`);
+    process.exit(1);
+  }
+}
+var usage5 = `Usage:
+  node worker-name.mjs --role ROLE --ref REF [--summary TEXT]
+
+Prints the --name of a worker Copilot session: "<Verb> <ref>: <summary>".
+ROLE is investigation, implementation, review, backlog (Find work) or improve.
+REF is "#N", "owner/repo#N", a bare number (read as "#N"), a task ID, or a
+rule ID. The name has at most 100 characters; a long summary ends with "…".`, MAX = 100, VERBS, clean2 = (text) => String(text ?? "").replace(/["'`\u2018\u2019\u201c\u201d]/g, "").replace(/\s+/g, " ").trim();
+var init_worker_name = __esm(() => {
+  VERBS = {
+    investigation: "Investigate",
+    implementation: "Implement",
+    review: "Review",
+    backlog: "Find work",
+    improve: "Improve"
+  };
+});
+
+// plugins/factory/skills/lifecycle/shot.ts
+var exports_shot = {};
+__export(exports_shot, {
+  main: () => main9,
+  parseShotArgs: () => parseShotArgs
+});
+import { spawn as spawn2, spawnSync as spawnSync2 } from "node:child_process";
+import { copyFileSync, existsSync as existsSync3, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname as dirname7, join as join12, resolve as resolve9 } from "node:path";
+import { fileURLToPath as fileURLToPath3 } from "node:url";
+import { parseArgs as parseArgs9 } from "node:util";
+function parseShotArgs(argv, env = process.env) {
+  const { values } = parseArgs9({
+    args: argv,
+    options: {
+      help: { type: "boolean", short: "h" },
+      widths: { type: "string", default: "1280,390" },
+      height: { type: "string", default: "900" },
+      data: { type: "string", default: join12(here, "factory.example.json") },
+      out: { type: "string", default: env.TMPDIR || tmpdir() },
+      browser: { type: "string", default: env.CHROME }
+    }
+  });
+  const widths = values.widths.split(",").map((width) => width.trim());
+  if (!widths.every((width) => /^[1-9]\d{1,4}$/.test(width))) {
+    throw new Error("--widths must be a comma-separated list of integers from 10 to 99999.");
+  }
+  if (!/^[1-9]\d{1,4}$/.test(values.height))
+    throw new Error("--height must be an integer from 10 to 99999.");
+  return { ...values, widths: widths.map(Number), height: Number(values.height) };
+}
+function findBrowser(requested) {
+  if (requested)
+    return requested;
+  return browsers.find((candidate) => candidate.startsWith("/") ? existsSync3(candidate) : spawnSync2("which", [candidate], { stdio: "ignore" }).status === 0);
+}
+function startServer(directory) {
+  const child = spawn2(process.execPath, [join12(here, "serve.mjs"), "--directory", directory, "--port", "0"], {
+    stdio: ["ignore", "pipe", "inherit"]
+  });
+  const url = new Promise((ready, reject) => {
+    child.once("error", reject);
+    child.once("exit", () => reject(new Error("serve.mjs exited before it printed a URL.")));
+    child.stdout.once("data", (chunk) => ready(String(chunk).split(`
+`)[0].trim()));
+  });
+  return { child, url };
+}
+async function main9(argv) {
+  let options;
+  try {
+    options = parseShotArgs(argv);
+  } catch (error) {
+    console.error(`${error.message}
+Run with --help for usage.`);
+    process.exitCode = 2;
+    return;
+  }
+  if (options.help) {
+    console.log(usage6);
+    return;
+  }
+  const browser = findBrowser(options.browser);
+  if (!browser) {
+    console.error("No Chrome or Edge found. Pass --browser PATH or set CHROME.");
+    process.exitCode = 1;
+    return;
+  }
+  const out = resolve9(options.out);
+  mkdirSync(out, { recursive: true });
+  const work = mkdtempSync(join12(out, "shot-"));
+  const state = join12(work, "state");
+  mkdirSync(state);
+  copyFileSync(resolve9(options.data), join12(state, "shot-factory.json"));
+  const server = startServer(state);
+  let failed = false;
+  try {
+    const url = await server.url;
+    for (const width of options.widths) {
+      const png = join12(out, `dashboard-${width}.png`);
+      rmSync(png, { force: true });
+      const run = spawnSync2(browser, [
+        "--headless=new",
+        "--no-sandbox",
+        "--disable-gpu",
+        "--hide-scrollbars",
+        `--user-data-dir=${join12(work, "profile")}`,
+        `--window-size=${width},${options.height}`,
+        "--virtual-time-budget=8000",
+        `--screenshot=${png}`,
+        `${url}?file=shot-factory.json`
+      ], { encoding: "utf8", timeout: 90000 });
+      if (!existsSync3(png)) {
+        failed = true;
+        console.error(`No screenshot at width ${width}. Browser output:
+${(run.stderr || "").trim().split(`
+`).slice(-5).join(`
+`)}`);
+        break;
+      }
+      console.log(png);
+    }
+  } finally {
+    server.child.kill();
+    rmSync(work, { recursive: true, force: true });
+  }
+  if (failed)
+    process.exitCode = 1;
+}
+var here, browsers, usage6 = `Screenshot the factory dashboard to PNG files.
+
+Usage: node shot.mjs [--widths 1280,390] [--height 900] [--data FILE] [--out DIR] [--browser PATH]
+
+  --widths LIST   Comma-separated window widths in pixels (default: 1280,390)
+  --height PX     Window height in pixels (default: 900)
+  --data FILE     Factory JSON to show (default: factory.example.json beside this script)
+  --out DIR       Output directory (default: $TMPDIR, else the system temp directory)
+  --browser PATH  Chrome or Edge binary (default: the first one found; or $CHROME)
+  -h, --help      Show help
+
+Starts serve.mjs on a free port (never 8766) with a private copy of the data,
+runs headless Chrome once per width, and prints one PNG path per line.
+Exits 2 for invalid arguments, 1 when the browser cannot render.`;
+var init_shot = __esm(() => {
+  here = dirname7(fileURLToPath3(import.meta.url));
+  browsers = [
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+    "google-chrome",
+    "chromium",
+    "chrome"
+  ];
+});
+
+// plugins/factory/skills/lifecycle/migrate.ts
+var exports_migrate = {};
+__export(exports_migrate, {
+  main: () => main10
+});
+import { createHash as createHash2, randomUUID as randomUUID3 } from "node:crypto";
+import { access, link as link2, mkdir as mkdir2, readFile as readFile10, rename, rm as rm4, writeFile as writeFile2 } from "node:fs/promises";
+import { basename as basename7, dirname as dirname8, join as join13, resolve as resolve10 } from "node:path";
+import { parseArgs as parseArgs10 } from "node:util";
+async function exists2(path) {
+  try {
+    await access(path);
+    return true;
+  } catch (error) {
+    if (error.code === "ENOENT")
+      return false;
+    throw error;
+  }
+}
+async function readSource(file) {
+  const raw = await readFile10(file, "utf8");
+  const data = JSON.parse(raw);
+  if (!data || !Array.isArray(data.tasks))
+    throw new Error(`${file}: expected a handoff with a tasks array.`);
+  for (const task of data.tasks) {
+    if (typeof task?.id !== "string" || typeof task.updated_at !== "string" || typeof task.goal !== "string" || typeof task.status !== "string") {
+      throw new Error(`${file}: a task is missing id, goal, status, or updated_at. Repair it and retry.`);
+    }
+  }
+  return { file, data, hash: createHash2("sha256").update(raw).digest("hex") };
+}
+function validLink(value) {
+  try {
+    return githubURL(value).href;
+  } catch {
+    return null;
+  }
+}
+function validPR(value) {
+  try {
+    return prURL(value);
+  } catch {
+    return null;
+  }
+}
+function text2(value) {
+  return typeof value === "string" && value.trim() ? value : null;
+}
+function issueURLOf(old, details, links, project) {
+  const named = /^issue-([^.]+)\.(.+)-(\d+)$/.exec(old.id);
+  const numbered = /^issue-(\d+)$/.exec(old.id);
+  const ref = /^([^/\s]+\/[^#\s]+)#(\d+)$/.exec(details.ref ?? "");
+  const guesses = [
+    ref && `https://github.com/${ref[1]}/issues/${ref[2]}`,
+    numbered && `https://github.com/${text2(old.repository) ?? project}/issues/${numbered[1]}`,
+    named && `https://github.com/${named[1]}/${named[2]}/issues/${named[3]}`
+  ].map((value) => value && validLink(value)).filter((value) => Boolean(value));
+  const issues = links.filter((href) => href.split("/")[5] === "issues");
+  return guesses[0] ?? (issues.length === 1 ? issues[0] : null);
+}
+function mapTask(role, file, old, project) {
+  const pr = validPR(old.pr);
+  const links = [...new Set([...old.links ?? [], ...old.pr ? [old.pr] : []].map(validLink).filter((href) => Boolean(href)))];
+  const details = old.details && typeof old.details === "object" ? old.details : {};
+  const issue = issueURLOf(old, details, links, project);
+  if (issue && !links.includes(issue))
+    links.push(issue);
+  let state = "initial";
+  if (old.status === "done")
+    state = "resolved";
+  else if (old.status === "blocked")
+    state = "blocked";
+  else if (pr && issue)
+    state = "implementation";
+  const brief = text2(old.brief);
+  const result = text2(old.result);
+  const pane = text2(details.pane_id);
+  const window = text2(details.window_id);
+  const worker = pane || window || brief || result ? {
+    status: state === "resolved" ? "closed" : "unknown",
+    mode: "continuous",
+    session: text2(details.session_id),
+    pane,
+    window,
+    name: text2(details.session_title),
+    brief,
+    result
+  } : null;
+  const worktreePath = text2(details.worktree_path) ?? text2(details.worktree);
+  return {
+    id: old.id,
+    title: old.goal,
+    state,
+    updated_at: old.updated_at,
+    next_action: state === "initial" || state === "implementation" ? `Reconcile this migrated task with its legacy details and any live worker, then continue. Legacy next action: ${text2(old.next_action) ?? "none recorded"}` : text2(old.next_action) ?? "Reconcile this migrated task.",
+    issue,
+    pr,
+    head: null,
+    reviewed_head: null,
+    links,
+    blocker: state === "blocked" ? {
+      from: pr ? "implementation" : "initial",
+      reason: text2(old.blocker) ?? "Blocked in the legacy handoff; no reason was recorded.",
+      since: old.updated_at
+    } : null,
+    resolution: state === "resolved" ? { outcome: "completed", note: "Migrated from a done legacy task; the outcome was not recorded.", at: old.updated_at } : null,
+    merge: null,
+    workers: worker ? { implementation: worker } : {},
+    worktree: worktreePath ? { path: worktreePath, created_by_run: details.worktree_created_by_run === true } : null,
+    history: [{ state, at: old.updated_at, note: `Migrated from the legacy ${role} handoff (status ${old.status}).` }],
+    details: { legacy: legacyRef(role, file, old) }
+  };
+}
+function reviewerPatch(reviewers) {
+  const byPR = new Map;
+  for (const { file, data } of reviewers) {
+    for (const old of data.tasks) {
+      const pr = validPR(old.pr) ?? validPR(old.url);
+      if (pr)
+        byPR.set(pr, { file, old });
+    }
+  }
+  return byPR;
+}
+function build(project, key, loaded, reviewers) {
+  const tasks = [];
+  const report = {
+    merged: [],
+    renamed: [],
+    reviewer_attached: 0,
+    reviewer_skipped: 0
+  };
+  for (const { role, source } of loaded) {
+    for (const old of source.data.tasks) {
+      let task = mapTask(role, source.file, old, project);
+      const twins = tasks.flatMap((other, index) => same(task.pr, other.pr) || same(task.issue, other.issue) ? [{ index, task: other }] : []);
+      if (twins.length) {
+        const group = [...twins.map(({ task: twin }) => twin), task];
+        let keep = group[0];
+        for (const candidate of group.slice(1)) {
+          if (Date.parse(candidate.updated_at) > Date.parse(keep.updated_at))
+            keep = candidate;
+        }
+        const drops = group.filter((candidate) => candidate !== keep).sort((a, b) => Date.parse(a.updated_at) - Date.parse(b.updated_at));
+        for (const drop of drops) {
+          keep.links = [...new Set([...keep.links, ...drop.links])];
+          keep.workers = { ...drop.workers, ...keep.workers };
+          keep.worktree ??= drop.worktree;
+          keep.pr ??= drop.pr;
+          keep.issue ??= drop.issue;
+          keep.details.legacy_merged = [
+            ...keep.details.legacy_merged ?? [],
+            drop.details.legacy,
+            ...drop.details.legacy_merged ?? []
+          ];
+          report.merged.push({ kept: keep.id, merged: drop.id });
+        }
+        tasks[twins[0].index] = keep;
+        for (const { index } of twins.slice(1).reverse())
+          tasks.splice(index, 1);
+        continue;
+      }
+      if (tasks.some((other) => other.id === task.id)) {
+        let id = `${role}-${task.id}`;
+        for (let count = 2;tasks.some((other) => other.id === id); count += 1)
+          id = `${role}-${task.id}-${count}`;
+        report.renamed.push({ from: task.id, to: id, role });
+        task = { ...task, id };
+      }
+      tasks.push(task);
+    }
+  }
+  const matched = new Set;
+  const byPR = reviewerPatch(reviewers);
+  for (const task of tasks) {
+    const match = task.pr && byPR.get(task.pr);
+    if (!match)
+      continue;
+    matched.add(task.pr);
+    const reviewed = /^[a-f0-9]{40}$/.test(match.old.lastReviewedHead ?? "") ? match.old.lastReviewedHead : null;
+    task.reviewed_head = reviewed;
+    task.workers.review = {
+      status: "unknown",
+      mode: "continuous",
+      pane: null,
+      window: null,
+      name: null,
+      session: null,
+      brief: text2(match.old.brief),
+      result: text2(match.old.result)
+    };
+    task.details.legacy_reviewer = {
+      role: "reviewer",
+      file: match.file,
+      status: match.old.status,
+      task_id: match.old.id
+    };
+    report.reviewer_attached += 1;
+  }
+  report.reviewer_skipped = [...byPR.keys()].filter((pr) => !matched.has(pr)).length;
+  const statuses = loaded.flatMap(({ source }) => typeof source.data.status === "string" ? [source.data.status] : []);
+  const status = statuses.includes("active") ? "active" : statuses.includes("blocked") ? "blocked" : "paused";
+  const data = {
+    format,
+    id: `${key}-factory`,
+    project,
+    goal: `Run the factory for ${project}`,
+    status,
+    updated_at: new Date().toISOString(),
+    rex_session: null,
+    rules: [],
+    limits: defaultLimits,
+    budget: defaultBudget,
+    tasks
+  };
+  validate(data);
+  return { data, report };
+}
+async function main10(argv) {
+  let options;
+  try {
+    options = parseArgs10({
+      args: argv,
+      options: {
+        help: { type: "boolean", short: "h" },
+        project: { type: "string" },
+        directory: { type: "string" },
+        "dry-run": { type: "boolean" },
+        archive: { type: "boolean" },
+        "ignore-locks": { type: "boolean" }
+      }
+    }).values;
+    if (options.help) {
+      console.log(`Migrate legacy coordinator handoffs into one factory.json.
+
+Usage: node migrate.mjs --project owner/repo [--directory PATH] [--dry-run] [--archive]
+                        [--ignore-locks]
+       bun migrate.mjs --project owner/repo [options]
+
+Reads <owner.repo>-implementer.json and <owner.repo>-coordinator.json and writes
+<owner.repo>-factory.json in ~/.local/state/copilot-factory. Each handoff is read from there, else from
+the legacy ~/.local/state/copilot-coordinator. --directory PATH uses only that directory.
+A <owner.repo>-reviewer.json is read only to attach reviews to migrated tasks with the same
+PR; its other tasks (other authors' PRs) are not imported and stay with coordination:review.
+
+Mapping: done becomes resolved (completed); blocked stays blocked; a task with both a PR and
+an issue enters implementation; every other open task enters initial for reconciliation.
+Tasks that share a PR or issue are merged (the newest is kept, the others are saved under
+details.legacy_merged). A repeated ID with different work gets a role prefix. Each original
+task is referenced under details.legacy as {role, file, status, task_id}; the handoff file
+keeps the full task, so keep or archive it.
+
+The command never changes a source unless --archive is given, then it moves the implementer and
+coordinator handoffs to archive/<date>-factory-migration/ after checking they did not change.
+It refuses to overwrite an existing factory.json, and stops when a legacy owner lock exists
+(stop the legacy coordinator and remove its lock first, or pass --ignore-locks).
+--dry-run prints the report and writes nothing. Exit: 0 success, 1 failure, 2 usage.`);
+      return;
+    }
+    if (!/^[^/\s]+\/[^/\s]+$/.test(options.project ?? "")) {
+      throw new Error("--project owner/repo is required.");
+    }
+  } catch (error) {
+    console.error(`${error.message}
+Run with --help for usage.`);
+    process.exitCode = 2;
+    return;
+  }
+  const project = options.project;
+  const key = project.replace("/", ".");
+  const explicit = options.directory;
+  const locate = explicit ? (name) => join13(resolve10(explicit), name) : stateFile;
+  const target = locate(`${key}-factory.json`);
+  const directory = dirname8(target);
+  const warnings = [];
+  const loaded = [];
+  for (const role of sources) {
+    const file = locate(`${key}-${role}.json`);
+    if (await exists2(file))
+      loaded.push({ role, source: await readSource(file) });
+  }
+  if (!loaded.length)
+    throw new Error(`No ${sources.join(" or ")} handoff found for ${project}.`);
+  const reviewerFile = locate(`${key}-reviewer.json`);
+  const reviewers = await exists2(reviewerFile) ? [await readSource(reviewerFile)] : [];
+  const locks = [];
+  for (const { role } of loaded) {
+    if (await exists2(locate(`${key}-${role}.lock`)))
+      locks.push(`${key}-${role}.lock`);
+  }
+  if (locks.length && !options["ignore-locks"] && !options["dry-run"]) {
+    throw new Error(`Legacy owner lock exists: ${locks.join(", ")}. Stop the legacy coordinator and release its lock first.`);
+  }
+  if (locks.length)
+    warnings.push(`Legacy owner lock exists: ${locks.join(", ")}.`);
+  if (await exists2(target) && !options["dry-run"]) {
+    throw new Error(`${target} already exists. Move it away or reconcile it by hand; this command never overwrites.`);
+  }
+  const { data, report } = build(project, key, loaded, reviewers);
+  const summary = {
+    file: target,
+    dry_run: Boolean(options["dry-run"]),
+    sources: loaded.map(({ role, source }) => ({ role, file: source.file, tasks: source.data.tasks.length })),
+    tasks: data.tasks.length,
+    by_state: countByState(data.tasks),
+    ...report,
+    warnings
+  };
+  if (!options["dry-run"]) {
+    for (const source of [...loaded.map((item) => item.source), ...reviewers]) {
+      if (createHash2("sha256").update(await readFile10(source.file)).digest("hex") !== source.hash) {
+        throw new Error(`${source.file} changed during migration. Stop its writer and retry.`);
+      }
+    }
+    const archive = join13(directory, "archive", `${new Date().toISOString().slice(0, 10)}-factory-migration`);
+    const moves = options.archive ? loaded.map(({ source }) => [source.file, join13(archive, basename7(source.file))]) : [];
+    for (const [, destination] of moves) {
+      if (await exists2(destination))
+        throw new Error(`${destination} already exists; archive by hand.`);
+    }
+    await mkdir2(directory, { recursive: true });
+    const temporary = `${target}.${randomUUID3()}.tmp`;
+    await writeFile2(temporary, `${JSON.stringify(data, null, 2)}
+`, { mode: 384, flag: "wx" });
+    try {
+      await link2(temporary, target);
+    } finally {
+      await rm4(temporary, { force: true });
+    }
+    if (options.archive) {
+      await mkdir2(archive, { recursive: true });
+      for (const [from, to] of moves)
+        await rename(from, to);
+      summary.archived = moves.map(([, to]) => to);
+    }
+  }
+  console.log(JSON.stringify(summary, null, 2));
+}
+var sources, legacyRef = (role, file, old) => ({ role, file, status: old.status, task_id: old.id }), same = (a, b) => a && b && githubResourceURL(a) === githubResourceURL(b);
+var init_migrate = __esm(() => {
+  init_factory_data();
+  init_state_dir();
+  sources = ["implementer", "coordinator"];
+});
+
+// plugins/factory/skills/lifecycle/pr-watch.ts
+var exports_pr_watch = {};
+__export(exports_pr_watch, {
+  main: () => main11
+});
+import { execFile as execFile3, spawn as spawn3 } from "node:child_process";
+import { parseArgs as parseArgs11, promisify as promisify3 } from "node:util";
+function usageError(message) {
+  process.stderr.write(`pr-watch: ${message}
+${USAGE}
+`);
+  process.exit(2);
+}
+function parseOptions(argv) {
+  const opts = { pr: null, repo: null, merge: false, interval: 30, timeout: null };
+  const minimum = process.env.PR_WATCH_MIN_INTERVAL === undefined ? 15 : Number(process.env.PR_WATCH_MIN_INTERVAL);
+  const number = (flag, value, min) => {
+    const n = Number(value);
+    if (typeof value !== "string" || !Number.isFinite(n) || n <= 0 || n < min) {
+      usageError(`${flag} needs a number of seconds${min > 0 ? ` of at least ${min}` : " greater than 0"}`);
+    }
+    return n;
+  };
+  const { tokens } = parseArgs11({
+    args: argv,
+    strict: false,
+    allowPositionals: true,
+    tokens: true,
+    options: {
+      help: { type: "boolean", short: "h" },
+      merge: { type: "boolean" },
+      repo: { type: "string", short: "R" },
+      interval: { type: "string" },
+      timeout: { type: "string" }
+    }
+  });
+  for (const token of tokens) {
+    if (token.kind === "option-terminator")
+      usageError("unknown flag --");
+    if (token.kind === "positional") {
+      if (token.value.startsWith("-"))
+        usageError(`unknown flag ${token.value}`);
+      if (opts.pr !== null)
+        usageError("only one PR is allowed");
+      opts.pr = token.value;
+      continue;
+    }
+    const { name, rawName, value } = token;
+    const known = ["help", "merge", "repo", "interval", "timeout"].includes(name);
+    const boolean = name === "help" || name === "merge";
+    if (!known || boolean && token.inlineValue)
+      usageError(`unknown flag ${rawName}${token.inlineValue ? `=${value}` : ""}`);
+    if (name === "help") {
+      process.stdout.write(`${USAGE}
+`);
+      process.exit(0);
+    } else if (name === "merge")
+      opts.merge = true;
+    else if (name === "repo") {
+      if (typeof value !== "string" || !value)
+        usageError(`${rawName} needs OWNER/REPO`);
+      opts.repo = value;
+    } else if (name === "interval")
+      opts.interval = number(rawName, value, minimum);
+    else
+      opts.timeout = number(rawName, value, 0);
+  }
+  return opts;
+}
+async function gh(args) {
+  try {
+    return (await run3("gh", args, { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 })).stdout;
+  } catch (error) {
+    const failure = error;
+    const text = [failure.stderr, failure.stdout].filter(Boolean).join(`
+`).trim() || failure.message;
+    if (RATE_LIMIT.test(text))
+      throw new RateLimited(text.split(`
+`)[0], retryAt(text));
+    if (failure.code === "ENOENT")
+      throw new Error("gh is not installed or is not on PATH");
+    throw new ((TRANSIENT.test(text)) ? Transient : Error)(text);
+  }
+}
+function retryAt(text) {
+  const after = /retry-after:?\s*(\d+)/i.exec(text);
+  const reset = /x-ratelimit-reset:?\s*(\d+)/i.exec(text);
+  const seconds = after ? Number(after[1]) : reset ? Number(reset[1]) - Date.now() / 1000 : RETRY_AFTER;
+  return new Date(Date.now() + Math.max(seconds, 1) * 1000).toISOString();
+}
+async function resolve11({ pr, repo }) {
+  const args = ["pr", "view", ...pr ? [pr] : [], ...repo ? ["--repo", repo] : [], "--json", "number,url"];
+  const { number, url } = JSON.parse(await gh(args));
+  const { hostname, pathname } = new URL(url);
+  const [owner, name] = pathname.split("/").filter(Boolean);
+  return { host: hostname, owner, repo: name, number, url };
+}
+function checkState(node) {
+  if (node.__typename === "CheckRun") {
+    if (node.status !== "COMPLETED")
+      return "pending";
+    if (node.conclusion === "SUCCESS")
+      return "passed";
+    if (FAILED.has(node.conclusion))
+      return "failed";
+    return node.conclusion === "CANCELLED" ? "cancelled" : "other";
+  }
+  if (node.state === "SUCCESS")
+    return "passed";
+  return FAILED.has(node.state) ? "failed" : "pending";
+}
+function summarizeChecks(contexts) {
+  const required = contexts.filter((node) => node.isRequired).map((node) => ({ name: node.name ?? node.context, state: checkState(node) }));
+  const names = (state) => required.filter((check) => check.state === state).map((check) => check.name);
+  const failed = names("failed");
+  const cancelled = names("cancelled");
+  let state = "passed";
+  if (required.length === 0)
+    state = "none";
+  else if (failed.length)
+    state = "failed";
+  else if (cancelled.length)
+    state = "cancelled";
+  else if (names("pending").length)
+    state = "pending";
+  else if (required.some((check) => check.state === "other"))
+    state = "other";
+  return { state, failed, cancelled };
+}
+async function fetchPages(target) {
+  let first = null;
+  let threads = [];
+  let contexts = [];
+  let threadsAfter = null;
+  let contextsAfter = null;
+  for (;; ) {
+    const out = await gh([
+      "api",
+      "graphql",
+      "--hostname",
+      target.host,
+      "-f",
+      `query=${QUERY}`,
+      "-f",
+      `owner=${target.owner}`,
+      "-f",
+      `repo=${target.repo}`,
+      "-F",
+      `number=${target.number}`,
+      ...threadsAfter ? ["-f", `threadsAfter=${threadsAfter}`] : [],
+      ...contextsAfter ? ["-f", `contextsAfter=${contextsAfter}`] : []
+    ]);
+    const { data } = JSON.parse(out);
+    const pr = data.repository.pullRequest;
+    first ??= pr;
+    if (pr.headRefOid !== first.headRefOid)
+      throw new Transient("head changed while paging");
+    const rollup = pr.commits.nodes[0]?.commit?.statusCheckRollup?.contexts;
+    threads = threads.concat(pr.reviewThreads.nodes);
+    contexts = contexts.concat(rollup?.nodes ?? []);
+    if (!pr.reviewThreads.pageInfo.hasNextPage && !rollup?.pageInfo.hasNextPage) {
+      return { pr: first, limit: data.rateLimit, threads, contexts };
+    }
+    threadsAfter = pr.reviewThreads.pageInfo.endCursor;
+    contextsAfter = rollup?.pageInfo.endCursor ?? null;
+  }
+}
+async function fetchSnapshot(target) {
+  const { pr, limit, threads, contexts } = await fetchPages(target);
+  const review = pr.reviews.nodes[0];
+  return {
+    snapshot: {
+      state: pr.state,
+      merged: pr.merged,
+      mergeCommit: pr.mergeCommit?.oid ?? null,
+      head: pr.headRefOid,
+      base: pr.baseRefOid,
+      draft: pr.isDraft,
+      mergeable: pr.mergeable,
+      mergeState: pr.mergeStateStatus,
+      review: {
+        decision: pr.reviewDecision,
+        latest: review ? { id: review.id, state: review.state } : null,
+        unresolved: threads.filter((thread) => !thread.isResolved).length
+      },
+      checks: summarizeChecks(contexts)
+    },
+    limit
+  };
+}
+function detect(base, now, mergeOnly) {
+  if (now.state === "MERGED")
+    return { event: "merged" };
+  if (now.state === "CLOSED")
+    return { event: "closed" };
+  if (mergeOnly)
+    return null;
+  if (now.checks.state === "failed" && base.checks.state !== "failed")
+    return { event: "checks" };
+  if (now.head !== base.head)
+    return { event: "head", previous_head: base.head };
+  if (now.checks.state === "cancelled" && base.checks.state !== "cancelled")
+    return { event: "checks" };
+  const a = base.review;
+  const b = now.review;
+  if (a.decision !== b.decision || a.latest?.id !== b.latest?.id || a.latest?.state !== b.latest?.state || a.unresolved !== b.unresolved) {
+    return { event: "review" };
+  }
+  if (now.mergeable !== "UNKNOWN" && now.mergeable !== base.mergeable)
+    return { event: "conflict" };
+  if (now.draft !== base.draft)
+    return { event: "draft" };
+  if (now.base !== base.base)
+    return { event: "base", previous_base: base.base };
+  if (now.checks.state === "passed" && base.checks.state !== "passed")
+    return { event: "checks" };
+  return null;
+}
+function startupEvent(snapshot, mergeOnly) {
+  if (snapshot.state === "MERGED" || snapshot.state === "CLOSED")
+    return detect(snapshot, snapshot, mergeOnly);
+  if (!mergeOnly && snapshot.checks.state === "failed")
+    return { event: "checks" };
+  return null;
+}
+function report2(target, snapshot, extra) {
+  const out = {
+    ...extra,
+    pr: target?.number ?? null,
+    url: target?.url ?? null,
+    head: snapshot?.head ?? null,
+    state: snapshot?.state ?? null,
+    checks: snapshot ? { state: snapshot.checks.state, failed: snapshot.checks.failed, cancelled: snapshot.checks.cancelled } : null,
+    review: snapshot ? { decision: snapshot.review.decision, latest: snapshot.review.latest } : null,
+    mergeable: snapshot?.mergeable ?? null,
+    at: new Date().toISOString()
+  };
+  if (extra.event === "merged")
+    out.merge_commit = snapshot?.mergeCommit;
+  if (extra.event === "closed" || extra.event === "merged")
+    out.merged = snapshot?.merged;
+  process.stdout.write(`${JSON.stringify(out)}
+`);
+}
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+class Listener {
+  alive = true;
+  attached = false;
+  pending = false;
+  error = "";
+  child;
+  #wake = null;
+  constructor(url) {
+    this.child = spawn3("gh", ["event", "listen", "--follow", "--resource", url, "--event", EVENTS], {
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    this.child.stdout?.on("data", () => {
+      this.pending = true;
+      this.#wake?.();
+    });
+    this.child.stderr?.on("data", (chunk) => {
+      this.error ||= String(chunk).trim().split(`
+`)[0];
+      this.attached = true;
+      this.#wake?.();
+    });
+    const end = (error) => {
+      this.alive = false;
+      this.error ||= error?.message ?? "";
+      this.#wake?.();
+    };
+    this.child.on("error", end);
+    this.child.on("exit", () => end());
+  }
+  async until(ready, ms) {
+    if (ready() || !this.alive)
+      return;
+    let timer;
+    await new Promise((resolve) => {
+      this.#wake = resolve;
+      timer = setTimeout(resolve, ms);
+    });
+    clearTimeout(timer);
+    this.#wake = null;
+  }
+  async wait(ms) {
+    await this.until(() => this.pending, ms);
+    this.pending = false;
+  }
+  stop() {
+    this.child.kill();
+  }
+}
+async function watch2(opts) {
+  const deadline = opts.timeout === null ? Infinity : Date.now() + opts.timeout * 1000;
+  let target = null;
+  let base = null;
+  let last = null;
+  let failures = 0;
+  let listener;
+  try {
+    for (;; ) {
+      let fetched = null;
+      try {
+        target ??= await resolve11(opts);
+        if (listener === undefined) {
+          listener = target.host === "github.com" ? new Listener(target.url) : null;
+          await listener?.until(() => listener.attached, Math.min(deadline - Date.now(), SAFETY_CHECK));
+        }
+        fetched = await fetchSnapshot(target);
+        failures = 0;
+      } catch (error) {
+        if (!(error instanceof Transient) || ++failures >= MAX_TRANSIENT)
+          throw error;
+        process.stderr.write(`pr-watch: transient failure ${failures}/${MAX_TRANSIENT}: ${error.message.split(`
+`)[0]}
+`);
+      }
+      if (fetched) {
+        const { snapshot, limit } = fetched;
+        last = snapshot;
+        let event;
+        if (base === null) {
+          base = snapshot;
+          event = startupEvent(snapshot, opts.merge);
+        } else {
+          if (base.mergeable === "UNKNOWN")
+            base.mergeable = snapshot.mergeable;
+          event = detect(base, snapshot, opts.merge);
+        }
+        if (event)
+          return report2(target, snapshot, event);
+        if (limit.remaining < limit.cost * 2) {
+          throw new RateLimited(`only ${limit.remaining} GraphQL points left`, new Date(limit.resetAt).toISOString());
+        }
+      }
+      const remaining = deadline - Date.now();
+      if (remaining <= 0)
+        return report2(target, last, { event: "timeout", timeout: true });
+      if (listener && !listener.alive) {
+        process.stderr.write(`pr-watch: gh event listen is unavailable, polling: ${listener.error.split(`
+`)[0]}
+`);
+        listener = null;
+      }
+      if (listener && failures === 0)
+        await listener.wait(Math.min(SAFETY_CHECK, remaining));
+      else
+        await sleep(Math.min(opts.interval * 1000 * (0.9 + Math.random() * 0.2), remaining));
+    }
+  } finally {
+    listener?.stop();
+  }
+}
+async function main11(argv) {
+  const opts = parseOptions(argv);
+  try {
+    await watch2(opts);
+  } catch (error) {
+    if (error instanceof RateLimited) {
+      process.stdout.write(`${JSON.stringify({ event: "rate_limited", retry_at: error.retryAt, reason: error.message })}
+`);
+      process.exitCode = 3;
+    } else {
+      const { message } = error;
+      process.stdout.write(`${JSON.stringify({ event: "error", message })}
+`);
+      process.stderr.write(`pr-watch: ${message}
+`);
+      process.exitCode = 1;
+    }
+  }
+}
+var run3, USAGE = `Usage: pr-watch.mjs [PR] [--repo OWNER/REPO] [--merge] [--interval S] [--timeout S]
+
+Watch a pull request. Print one JSON line at the first event.
+
+  PR               number or URL. Default: the PR of the current branch
+  --repo, -R REPO  repository, OWNER/REPO (the command also reads GH_REPO)
+  --merge          report only merged or closed
+  --interval S     seconds between checks. Default 30, minimum 15
+                   (PR_WATCH_MIN_INTERVAL changes the minimum). The command
+                   uses it only when "gh event listen" is not available
+  --timeout S      after S seconds, print a timeout event and exit 0
+  -h, --help       print this help
+
+Events: merged, closed, checks (a required check failed, was cancelled, or all
+passed), head, review, conflict, draft, base, timeout, rate_limited, error.
+Exit codes: 0 event, 1 error, 2 usage, 3 rate limited (retry_at in the JSON).
+The next check retries a transient failure (HTTP 502/503/504, connection reset,
+timeout, EOF). The fifth failure in a row is an error.
+If the PR is already merged or closed, or a required check failed, the command
+exits at once.
+On github.com, "gh event listen" (preview) starts each check. It replaces the
+interval, with a safety check every 5 minutes. If "gh event listen" fails, the
+command polls on the interval.`, QUERY = `query($owner: String!, $repo: String!, $number: Int!, $threadsAfter: String, $contextsAfter: String) {
+  rateLimit { cost remaining resetAt }
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      state merged mergeCommit { oid } headRefOid baseRefOid isDraft
+      mergeable mergeStateStatus reviewDecision
+      reviews(last: 1) { nodes { id state } }
+      reviewThreads(first: 100, after: $threadsAfter) { pageInfo { hasNextPage endCursor } nodes { isResolved } }
+      commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100, after: $contextsAfter) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          __typename
+          ... on CheckRun { name status conclusion isRequired(pullRequestNumber: $number) }
+          ... on StatusContext { context state isRequired(pullRequestNumber: $number) }
+        }
+      } } } } }
+    }
+  }
+}`, FAILED, RATE_LIMIT, TRANSIENT, MAX_TRANSIENT = 5, RETRY_AFTER, SAFETY_CHECK, EVENTS, RateLimited, Transient;
+var init_pr_watch = __esm(() => {
+  run3 = promisify3(execFile3);
+  FAILED = new Set(["FAILURE", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE", "ERROR"]);
+  RATE_LIMIT = /rate limit|abuse detection|HTTP 429|RATE_LIMITED/i;
+  TRANSIENT = /HTTP 50[234]\b|bad gateway|service unavailable|gateway time-?out|ECONNRESET|connection reset|ETIMEDOUT|timed? ?out|\bEOF\b/i;
+  RETRY_AFTER = 5 * 60;
+  SAFETY_CHECK = 5 * 60 * 1000;
+  EVENTS = [
+    "review.submitted.v1",
+    "state.changed.v1",
+    "head.changed.v1",
+    "merge_conflict.v1",
+    "check_suite.status.changed.v1"
+  ].map((type) => `com.github.pull_request.${type}`).join(",");
+  RateLimited = class RateLimited extends Error {
+    retryAt;
+    constructor(message, retryAt) {
+      super(message);
+      this.retryAt = retryAt;
+    }
+  };
+  Transient = class Transient extends Error {
+  };
+});
+
+// plugins/factory/hooks/guard.ts
+var exports_guard = {};
+__export(exports_guard, {
+  main: () => main12
+});
+import { existsSync as existsSync4, readFileSync as readFileSync4, realpathSync as realpathSync2 } from "node:fs";
+import { homedir as homedir7, tmpdir as tmpdir2 } from "node:os";
+import { dirname as dirname9, join as join14, resolve as resolve12, sep } from "node:path";
+function split(line) {
+  const segs = [];
+  const subs = [];
+  let cur = "";
+  let quote = "";
+  for (let i = 0;i < line.length; i++) {
+    const ch = line[i];
+    if (ch === "\\" && quote !== "'") {
+      if (line[i + 1] === `
+`)
+        cur += " ";
+      else
+        cur += ch + (line[i + 1] ?? "");
+      i++;
+    } else if (quote === "'") {
+      if (ch === "'")
+        quote = "";
+      cur += ch;
+    } else if (quote === '"') {
+      if (ch === '"')
+        quote = "";
+      cur += ch;
+      if (ch === "`") {
+        const end = line.indexOf("`", i + 1);
+        const stop = end < 0 ? line.length : end;
+        subs.push(line.slice(i + 1, stop));
+        cur += line.slice(i + 1, stop + 1);
+        i = stop;
+      } else if (ch === "$" && line[i + 1] === "(") {
+        let depth = 0;
+        let j = i + 1;
+        for (;j < line.length; j++) {
+          if (line[j] === "(")
+            depth++;
+          else if (line[j] === ")" && --depth === 0)
+            break;
+        }
+        subs.push(line.slice(i + 2, j));
+        cur += line.slice(i + 1, j + 1);
+        i = j;
+      }
+    } else if (ch === "'" || ch === '"') {
+      quote = ch;
+      cur += ch;
+    } else if (ch === "&" && line[i + 1] === "&") {
+      segs.push(cur);
+      cur = "";
+      i++;
+    } else if (ch === "&" && (line[i + 1] === ">" || cur.endsWith(">") || cur.endsWith("<"))) {
+      cur += ch;
+    } else if (ch === "&") {
+      segs.push(`${cur} &`);
+      cur = "";
+    } else if ("\n;|(`".includes(ch)) {
+      segs.push(cur);
+      cur = "";
+    } else {
+      cur += ch;
+    }
+  }
+  segs.push(cur);
+  return { segs, subs };
+}
+function commands(line) {
+  const out = [];
+  const { segs, subs } = split(line);
+  for (const sub of subs)
+    out.push(...commands(sub));
+  for (let seg of segs) {
+    const detached = /^(?:(?:\w+=\S*|sudo|env|command|exec|time)\s+)*(?:nohup|setsid)\s/.test(seg.trim());
+    seg = seg.trim().replace(/^(?:(?:\w+=\S*|sudo|env|command|exec|time|nohup|setsid)\s+)+/, "");
+    if (!seg)
+      continue;
+    if (detached && !seg.endsWith(" &"))
+      seg += " &";
+    out.push(seg);
+    const inner = seg.match(/^rex\b.*?\s--\s+(.+)$/)?.[1] ?? seg.match(/^(?:ba|z)?sh\s+(?:-\w+\s+)*-c\s+(.+)$/)?.[1];
+    if (inner)
+      out.push(...commands(inner.replace(/^['"]|['"]$/g, "")));
+  }
+  return out;
+}
+function real3(path) {
+  let head = path;
+  const tail = [];
+  while (!existsSync4(head) && dirname9(head) !== head) {
+    tail.unshift(head.slice(dirname9(head).length + 1));
+    head = dirname9(head);
+  }
+  return join14(realpathSync2(head), ...tail);
+}
+function writeRoots() {
+  const home = homedir7();
+  const roots = [
+    join14(home, ".local/state/copilot-coordinator"),
+    join14(home, ".local/state/copilot-factory"),
+    join14(process.env.COPILOT_HOME || join14(home, ".copilot"), "session-state"),
+    process.env.TMPDIR || tmpdir2()
+  ];
+  return roots.flatMap((r) => [resolve12(r), real3(resolve12(r))]);
+}
+function targets(tool, args, cwd) {
+  const paths = typeof args.path === "string" ? [args.path] : [];
+  if (tool === "apply_patch") {
+    for (const m of JSON.stringify(args).matchAll(/\*\*\* (?:Add|Update|Delete) File: ([^\\"]+)/g))
+      paths.push(m[1]);
+  }
+  return paths.map((p) => resolve12(cwd, p.replace(/^~(?=$|\/)/, homedir7())));
+}
+function decide({ toolName = "", toolArgs, cwd = process.cwd() }) {
+  if (DENIED_TOOLS.includes(toolName)) {
+    return { name: "no-subagents", reason: "The factory uses Rex workers. Never use subagents or workflows." };
+  }
+  const args = typeof toolArgs === "string" ? JSON.parse(toolArgs) : toolArgs ?? {};
+  if (toolName === "bash") {
+    for (const command of commands(String(args.command ?? ""))) {
+      const rule = BASH_RULES.find((r) => r.deny(command));
+      if (rule)
+        return rule;
+    }
+  }
+  if (WRITE_TOOLS.includes(toolName)) {
+    const roots = writeRoots();
+    for (const path of targets(toolName, args, cwd)) {
+      const target = real3(path);
+      if (!roots.some((r) => target === r || target.startsWith(r + sep))) {
+        return {
+          name: "write-boundary",
+          reason: `${path} is outside the state directories and $TMPDIR. The coordinator never edits product files. Give the change to a worker.`
+        };
+      }
+    }
+  }
+  return null;
+}
+function main12(_argv) {
+  try {
+    const input = JSON.parse(readFileSync4(0, "utf8"));
+    const hit = isCoordinator(input) ? decide(input) : null;
+    if (hit) {
+      console.log(JSON.stringify({
+        permissionDecision: "deny",
+        permissionDecisionReason: `factory guard rule ${hit.name}: ${hit.reason}`
+      }));
+    }
+  } catch {}
+}
+var DENIED_TOOLS, WRITE_TOOLS, isCopilot = (c) => /^copilot\s/.test(c), isLaunch = (c) => isCopilot(c) && /\s(?:-i|--interactive|-p|--prompt)\b/.test(c), BASH_RULES;
+var init_guard = __esm(() => {
+  init_gate();
+  DENIED_TOOLS = ["task", "read_agent", "write_agent", "run_dynamic_workflow"];
+  WRITE_TOOLS = ["edit", "create", "str_replace_editor", "apply_patch"];
+  BASH_RULES = [
+    {
+      name: "gh-pr-merge",
+      reason: "The coordinator never merges a PR. An implementation worker lands it.",
+      deny: (c) => /^gh\b.*\bpr\s+merge\b/.test(c)
+    },
+    {
+      name: "git-merge-ff-only",
+      reason: "The coordinator lands a branch only with `git merge --ff-only`.",
+      deny: (c) => /^git(?:\s+-[Cc]\s+\S+)*\s+merge(?![-\w])/.test(c) && !/\s--ff-only\b/.test(c)
+    },
+    {
+      name: "rex-session",
+      reason: "The factory runs in the Rex session where it started. Never create or rename a Rex session.",
+      deny: (c) => /^rex\s+new\b/.test(c) || /^rex\s+session\s+(?:new|create|rename)\b/.test(c)
+    },
+    {
+      name: "waiter-async-bash",
+      reason: "Run `broker.mjs wait` as async bash and read its output. A waiter that runs with `&`, nohup, setsid, or disown, or with stdout sent to a file, has no reader. Its wake never reaches you.",
+      deny: (c) => /^(?:\S*\/)?(?:node|bun)\s+\S*broker\.mjs\s+wait\b/.test(c) && (/\s&$/.test(c) || /(?:^|\s)(?:1|&)?>>?\s*(?!&)\S/.test(c))
+    },
+    {
+      name: "copilot-autopilot",
+      reason: "A worker never runs with --autopilot.",
+      deny: (c) => isCopilot(c) && /\s--autopilot\b/.test(c)
+    },
+    {
+      name: "copilot-model",
+      reason: "Every worker launch needs `--model claude-sonnet-5.5`.",
+      deny: (c) => isLaunch(c) && !/\s--model[ =]claude-sonnet-5\.5(?=\s|$)/.test(c)
+    }
+  ];
+});
+
+// plugins/factory/hooks/attention.ts
+var exports_attention = {};
+__export(exports_attention, {
+  main: () => main13
+});
+import { readFileSync as readFileSync5, rmSync as rmSync2, writeFileSync } from "node:fs";
+import { tmpdir as tmpdir3 } from "node:os";
+import { join as join15 } from "node:path";
+function identify(input, env = process.env) {
+  const session = hookSession(input);
+  if (typeof session !== "string" || !session)
+    return null;
+  const file = factoryFile(input.cwd ?? process.cwd(), env);
+  if (!file)
+    return null;
+  const found = { file, session, role: env.FACTORY_ROLE || undefined, pane: env.REX_BLOCK || undefined };
+  if (env.FACTORY_TASK || env.FACTORY_ROLE)
+    return found;
+  if (isCoordinator(input, env))
+    return { ...found, role: "coordinator" };
+  try {
+    const factory = JSON.parse(readFileSync5(file, "utf8"));
+    for (const task of factory.tasks ?? []) {
+      for (const [role, worker] of Object.entries(task.workers ?? {})) {
+        if (worker?.session === session)
+          return { ...found, role, pane: found.pane ?? worker.pane ?? undefined };
+      }
+    }
+  } catch {}
+  return null;
+}
+function observe(input) {
+  const args = input.toolInput ?? input.toolArgs;
+  if (!args || typeof args !== "object")
+    return null;
+  if (input.toolName === "ask_user") {
+    if (typeof args.message !== "string")
+      return null;
+    const fields = Object.values(args.requestedSchema?.properties ?? {});
+    const choices = fields.length === 1 && Array.isArray(fields[0]?.enum) ? fields[0].enum : [];
+    const options = choices.length > 0 && choices.every((option) => typeof option === "string") ? choices.slice(0, MAX_OPTIONS).map((option) => clip(option, MAX_OPTION)) : [];
+    return { type: "ask-user", text: args.message, options };
+  }
+  if (input.toolName === "bash" && typeof args.command === "string") {
+    return {
+      type: "command",
+      command: args.command,
+      bypass: args.requestSandboxBypass === true,
+      reason: typeof args.requestSandboxBypassReason === "string" ? args.requestSandboxBypassReason : ""
+    };
+  }
+  return null;
+}
+function takeNote(session, now) {
+  const file = noteFile(session);
+  try {
+    const note = JSON.parse(readFileSync5(file, "utf8"));
+    rmSync2(file, { force: true });
+    return now - note.at <= NOTE_TTL_MS ? note : null;
+  } catch {
+    return null;
+  }
+}
+function describe(input, note) {
+  const message = typeof input.message === "string" ? input.message : "";
+  if (input.notification_type === "elicitation_dialog") {
+    return note?.type === "ask-user" ? { kind: "ask-user", text: note.text, options: note.options } : { kind: "ask-user", text: message, options: [] };
+  }
+  const matches = note?.type === "command" && message.includes(note.command.split(`
+`)[0].slice(0, 80));
+  const bypass = /sandbox/i.test(message) || matches && note.bypass;
+  const reason = matches && note.bypass && note.reason ? `
+Sandbox bypass: ${note.reason}` : "";
+  return { kind: bypass ? "sandbox-bypass" : "permission", text: message + reason, options: [] };
+}
+async function run4() {
+  const input = JSON.parse(readFileSync5(0, "utf8"));
+  const who = input && typeof input === "object" ? identify(input) : null;
+  if (!who)
+    return;
+  const now = Date.now();
+  if (input.notification_type === undefined) {
+    const note = observe(input);
+    if (note)
+      writeFileSync(noteFile(who.session), JSON.stringify({ ...note, at: now }), { mode: 384 });
+    return;
+  }
+  if (!PROMPTS.has(input.notification_type))
+    return;
+  const { kind, text, options } = describe(input, takeNote(who.session, now));
+  const data = { session: who.session, kind, text: clip(text, MAX_TEXT) };
+  if (who.role)
+    data.role = who.role;
+  if (who.pane)
+    data.pane = who.pane;
+  if (options.length)
+    data.options = options;
+  await Promise.resolve().then(() => init_broker());
+  await emit(await resolveFactory(who.file), { type: "attention.requested", source: "attention", data });
+}
+async function main13(_argv) {
+  try {
+    await run4();
+  } catch {}
+}
+var MAX_TEXT = 2000, MAX_OPTIONS = 20, MAX_OPTION = 200, NOTE_TTL_MS = 30000, clip = (value, max) => String(value).slice(0, max), noteFile = (session) => join15(process.env.TMPDIR || tmpdir3(), `factory-attention-${session.replace(/[^\w-]/g, "_")}.json`), PROMPTS;
+var init_attention2 = __esm(() => {
+  init_gate();
+  PROMPTS = new Set(["permission_prompt", "elicitation_dialog"]);
+});
+
+// plugins/factory/hooks/stop-hook.ts
+var exports_stop_hook = {};
+__export(exports_stop_hook, {
+  main: () => main14
+});
+import { spawnSync as spawnSync3 } from "node:child_process";
+import { readFileSync as readFileSync6, statSync as statSync3 } from "node:fs";
+import { basename as basename8, dirname as dirname10, join as join16 } from "node:path";
+import { fileURLToPath as fileURLToPath4 } from "node:url";
+function block(reason) {
+  process.stdout.write(`${JSON.stringify({ decision: "block", reason: reason.slice(0, maxReason) })}
+`);
+}
+async function run5() {
+  let input;
+  try {
+    input = JSON.parse(readFileSync6(0, "utf8"));
+  } catch {
+    input = {};
+  }
+  const file = factoryFile(input.cwd ?? process.cwd());
+  if (!file || !isCoordinator(input) || !statSync3(file, { throwIfNoEntry: false }))
+    return;
+  const factory = JSON.parse(readFileSync6(file, "utf8"));
+  if (factory.status === "finished")
+    return;
+  if (await waiterPid(await resolveFactory(file)) === null) {
+    block(`No broker waiter is armed and the run is not finished. Arm the waiter now. Run \`node ${join16(lifecycle, "broker.mjs")} wait ${file} --since CURSOR --exclude-source coordinator --due\` as async bash with the latest cursor. If you have no cursor, run \`broker.mjs cursor\`. Then end the turn.`);
+    return;
+  }
+  if (input.stop_hook_active || input.stopHookActive)
+    return;
+  const sweep = spawnSync3(process.execPath, [join16(lifecycle, "reconcile.mjs"), file], { encoding: "utf8", timeout: 15000 });
+  if (sweep.status !== 0)
+    return;
+  const { findings } = JSON.parse(sweep.stdout);
+  if (findings?.length) {
+    block(`reconcile.mjs reports ${findings.length} finding(s). Act on each finding with factory.mjs. Keep the waiter armed. Then end the turn. If a finding needs the user, report it. Do not act on it. Findings: ${JSON.stringify(findings)}`);
+  }
+}
+async function main14(_argv) {
+  try {
+    await run5();
+  } catch {}
+}
+var here2, lifecycle, maxReason = 4000;
+var init_stop_hook = __esm(() => {
+  init_broker();
+  init_gate();
+  here2 = dirname10(fileURLToPath4(import.meta.url));
+  lifecycle = basename8(here2) === "hooks" ? join16(here2, "..", "skills", "lifecycle") : here2;
+});
+
+// plugins/factory/skills/lifecycle/factory.ts
+init_conflict();
+import { realpathSync as realpathSync3 } from "node:fs";
+import { pathToFileURL as pathToFileURL4 } from "node:url";
+var update2 = async (...args) => (await Promise.resolve().then(() => (init_tasks(), exports_tasks))).update(...args);
+var commands2 = {
+  write: () => Promise.resolve().then(() => (init_tasks(), exports_tasks)),
+  broker: () => Promise.resolve().then(() => (init_broker(), exports_broker)),
+  reconcile: () => Promise.resolve().then(() => (init_reconcile(), exports_reconcile)),
+  serve: () => Promise.resolve().then(() => (init_serve(), exports_serve)),
+  worktree: () => Promise.resolve().then(() => (init_worktree(), exports_worktree)),
+  "worker-name": () => Promise.resolve().then(() => (init_worker_name(), exports_worker_name)),
+  shot: () => Promise.resolve().then(() => (init_shot(), exports_shot)),
+  archive: () => Promise.resolve().then(() => (init_archive(), exports_archive)),
+  "session-metrics": () => Promise.resolve().then(() => (init_session_metrics(), exports_session_metrics)),
+  migrate: () => Promise.resolve().then(() => (init_migrate(), exports_migrate)),
+  "pr-watch": () => Promise.resolve().then(() => (init_pr_watch(), exports_pr_watch))
+};
+var hooks = {
+  guard: () => Promise.resolve().then(() => (init_guard(), exports_guard)),
+  attention: () => Promise.resolve().then(() => (init_attention2(), exports_attention)),
+  stop: () => Promise.resolve().then(() => (init_stop_hook(), exports_stop_hook))
+};
+var usage7 = `Run a factory command.
+
+Usage: node factory.mjs COMMAND [ARGS]
+
+Commands:
+  write FILE [OPTIONS]      Create or update a factory.json file (node factory.mjs write --help)
+  broker wait|emit|cursor|armed
+                            Wait for events, emit them, read the cursor, check the waiter
+  reconcile FILE            Sweep a factory file and print findings
+  serve                     Serve the dashboard
+  worktree create|delete|path
+                            Manage the worktree of a task
+  worker-name               Print the name of a worker
+  shot                      Screenshot the dashboard
+  archive clean FILE        Delete old task artifacts
+  session-metrics FILE      Count the events of the factory sessions
+  migrate                   Move legacy handoffs into a factory file
+  pr-watch                  Watch a pull request
+  hook guard|attention|stop Run a Copilot hook (the payload comes on stdin)
+
+Every command takes --help. Old usage still works: node factory.mjs FILE [OPTIONS] runs write.
+Exit: 2 for invalid usage.`;
+async function main15(argv) {
+  const [name, ...rest] = argv;
+  if (name === undefined || name === "-h" || name === "--help") {
+    (name === undefined ? console.error : console.log)(usage7);
+    process.exitCode = name === undefined ? 2 : 0;
+    return;
+  }
+  if (name === "hook") {
+    const [hook, ...args] = rest;
+    const load = hooks[hook ?? ""];
+    if (!load) {
+      console.error(`Unknown hook "${hook ?? ""}". Use guard, attention or stop.`);
+      process.exitCode = 2;
+      return;
+    }
+    await (await load()).main(args);
+    if (hook === "attention")
+      process.exit(0);
+    return;
+  }
+  const load = Object.hasOwn(commands2, name) ? commands2[name] : undefined;
+  const run = load ?? commands2.write;
+  const args = load ? rest : argv;
+  try {
+    await (await run()).main(args);
+  } catch (error) {
+    if (name !== "migrate")
+      throw error;
+    console.error(error.message);
+    process.exitCode = 1;
+  }
+}
+if (process.argv[1] && import.meta.url === pathToFileURL4(realpathSync3(process.argv[1])).href)
+  await main15(process.argv.slice(2));
 export {
   ConflictError,
-  main,
-  update
+  main15 as main,
+  update2 as update
 };
