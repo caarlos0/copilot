@@ -626,9 +626,10 @@ async function clean(file, { olderThan = 14 * day, run = false, now = Date.now()
   const unique = (key) => [...new Set(remove.map((item) => item[key]).filter((value) => value !== undefined))];
   return { run, tasks: unique("task"), rules: unique("rule"), counts, delete: remove, kept, "stale-large": large };
 }
-async function main() {
+async function main(argv) {
   try {
     const { values, positionals } = parseArgs({
+      args: argv,
       allowPositionals: true,
       options: { "older-than": { type: "string", default: "14d" }, run: { type: "boolean", default: false } }
     });
@@ -642,11 +643,12 @@ async function main() {
   }
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href)
-  await main();
+  await main(process.argv.slice(2));
 export {
   archiveDirectory,
   clean,
   findArchived,
+  main,
   readArchive,
   removeArchived,
   saveArchive

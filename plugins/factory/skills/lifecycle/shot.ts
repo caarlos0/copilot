@@ -68,10 +68,10 @@ function startServer(directory: string) {
   return { child, url };
 }
 
-async function main() {
+export async function main(argv: string[]) {
   let options: ReturnType<typeof parseShotArgs>;
   try {
-    options = parseShotArgs(process.argv.slice(2));
+    options = parseShotArgs(argv);
   } catch (error) {
     console.error(`${(error as Error).message}\nRun with --help for usage.`);
     process.exitCode = 2;
@@ -119,4 +119,4 @@ async function main() {
   if (failed) process.exitCode = 1;
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main();
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main(process.argv.slice(2));

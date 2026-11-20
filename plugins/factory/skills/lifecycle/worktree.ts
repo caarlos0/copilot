@@ -2,6 +2,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { constants, homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { defaultBranch } from "./default-branch.mjs";
 
@@ -221,7 +222,7 @@ function remove(
   return { ...info, removed: true, branch_deleted: branchDeleted };
 }
 
-function main(argv: string[]): Outcome {
+function plan(argv: string[]): Outcome {
   const dash = argv.indexOf("--");
   const [args, command] = dash === -1 ? [argv, []] : [argv.slice(0, dash), argv.slice(dash + 1)];
   let parsed;
@@ -277,25 +278,29 @@ function exitWith(error: unknown): never {
   process.exit(CODES[code]);
 }
 
-let outcome: Outcome;
-try {
-  outcome = main(process.argv.slice(2));
-} catch (error) {
-  exitWith(error);
+export function main(argv: string[]) {
+  let outcome: Outcome;
+  try {
+    outcome = plan(argv);
+  } catch (error) {
+    exitWith(error);
+  }
+
+  if ("out" in outcome) {
+    process.stdout.write(`${outcome.out}\n`);
+  } else if (outcome.command?.length) {
+    process.stderr.write(`${JSON.stringify(outcome.result)}\n`);
+    const [cmd, ...args] = outcome.command;
+    const child = spawn(cmd, args, { cwd: outcome.result.path, stdio: "inherit" });
+    for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) process.on(signal, () => child.kill(signal));
+    child.on("error", (error) => {
+      process.stderr.write(`${cmd}: ${error.message}\n`);
+      process.exit(127);
+    });
+    child.on("exit", (code, signal) => process.exit(code ?? 128 + constants.signals[signal as NodeJS.Signals]));
+  } else {
+    process.stdout.write(`${JSON.stringify(outcome.result)}\n`);
+  }
 }
 
-if ("out" in outcome) {
-  process.stdout.write(`${outcome.out}\n`);
-} else if (outcome.command?.length) {
-  process.stderr.write(`${JSON.stringify(outcome.result)}\n`);
-  const [cmd, ...args] = outcome.command;
-  const child = spawn(cmd, args, { cwd: outcome.result.path, stdio: "inherit" });
-  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) process.on(signal, () => child.kill(signal));
-  child.on("error", (error) => {
-    process.stderr.write(`${cmd}: ${error.message}\n`);
-    process.exit(127);
-  });
-  child.on("exit", (code, signal) => process.exit(code ?? 128 + constants.signals[signal as NodeJS.Signals]));
-} else {
-  process.stdout.write(`${JSON.stringify(outcome.result)}\n`);
-}
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) main(process.argv.slice(2));

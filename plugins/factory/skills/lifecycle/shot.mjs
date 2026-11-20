@@ -66,10 +66,10 @@ function startServer(directory) {
   });
   return { child, url };
 }
-async function main() {
+async function main(argv) {
   let options;
   try {
-    options = parseShotArgs(process.argv.slice(2));
+    options = parseShotArgs(argv);
   } catch (error) {
     console.error(`${error.message}
 Run with --help for usage.`);
@@ -128,7 +128,8 @@ ${(run.stderr || "").trim().split(`
     process.exitCode = 1;
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url))
-  await main();
+  await main(process.argv.slice(2));
 export {
+  main,
   parseShotArgs
 };

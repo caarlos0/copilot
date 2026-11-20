@@ -5,6 +5,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { constants, homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { defaultBranch } from "./default-branch.mjs";
 var usage = `Usage:
@@ -201,7 +202,7 @@ function remove(ctx, name, { force, defaultBranch: override, mergedPr }) {
   const branchDeleted = (merged || prMerged) && branch !== null && gitOk(ctx.cwd, "branch", prMerged && !merged ? "-D" : "-d", branch);
   return { ...info, removed: true, branch_deleted: branchDeleted };
 }
-function main(argv) {
+function plan(argv) {
   const dash = argv.indexOf("--");
   const [args, command] = dash === -1 ? [argv, []] : [argv.slice(0, dash), argv.slice(dash + 1)];
   let parsed;
@@ -261,29 +262,36 @@ function exitWith(error) {
 `);
   process.exit(CODES[code]);
 }
-var outcome;
-try {
-  outcome = main(process.argv.slice(2));
-} catch (error) {
-  exitWith(error);
+function main(argv) {
+  let outcome;
+  try {
+    outcome = plan(argv);
+  } catch (error) {
+    exitWith(error);
+  }
+  if ("out" in outcome) {
+    process.stdout.write(`${outcome.out}
+`);
+  } else if (outcome.command?.length) {
+    process.stderr.write(`${JSON.stringify(outcome.result)}
+`);
+    const [cmd, ...args] = outcome.command;
+    const child = spawn(cmd, args, { cwd: outcome.result.path, stdio: "inherit" });
+    for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"])
+      process.on(signal, () => child.kill(signal));
+    child.on("error", (error) => {
+      process.stderr.write(`${cmd}: ${error.message}
+`);
+      process.exit(127);
+    });
+    child.on("exit", (code, signal) => process.exit(code ?? 128 + constants.signals[signal]));
+  } else {
+    process.stdout.write(`${JSON.stringify(outcome.result)}
+`);
+  }
 }
-if ("out" in outcome) {
-  process.stdout.write(`${outcome.out}
-`);
-} else if (outcome.command?.length) {
-  process.stderr.write(`${JSON.stringify(outcome.result)}
-`);
-  const [cmd, ...args] = outcome.command;
-  const child = spawn(cmd, args, { cwd: outcome.result.path, stdio: "inherit" });
-  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"])
-    process.on(signal, () => child.kill(signal));
-  child.on("error", (error) => {
-    process.stderr.write(`${cmd}: ${error.message}
-`);
-    process.exit(127);
-  });
-  child.on("exit", (code, signal) => process.exit(code ?? 128 + constants.signals[signal]));
-} else {
-  process.stdout.write(`${JSON.stringify(outcome.result)}
-`);
-}
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href)
+  main(process.argv.slice(2));
+export {
+  main
+};

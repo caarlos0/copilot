@@ -39,9 +39,10 @@ export function workerName({ role, ref, summary }: { role?: string; ref?: string
   return `${head}: ${text}`;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+export function main(argv: string[]) {
   try {
     const { values } = parseArgs({
+      args: argv,
       options: { role: { type: "string" }, ref: { type: "string" }, summary: { type: "string" } },
       strict: true,
     });
@@ -51,3 +52,5 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     process.exit(1);
   }
 }
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main(process.argv.slice(2));

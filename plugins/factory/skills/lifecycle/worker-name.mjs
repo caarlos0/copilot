@@ -38,9 +38,10 @@ function workerName({ role, ref, summary }) {
   const text = chars.length <= room ? chars.join("") : `${chars.slice(0, room - 1).join("").trimEnd()}…`;
   return `${head}: ${text}`;
 }
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+function main(argv) {
   try {
     const { values } = parseArgs({
+      args: argv,
       options: { role: { type: "string" }, ref: { type: "string" }, summary: { type: "string" } },
       strict: true
     });
@@ -52,6 +53,9 @@ ${usage}`);
     process.exit(1);
   }
 }
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)
+  main(process.argv.slice(2));
 export {
+  main,
   workerName
 };

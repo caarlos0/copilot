@@ -3,6 +3,8 @@
 
 // plugins/factory/skills/lifecycle/pr-watch.ts
 import { execFile, spawn } from "node:child_process";
+import { realpathSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 import { parseArgs, promisify } from "node:util";
 var run = promisify(execFile);
 var USAGE = `Usage: pr-watch.mjs [PR] [--repo OWNER/REPO] [--merge] [--interval S] [--timeout S]
@@ -421,20 +423,27 @@ async function watch(opts) {
     listener?.stop();
   }
 }
-var opts = parseOptions(process.argv.slice(2));
-try {
-  await watch(opts);
-} catch (error) {
-  if (error instanceof RateLimited) {
-    process.stdout.write(`${JSON.stringify({ event: "rate_limited", retry_at: error.retryAt, reason: error.message })}
+async function main(argv) {
+  const opts = parseOptions(argv);
+  try {
+    await watch(opts);
+  } catch (error) {
+    if (error instanceof RateLimited) {
+      process.stdout.write(`${JSON.stringify({ event: "rate_limited", retry_at: error.retryAt, reason: error.message })}
 `);
-    process.exitCode = 3;
-  } else {
-    const { message } = error;
-    process.stdout.write(`${JSON.stringify({ event: "error", message })}
+      process.exitCode = 3;
+    } else {
+      const { message } = error;
+      process.stdout.write(`${JSON.stringify({ event: "error", message })}
 `);
-    process.stderr.write(`pr-watch: ${message}
+      process.stderr.write(`pr-watch: ${message}
 `);
-    process.exitCode = 1;
+      process.exitCode = 1;
+    }
   }
 }
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href)
+  await main(process.argv.slice(2));
+export {
+  main
+};

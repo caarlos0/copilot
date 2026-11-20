@@ -5,6 +5,8 @@
 // classification is the same either way. Dependency-free; talks to GitHub only
 // through `gh`.
 import { type ChildProcess, execFile, spawn } from "node:child_process";
+import { realpathSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 import { parseArgs, promisify } from "node:util";
 
 const run = promisify(execFile);
@@ -434,17 +436,21 @@ async function watch(opts: Options) {
   }
 }
 
-const opts = parseOptions(process.argv.slice(2));
-try {
-  await watch(opts);
-} catch (error) {
-  if (error instanceof RateLimited) {
-    process.stdout.write(`${JSON.stringify({ event: "rate_limited", retry_at: error.retryAt, reason: error.message })}\n`);
-    process.exitCode = 3;
-  } else {
-    const { message } = error as Error;
-    process.stdout.write(`${JSON.stringify({ event: "error", message })}\n`);
-    process.stderr.write(`pr-watch: ${message}\n`);
-    process.exitCode = 1;
+export async function main(argv: string[]) {
+  const opts = parseOptions(argv);
+  try {
+    await watch(opts);
+  } catch (error) {
+    if (error instanceof RateLimited) {
+      process.stdout.write(`${JSON.stringify({ event: "rate_limited", retry_at: error.retryAt, reason: error.message })}\n`);
+      process.exitCode = 3;
+    } else {
+      const { message } = error as Error;
+      process.stdout.write(`${JSON.stringify({ event: "error", message })}\n`);
+      process.stderr.write(`pr-watch: ${message}\n`);
+      process.exitCode = 1;
+    }
   }
 }
+
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) await main(process.argv.slice(2));

@@ -1,6 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
+import { realpathSync } from "node:fs";
 import { access, link, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { countByState, defaultBudget, defaultLimits, format, githubResourceURL, githubURL, prURL, validate } from "./factory-data.mjs";
 import { stateFile } from "./state-dir.mjs";
@@ -289,7 +291,7 @@ function build(project: string, key: string, loaded: Loaded[], reviewers: Source
   return { data, report };
 }
 
-async function main() {
+export async function main(argv: string[]) {
   let options: {
     help?: boolean;
     project?: string;
@@ -300,6 +302,7 @@ async function main() {
   };
   try {
     options = parseArgs({
+      args: argv,
       options: {
         help: { type: "boolean", short: "h" },
         project: { type: "string" },
@@ -417,7 +420,9 @@ It refuses to overwrite an existing factory.json, and stops when a legacy owner 
   console.log(JSON.stringify(summary, null, 2));
 }
 
-main().catch((error) => {
-  console.error(error.message);
-  process.exitCode = 1;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
+  await main(process.argv.slice(2)).catch((error) => {
+    console.error(error.message);
+    process.exitCode = 1;
+  });
+}

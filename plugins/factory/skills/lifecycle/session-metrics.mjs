@@ -167,11 +167,12 @@ async function report(entries, directory, activeSince = null) {
   };
   return { ...window, totals: sum(sessions), missing, sessions };
 }
-async function main() {
+async function main(argv) {
   let values;
   let positionals;
   try {
     ({ values, positionals } = parseArgs({
+      args: argv,
       options: {
         help: { type: "boolean", short: "h" },
         registry: { type: "string" },
@@ -230,8 +231,9 @@ Run with --help for usage.`);
   }
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href)
-  await main();
+  await main(process.argv.slice(2));
 export {
+  main,
   measureFile,
   report
 };
