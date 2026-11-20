@@ -16,12 +16,6 @@ structure or workflows change.
   `<plugin>/v<version>` tag, and pushes both atomically.
 - `plugins/<plugin>/agents/*.agent.md` defines agent roles and model choices.
   Keep roles distinct and put reusable procedures in skills.
-- `bench/model-benchmark/` is a dependency-free Node harness (TypeScript,
-  bundled in place to `.mjs` like the plugins) that compares
-  models on history-based tasks and reports cost per passing run. It is not
-  shipped in any plugin, so its build boundary is the repository, not a plugin.
-  Its README has the commands. `node --test` covers it
-  with synthetic repositories, so tests never call `copilot`.
 - `plugins/<plugin>/skills/<name>/SKILL.md` contains reusable procedures.
   Keep supporting scripts, references, and assets beside the skill.
 - Machine settings and personal instructions remain in `caarlos0/dotfiles`.
