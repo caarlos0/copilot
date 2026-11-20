@@ -2708,7 +2708,6 @@ test("the result link in Task details and the card summary both open the result 
   const name = "owner.repo-issue-9-implementation-result.json";
   const raw = '{"outcome":"complete","note":"<script>alert(1)</script>","count":3}';
   await writeFile(join(ui.directory, name), raw);
-  ui.run("navigator = { clipboard: { writeText: async (value) => { globalThis.copied = value; } } }");
   const task = structuredClone(example.tasks.find((item) => item.id === "issue-9"));
   task.state = "implementation";
   task.workers.implementation.summary = "Shipped.";
@@ -2728,15 +2727,14 @@ test("the result link in Task details and the card summary both open the result 
     assert.equal(click.defaultPrevented, true);
     assert.equal(dialog.open, true);
     assert.equal(ui.get("result-title").textContent, "issue-9: implementation result");
-    assert.equal(ui.get("result-name").textContent, name);
-    assert.equal(ui.get("open-raw").href, href);
+    for (const id of ["result-name", "copy-result", "open-raw"]) {
+      assert.ok(!ui.document.getElementById(id), `The popup has no #${id}.`);
+    }
     assert.equal(ui.get("result-error").hidden, true);
     const body = ui.get("result-body");
     assert.equal(body.textContent, JSON.stringify(JSON.parse(raw), null, 2));
     assert.equal(body.querySelector(".json-key").textContent, '"outcome"');
     assert.equal(body.querySelector("script"), null);
-    await ui.get("copy-result").fire("click");
-    assert.equal(ui.run("copied"), raw, "Copy JSON copies the file as it is.");
     assert.equal(ui.document.activeElement, body, "Focus moves into the popup.");
     await dialog.fire("cancel");
     assert.equal(dialog.open, false);

@@ -271,8 +271,9 @@ dashboard reads only the factory file. A `--workers` write that sets a worker
 A worker's `result` link (Task details, Find work) and the "View result" link under
 a card summary open one popup with the result file, pretty-printed and highlighted
 (`highlightText`, built with `textContent`). It loads the file through
-`/api/artifact`, so the server's access checks apply. The link keeps its `href`, so
-a modified click or "Open raw" still opens the raw file in a new tab.
+`/api/artifact`, so the server's access checks apply. The popup shows only the title,
+a close button and the JSON. The link keeps its `href`, so a modified click still opens
+the raw file in a new tab.
 
 The "Task details" section of a task card has a "Usage" block: elapsed time (first history
 entry to `resolved`, or live while open) and, per worker role plus a task total, models, credits

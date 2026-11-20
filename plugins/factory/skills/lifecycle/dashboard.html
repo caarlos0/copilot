@@ -164,8 +164,6 @@
       dialog:focus { outline: none; }
       dialog::backdrop { background: rgb(0 0 0 / .5); }
       #move-dialog, #settings-dialog { width: min(560px, calc(100% - 32px)); }
-      .result-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 12px 24px 0; }
-      .result-bar code { flex: 1; min-width: 0; overflow-wrap: anywhere; }
       #result-error { margin: 8px 24px 0; color: var(--blocked); overflow-wrap: anywhere; }
       #result-body { margin: 12px 24px 24px; max-height: 60vh; overflow: auto; }
       #result-body pre { margin: 0; }
@@ -446,11 +444,6 @@
           <h2 id="result-title"></h2>
           <button id="close-result" class="icon-button close-button" type="button" tabindex="-1"
             aria-label="Close result" title="Close result">&times;</button>
-        </div>
-        <div class="result-bar">
-          <code id="result-name"></code>
-          <button id="copy-result" type="button">Copy JSON</button>
-          <a id="open-raw" target="_blank" rel="noopener noreferrer">Open raw</a>
         </div>
         <p id="result-error" class="muted" role="alert" hidden></p>
         <div id="result-body" tabindex="0" role="region" aria-label="Result JSON"></div>
@@ -1086,19 +1079,13 @@
       }
 
       // Loads one result file through the artifact route and shows it pretty-printed and highlighted.
-      async function openResult({ task, role, name, href, trigger }) {
+      async function openResult({ task, role, href, trigger }) {
         const load = ++resultLoad;
         resultOpener = trigger;
         const body = document.getElementById("result-body");
         const error = document.getElementById("result-error");
-        const copy = document.getElementById("copy-result");
         document.getElementById("result-title").textContent = `${task}: ${role} result`;
-        document.getElementById("result-name").textContent = name;
-        document.getElementById("open-raw").href = href;
         error.hidden = true;
-        copy.disabled = true;
-        copy.textContent = "Copy JSON";
-        copy.rawText = "";
         body.replaceChildren(element("p", "Loading…", "muted"));
         resultDialog.showModal();
         body.focus();
@@ -1122,12 +1109,9 @@
           error.textContent = message;
           error.hidden = false;
           body.replaceChildren(element("pre", text));
-          copy.disabled = !text;
         } else {
           body.replaceChildren(highlightJSON(parsed));
-          copy.disabled = false;
         }
-        copy.rawText = text;
       }
 
       function closeSettings() {
@@ -1609,7 +1593,7 @@
         node.addEventListener("click", (event) => {
           if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
           event.preventDefault();
-          return openResult({ ...context, name, href, trigger: node });
+          return openResult({ ...context, href, trigger: node });
         });
         return node;
       }
@@ -2471,16 +2455,6 @@
       wireDismiss(moveDialog, "close-move", closeMove);
       wireDismiss(settingsDialog, "close-settings", closeSettings);
       wireDismiss(resultDialog, "close-result", closeResult);
-      document.getElementById("copy-result").addEventListener("click", async (event) => {
-        const button = event.target;
-        try {
-          await navigator.clipboard.writeText(button.rawText);
-          button.textContent = "Copied";
-        } catch {
-          button.textContent = "Copy failed";
-        }
-        setTimeout(() => { button.textContent = "Copy JSON"; }, 2000);
-      });
       wireDismiss(paletteDialog, "close-palette", () => paletteDialog.close());
 
       document.getElementById("logo").src = document.getElementById("icon").href;
