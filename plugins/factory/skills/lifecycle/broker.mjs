@@ -6,6 +6,7 @@ import { basename, dirname, extname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { dueRules, isObject, nextDue } from "./factory-data.mjs";
+import { alive } from "./state-dir.mjs";
 
 const maxTimer = 2 ** 31 - 1;
 const maxLine = 64 * 1024;
@@ -38,12 +39,8 @@ const waiterFile = (file) =>
 
 class UsageError extends Error {}
 
-function alive(pid) {
-  try {
-    process.kill(pid, 0);
-  } catch (error) {
-    if (error.code !== "EPERM") return false;
-  }
+function isWaiter(pid) {
+  if (!alive(pid)) return false;
   // A reused PID is alive but not a waiter. When ps cannot run (some sandboxes),
   // the process cannot be identified, so it counts as the waiter.
   try {
@@ -66,7 +63,7 @@ export async function waiterPid(factory) {
     throw error;
   }
   const pid = Number.parseInt(text, 10);
-  return Number.isInteger(pid) && pid > 0 && alive(pid) ? pid : null;
+  return Number.isInteger(pid) && pid > 0 && isWaiter(pid) ? pid : null;
 }
 
 // A hard link makes the claim atomic and never exposes a half-written PID file.

@@ -8,17 +8,9 @@ import { resolveAttention, sameId } from "./attention.mjs";
 import { resolveFactory, waiterPid } from "./broker.mjs";
 import { intervalMs } from "./factory-data.mjs";
 import { hooksInactive } from "./gate.mjs";
+import { readJSON } from "./state-dir.mjs";
 
 const usage = "Usage: node reconcile.mjs FACTORY_FILE [--default-branch NAME] [--blocked-after 24h] [--attention-after 30m]";
-
-async function readJSON(file) {
-  try {
-    return JSON.parse(await readFile(file, "utf8"));
-  } catch (error) {
-    if (error.code === "ENOENT" || error instanceof SyntaxError) return null;
-    throw error;
-  }
-}
 
 const git = (cwd, ...args) => execFileSync("git", ["-C", cwd, ...args], {
   encoding: "utf8",

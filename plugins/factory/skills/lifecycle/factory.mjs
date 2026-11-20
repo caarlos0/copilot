@@ -10,6 +10,7 @@ import {
   parseBlocker, validate,
 } from "./factory-data.mjs";
 import { findSessions, recordSessions, registryFile, sessionID, sessionStateDirectory } from "./sessions.mjs";
+import { alive } from "./state-dir.mjs";
 
 export class ConflictError extends Error {}
 
@@ -503,15 +504,6 @@ async function locateSessions(current, previous, launches, now, track) {
 }
 
 const lockMaxAge = 10 * 60 * 1000;
-
-function alive(pid) {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return error.code === "EPERM";
-  }
-}
 
 // The lock holds its owner's PID. A dead owner leaves a stale lock. A lock with no PID
 // (old format, or its owner stopped before writing it) is stale only after ten minutes.

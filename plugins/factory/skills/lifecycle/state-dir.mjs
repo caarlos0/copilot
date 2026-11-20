@@ -1,6 +1,26 @@
 import { statSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+
+// Parsed JSON, or null when the file is missing or not valid JSON.
+export async function readJSON(file) {
+  try {
+    return JSON.parse(await readFile(file, "utf8"));
+  } catch (error) {
+    if (error.code === "ENOENT" || error instanceof SyntaxError) return null;
+    throw error;
+  }
+}
+
+export function alive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === "EPERM";
+  }
+}
 
 const exists = (path) => {
   try {

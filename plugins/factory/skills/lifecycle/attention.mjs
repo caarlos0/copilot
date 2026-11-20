@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { emit, eventsFile, resolveFactory } from "./broker.mjs";
+import { readJSON } from "./state-dir.mjs";
 
 const run = promisify(execFile);
 const tailBytes = 256 * 1024;
@@ -16,15 +17,6 @@ const bare = (id) => id.replace(/^\w+:/, "");
 export const sameId = (a, b) => bare(a).endsWith(bare(b)) || bare(b).endsWith(bare(a));
 
 const sessionState = () => process.env.FACTORY_SESSION_STATE ?? join(homedir(), ".copilot", "session-state");
-
-async function readJSON(file) {
-  try {
-    return JSON.parse(await readFile(file, "utf8"));
-  } catch (error) {
-    if (error.code === "ENOENT" || error instanceof SyntaxError) return null;
-    throw error;
-  }
-}
 
 // Session logs reach 500 MB, so read the last bytes only. A busy session writes more than one
 // tail after a prompt (tool output, streaming), so the tail grows until it reaches an event
