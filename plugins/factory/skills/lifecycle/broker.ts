@@ -486,13 +486,14 @@ armed   Read-only. Prints {"armed":true,"pid":N} and exits 0 when a waiter for t
 
 The command prints progress and errors to stderr. Exit: 0 success, 1 operational failure, 2 invalid usage.`;
 
-async function main() {
+export async function main(argv: string[]) {
   let command = "";
   let factory = "";
   let event: NewEvent = { type: "", source: "" };
   let waitOptions: WaitOptions = {};
   try {
     const { values, positionals } = parseArgs({
+      args: argv,
       options: {
         help: { type: "boolean", short: "h" },
         since: { type: "string" },
@@ -564,4 +565,4 @@ async function main() {
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) await main();
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) await main(process.argv.slice(2));

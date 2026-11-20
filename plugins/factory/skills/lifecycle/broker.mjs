@@ -474,13 +474,14 @@ armed   Read-only. Prints {"armed":true,"pid":N} and exits 0 when a waiter for t
         waiter exists. A turn must never end while armed exits 1.
 
 The command prints progress and errors to stderr. Exit: 0 success, 1 operational failure, 2 invalid usage.`;
-async function main() {
+async function main(argv) {
   let command = "";
   let factory = "";
   let event = { type: "", source: "" };
   let waitOptions = {};
   try {
     const { values, positionals } = parseArgs({
+      args: argv,
       options: {
         help: { type: "boolean", short: "h" },
         since: { type: "string" },
@@ -560,10 +561,11 @@ Run with --help for usage.`);
   }
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href)
-  await main();
+  await main(process.argv.slice(2));
 export {
   emit,
   eventsFile,
+  main,
   resolveFactory,
   waitForEvents,
   waiterPid

@@ -645,12 +645,13 @@ const taskOptions = [
   "expected-revision", "feedback-id", "ack-feedback",
 ];
 
-async function main() {
+export async function main(argv: string[]) {
   let file: string;
   let values: Values;
   let positionals: string[];
   try {
     ({ values, positionals } = parseArgs({
+      args: argv,
       options: {
         help: { type: "boolean", short: "h" },
         project: { type: "string" },
@@ -841,4 +842,4 @@ A conflict is an error. The command never tries again.`);
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) await main();
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) await main(process.argv.slice(2));

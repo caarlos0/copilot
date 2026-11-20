@@ -1127,12 +1127,13 @@ var taskOptions = [
   "feedback-id",
   "ack-feedback"
 ];
-async function main() {
+async function main(argv) {
   let file;
   let values;
   let positionals;
   try {
     ({ values, positionals } = parseArgs({
+      args: argv,
       options: {
         help: { type: "boolean", short: "h" },
         project: { type: "string" },
@@ -1325,8 +1326,9 @@ Run with --help for usage.`);
   }
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href)
-  await main();
+  await main(process.argv.slice(2));
 export {
   ConflictError,
+  main,
   update
 };
