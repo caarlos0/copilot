@@ -739,6 +739,10 @@ work". It changes nothing without the user's answer. Its worker follows
    - `rule`, `limit`, or `budget`: apply it with `--rules`, `--limits`, or `--budget`.
    - `process`: put it in later briefs.
    - `skill`: report only. Never edit plugin files.
+   - `grant`: report only. Give the user the exact `copilot config` command (or
+     launch flag) from the result `apply` field and the reason. Never edit
+     `~/.copilot` settings or config yourself, and never add a grant to a
+     launch command on your own.
 
    For `declined`, change nothing. In both cases add `"decision": {"status":
    "applied" | "declined" | "noted", "at", "note", "proposal_id"}` to the result
@@ -1348,7 +1352,7 @@ the cursor. Each event has `id`, `at`, `type`, `task`, `source`, and `data`:
 | `pr.merged` | the implementation worker after its final `merged: true` result | `role`, `pr`, `merge_commit`, `head` |
 | `attention.requested` | a hook (`--source attention`) when a Copilot session waits for the user; no `--task` | `session`, `kind` (`permission`, `sandbox-bypass`, `ask-user`; `other` is accepted for old logs but no hook writes it), `text` (at most 2000 characters), optional `role`, `pane`, `options` (strings) |
 | `attention.resolved` | a hook (`--source attention`) when that wait ends; no `--task` | `session` |
-| `improve.proposed` | you (`--source improve`), once per change an `improve` worker proposes; no `--task` | `rule`, `change` (`rule`, `limit`, `budget`, `process`, `skill`), `title`, `evidence` (at most 2000 characters), `recommended` (`accept` or `decline`), `proposal_id` (unique), `result` (the result file name) |
+| `improve.proposed` | you (`--source improve`), once per change an `improve` worker proposes; no `--task` | `rule`, `change` (`rule`, `limit`, `budget`, `process`, `skill`, `grant`), `title`, `evidence` (at most 2000 characters), `recommended` (`accept` or `decline`), `proposal_id` (unique), `result` (the result file name) |
 | `improve.decided` | the dashboard server (`--source dashboard`) when the user clicks Accept or Decline; no `--task` | `proposal_id`, `decision` (`accepted` or `declined`), optional `note` |
 | `rule.due` | `wait --due` itself, never stored | `rules`: due rule IDs |
 | `reconcile.due` | `wait --due` itself, every 5 minutes while the run is `active`, never stored | `every`: `"5m"` |

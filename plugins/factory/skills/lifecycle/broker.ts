@@ -32,7 +32,7 @@ const reconcileMs = 5 * 60_000;
 const workerOutcomes = ["working", "waiting", "complete", "blocked"];
 const attentionKinds = ["permission", "sandbox-bypass", "ask-user", "other"];
 const maxAttentionText = 2000;
-const changeKinds = ["rule", "limit", "budget", "process", "skill"];
+const changeKinds = ["rule", "limit", "budget", "process", "skill", "grant"];
 const answers = ["accept", "decline"];
 const decisions = ["accepted", "declined"];
 

@@ -31,7 +31,8 @@ The brief gives you `WINDOW_START` (an ISO time) and absolute paths for:
   its text.
 - Put session IDs and metric values in the result. Never put prompts, replies,
   commands, file contents, or secrets in the result, an issue, a PR, or a
-  comment.
+  comment. The one exception is a `grant`: it names a command name, a path, or a
+  host, as in step 4.
 
 ## Session history queries
 
@@ -66,6 +67,7 @@ If you use `session_store_sql`, obey these rules:
    | Questions to the user | `tools.ask_user.calls`, `user_messages` in worker sessions | Give the worker a default answer, or decide in the brief |
    | Failures | `tools.<name>.failures` | Correct the tool profile or the brief; a tool that fails every call is a config bug |
    | User waits | `attention.requested` per `role`, and the median time to the `attention.resolved` for the same `session`, in the events log `<owner.repo>-factory-events.jsonl` beside the factory file | Give the worker a default answer, or allow the tool in its profile |
+   | Permission prompts | `attention.requested` with `kind` `sandbox-bypass` or `permission`, per `role` and per command name or path (step 4) | Fix the prompt, skill, or agent; or a narrow `grant` |
 
    Four of these signals have a standing line in every implementation brief
    ("Standing cost lines" in the skill). If the signal is still high, the brief
@@ -87,11 +89,45 @@ If you use `session_store_sql`, obey these rules:
    factory ran the tool without `--active-since`, its totals are cumulative over
    the whole session. Compare them with the previous result, not with the
    window.
-4. **Pick one change, or none.** Choose the change with the largest expected
+4. **Reduce permission prompts.** Every `sandbox-bypass` and `permission`
+   request makes a user wait, so look for the repeated ones. Read the
+   `attention.requested` events of the window in the events log
+   `<owner.repo>-factory-events.jsonl` (beside the factory file; use only events
+   whose `session` is in the registry). Count the events with `kind`
+   `sandbox-bypass` or `permission` per `role`, and per command name or path in
+   the `text`. A cause is one role with one command name or path. Rank the causes
+   by count. The metrics file has no count for them, so do not add a data store.
+   For each of the top 3 causes, choose the smallest fix, in this order:
+   1. Fix the prompt, skill, or agent so the worker does not need the access.
+      For example, use a path inside the worktree or `$TMPDIR`, or a tool that
+      does not need to leave the sandbox. This is a `process` or `skill` change.
+   2. If the access is needed, a narrow grant. This is a `grant` change.
+
+   Before you propose a grant, learn what grants exist. Your sandbox can fail
+   to run `copilot help config`; if it does, use `fetch_copilot_cli_documentation`
+   with the entries `cli:copilot config`, `topic:permissions`, and
+   `topic:sandbox#configuration`. The grants that are documented are:
+   - `copilot config KEY VALUE` appends a value to a list setting in
+     `~/.copilot/settings.json`. Examples are `allowedUrls` and
+     `sandbox.userPolicy.filesystem.readwritePaths` (or `readonlyPaths`);
+   - the launch flags `--allow-tool 'shell(CMD)'`, `--add-dir PATH`, and
+     `--allow-url HOST`, which last for one run.
+
+   A `grant` proposal must give, in `apply`, the exact command line that the
+   user runs (or the exact launch flag), and say why it is the least privilege
+   that works: one command name, one directory, or one host, never `--allow-all`,
+   `--allow-all-tools`, `--allow-all-paths`, or a rule that also allows a
+   destructive command (for example `shell(gh pr)` also allows `gh pr merge`). Do
+   not propose a grant for a command that the worker deny flags block. Write the
+   command name or path only. Never copy a full command line, its arguments, or
+   its output into the result. You never apply a grant. Do not change launch
+   scripts in this step. Another task covers `--add-dir`.
+5. **Pick one change, or none.** Choose the change with the largest expected
    effect on one metric. If the window has fewer than 3 worker sessions, prefer
    no change. If the cause is outside the factory (for example a CI outage), say
-   so and propose nothing.
-5. **Write the result** (below), atomically. Write a temporary file in the same
+   so and propose nothing. Put the other causes of step 4 in `findings`, with
+   the grant that you considered.
+6. **Write the result** (below), atomically. Write a temporary file in the same
    directory, then rename it. End with the result path.
 
 ## Change kinds
@@ -102,6 +138,7 @@ If you use `session_store_sql`, obey these rules:
 | `limit` | The worker caps in `limits`, or the total `budget` | The factory, with `--limits` or `--budget`, after the user accepts it in the dashboard |
 | `process` | How the factory or its workers behave, such as a brief line | The factory, in later briefs, after the user accepts it in the dashboard |
 | `skill` | A text change to the factory skill or agent files | The user. The factory only reports it |
+| `grant` | A narrow permission or sandbox grant that stops a repeated prompt (see step 4) | The user. The factory only reports the exact command |
 
 ## Result
 

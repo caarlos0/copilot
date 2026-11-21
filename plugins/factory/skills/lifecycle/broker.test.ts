@@ -637,6 +637,7 @@ test("improve events need no task, validate their data, and a waiter that skips 
   const emit = (type: string, body: unknown, source: string) => f.run("emit", f.factory, type, "--source", source, "--data", JSON.stringify(body));
   const done = await f.wait("--exclude-source", "improve");
   assert.equal(emit("improve.proposed", proposed, "improve").status, 0);
+  assert.equal(emit("improve.proposed", { ...proposed, change: "grant", proposal_id: "p2" }, "improve").status, 0);
   assert.equal(emit("improve.decided", { proposal_id: "p1", decision: "accepted", note: "ok" }, "dashboard").status, 0);
   assert.deepEqual((await done()).events.map(({ type, source }) => [type, source]), [["improve.decided", "dashboard"]]);
 

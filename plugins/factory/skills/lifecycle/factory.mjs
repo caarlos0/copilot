@@ -1707,7 +1707,7 @@ var init_broker = __esm(() => {
   reconcileMs = 5 * 60000;
   workerOutcomes = ["working", "waiting", "complete", "blocked"];
   attentionKinds = ["permission", "sandbox-bypass", "ask-user", "other"];
-  changeKinds = ["rule", "limit", "budget", "process", "skill"];
+  changeKinds = ["rule", "limit", "budget", "process", "skill", "grant"];
   answers = ["accept", "decline"];
   decisions = ["accepted", "declined"];
   eventTypes = {

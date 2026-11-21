@@ -431,7 +431,14 @@ worker follows `improve.md` and Lever's `run-health-review`, and proposes at
 most one change. The factory does not ask in chat. It emits `improve.proposed`
 (source `improve`). The user accepts or declines in the "Waiting
 for you" list of the dashboard. The factory applies `rule` and `limit` changes only after
-`improve.decided`, and never edits plugin files. `factory.mjs write` keeps
+`improve.decided`, and never edits plugin files. The worker also counts the
+`sandbox-bypass` and `permission` attention events per role and per command or
+path (from the events log, not `session-metrics`) and tries to reduce them. It
+proposes a prompt, skill, or agent fix (`process`, `skill`), or a narrow `grant`.
+A `grant` names the exact `copilot config` command or launch flag with the
+least privilege that works. On acceptance the factory only reports that command
+to the user. It never edits `~/.copilot` settings or a launch command, and the
+worker never applies a grant. `factory.mjs write` keeps
 `<owner.repo>-factory-sessions.jsonl` (IDs, roles, task or rule names; mode 0600)
 from `--session` and worker records. `factory.mjs session-metrics` reads the `events.jsonl` of those sessions
 and prints counts only, never content. It cannot measure tool run
