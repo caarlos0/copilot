@@ -27,7 +27,7 @@
     {
       "name": "coordination",
       "source": "./plugins/coordination",
-      "version": "0.5.1"
+      "version": "0.6.0"
     },
     {
       "name": "factory",
