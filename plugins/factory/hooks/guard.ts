@@ -1,6 +1,6 @@
 // preToolUse guard for the factory coordinator. Reads the hook payload on
 // stdin and prints a deny decision only for a coordinator session (see
-// gate.mjs) and only when a rule below matches. Anything
+// gate.ts) and only when a rule below matches. Anything
 // else, including any parse error, prints nothing, which allows the call.
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";

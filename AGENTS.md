@@ -59,17 +59,20 @@ installed, if `node_modules` is missing, or if the plugin has unstaged changes,
 because the build reads the working tree. To skip it, use `git commit --no-verify`.
 CI still checks for drift.
 
-A `.mjs` with a same-named `.ts` beside it is a generated bundle. Edit the
-`.ts`, run `bun run build` in the plugin directory (`scripts/build.ts`, shared by
-all plugins), and commit both files. `.gitattributes` marks every `.mjs` file in
+A `.mjs` that ships is a generated bundle. Each plugin commits only the bundles
+named in its entry list in `scripts/build.ts`: a dispatcher (`factory.mjs`,
+`coordinator.mjs`) that holds all Node code of the plugin, and the browser bundles
+(`dashboard.mjs`, `board-data.mjs`). Edit the `.ts`, run `bun run build` in the
+plugin directory (`scripts/build.ts`, shared by all plugins), and commit the sources
+and the bundles together. `.gitattributes` marks every `.mjs` file in
 `plugins/factory` and `plugins/coordination` as `linguist-generated`, so GitHub
-collapses its diff. Do not write a `.mjs` file by hand in these plugins. A new bundle also needs a line in the
-entry list of its plugin in `scripts/build.ts`; the build ignores a `.ts` file
-that is not in the list. Never
-edit the `.mjs`. CI runs the build of every plugin, then `git diff --exit-code`. Sibling
-`.mjs` imports stay external, and tests keep running the `.mjs` paths. A
-bundle must not read files beside itself through `import.meta.url` or
-`__dirname`; check this before you port a module. The build fails when a
+collapses its diff. A new command is a module that the dispatcher imports; it
+needs no new bundle and no new line in the entry list. Sources import each other as
+`./name.ts`. Never edit the `.mjs`. CI runs the build of every plugin, then
+`git diff --exit-code`. Tests import the `.ts` sources or spawn the dispatcher. A
+module has no `process.argv[1]` guard. A source can read files beside the bundle
+through `import.meta.url`, because the bundle sits in the same directory as the
+sources. The build fails when a
 plugin module imports a file outside its own plugin directory. A relative
 `import type` from a sibling `.ts` is erased, so the build cannot see it; keep
 those inside the plugin too. Use the same Bun version as CI: `bun-version` in
@@ -116,6 +119,6 @@ Each plugin's `AGENTS.md` lists its own tests.
 and macOS for every pull request and every push to `main`. Tests are
 TypeScript (`*.test.ts`, `node:test`, ESM). Node 22.18 or later strips the types
 and finds every `*.test.ts` file, so a new test needs no workflow change. A test
-is not a bundle: the build skips `*.test.ts`. Tests import or spawn the `.mjs`
-bundles, because they check shipped behavior. Pin action versions by commit SHA
-with a version comment.
+is not a bundle: the build skips `*.test.ts`. Tests import the `.ts` sources, and
+spawn the dispatcher `.mjs` when they check shipped behavior. Pin action versions by
+commit SHA with a version comment.

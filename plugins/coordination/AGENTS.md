@@ -54,20 +54,20 @@ worktrees and unfinished work.
 
 `board-data`, `handoff`, `wait`, `serve` and `coordinator` in `skills/coordinator/` are
 TypeScript, checked with `strict` on. Edit the `.ts`, run `bun run build` in
-`plugins/coordination`, and commit the `.ts` and the generated `.mjs` together. Each
-bundle sits at the path of its source, so `node coordinator.mjs wait` and the other
-commands need no Bun and no `node_modules`. `coordinator.mjs` is a dispatcher: it loads
-`handoff`, `wait` or `serve` only when you name it (`node coordinator.mjs wait ARGS`).
-The skill and the tests use it. Each of these three modules exports
-`main(argv)`. It runs the module only when `process.argv[1]` is its own `.mjs` file,
-so the dispatcher bundle does not run it twice.
-The old `handoff.mjs`, `wait.mjs` and `serve.mjs` stay because live runs use them.
-Do not use them in new text. A separate change deletes them. `serve` reads `import.meta.url` to find
-`board.html` and `board-data.mjs` beside it; both stay valid for that reason.
-`board-data.mjs` is served to the browser, so it must not import `node:` modules.
+`plugins/coordination`, and commit the `.ts` and the two generated bundles together.
+Only two `.mjs` files are committed: `coordinator.mjs` and `board-data.mjs`.
+`coordinator.mjs` is a dispatcher: it loads `handoff`, `wait` or `serve` only when
+you name it (`node coordinator.mjs wait ARGS`). It needs no Bun and no
+`node_modules`. The skill and the tests use it. Each of these three modules exports
+`main(argv)`, and the dispatcher calls it. A module has no `process.argv[1]` guard.
+Modules import each other as `./name.ts`. Tests import the `.ts` sources, or spawn
+`coordinator.mjs`.
+`serve` reads `import.meta.url` to find `board.html` and `board-data.mjs` beside it.
+This is the path of `coordinator.mjs` in the bundle, so `coordinator.mjs` must stay
+in `skills/coordinator/`. `board-data.mjs` is also the browser bundle. `serve` serves it, so
+it must not import `node:` modules.
 The build fails when a coordination module imports a file outside this plugin,
-so it stays independent of the factory plugin. Share types between modules with
-`import type` from the `.ts` file, and values with a `.mjs` import.
+so it stays independent of the factory plugin.
 
 ## Validation
 

@@ -112,7 +112,7 @@ Findings block once per turn (`stop_hook_active` allows the next stop), because
 some findings need the user. Copilot ends the turn after 8 consecutive blocks.
 The hook cannot arm the waiter or wake an idle agent. It only forces the model to
 do these actions. The hook runs in every session of every user, so a gate
-(`gate.mjs`) controls it. It does nothing
+(`gate.ts`) controls it. It does nothing
 unless the project's owner lock (`<project>-factory.lock`, beside the factory
 file) records the Copilot session in the hook payload (`sessionId`). The lock
 holds `owner.json` with `copilot_session`. The hook still reads the older text
@@ -157,7 +157,7 @@ on any error, unless the session belongs to the factory. A session belongs to th
 factory when `FACTORY_TASK` or `FACTORY_ROLE` is set. Otherwise, the
 payload `sessionId` must be the owner lock's session (the coordinator) or a
 `workers.*.session` in the factory file. The factory file comes from
-`FACTORY_FILE`. Otherwise it comes from the `origin` remote, like `gate.mjs`. A `notification`
+`FACTORY_FILE`. Otherwise it comes from the `origin` remote, like `gate.ts`. A `notification`
 (`permission_prompt` or `elicitation_dialog`) appends one `attention.requested`
 event (source `attention`) with `factory.mjs broker emit`. In the event, `kind` is
 `permission`, `sandbox-bypass` or `ask-user`. The `kind` is `sandbox-bypass` when
@@ -168,7 +168,7 @@ message, plus the bypass reason, or the `ask_user` question with its enum
 The two observers only write a note in `$TMPDIR` (valid 30 seconds, used once).
 Any other notification type (`new_inbox_message`, `shell_completed`, and so on)
 is not a wait for the user. For these types the hook records nothing, and
-`attention.mjs` skips `other` items that older logs hold. Tests
+`attention.ts` skips `other` items that older logs hold. Tests
 are in `hooks/attention.test.ts`. The payloads are in `hooks/fixtures/`.
 
 Every worker launch carries the same deny flags (the worker deny constant).
@@ -247,10 +247,10 @@ state flow (`initial`, `investigation`, `implementation`, `review`, `blocked`,
 GitHub issue, or has `issue: null` for work without one. An issue-less task
 uses every state without a PR. Review covers its local branch `head`. A
 local `git merge --ff-only` resolves it as `merged`, with the landed head SHA in
-`details.merge_commit`. Tasks with an issue keep the PR flow. `factory-data.mjs`
+`details.merge_commit`. Tasks with an issue keep the PR flow. `factory-data.ts`
 holds the schema. The writer,
 `factory.mjs migrate`, `factory.mjs serve` (port 8766, lists only `*-factory.json`), and
-`dashboard.html` share it. `state-dir.mjs` resolves per file, not per directory.
+`dashboard.html` share it. `state-dir.ts` resolves per file, not per directory.
 A factory file can be in either directory, even when both exist. The new
 directory wins, then the legacy one. If a file is in neither, the writer creates
 it in the new directory. `factory.mjs serve` lists and serves the factories of both
@@ -279,7 +279,7 @@ Repair drift through `factory.mjs write`, including local issue-less merges with
 `resolution: merged` and the full merge SHA in `details.merge_commit`.
 
 The dashboard task cards show one worker summary (`cardSummary` in
-`factory-data.mjs`). It shows the role that matches the task state, else the newest role by
+`factory-data.ts`). It shows the role that matches the task state, else the newest role by
 `summary_at`. The coordinator mirrors each result's `summary` into the optional
 `workers.<role>.summary` (at most 2000 characters) and `summary_at`. The
 dashboard reads only the factory file. A `--workers` write that sets a worker
@@ -323,20 +323,20 @@ The chip row of a task card shows usage. The chips are "Elapsed" (first history 
 credits), one chip per model, and "Active" (first to last session event). The tooltip of the cost
 chip has the AIC value and lists each worker role. Each worker line on a history step shows the
 model chip and the cost chip of that worker. The tooltip of that cost chip has the AIC value. An
-unknown value shows no chip. `usage.mjs` computes the usage on the server for
+unknown value shows no chip. `usage.ts` computes the usage on the server for
 `/api/factory` (`usage`, keyed by task ID, in the ETag). It reads only the logs of the session IDs
 in the factory file. The logs are in `$FACTORY_SESSION_STATE` (default
-`~/.copilot/session-state`). It reads them through `session-metrics.mjs` `measureFile` (streamed,
+`~/.copilot/session-state`). It reads them through `session-metrics.ts` `measureFile` (streamed,
 no log over 512 MiB, four logs at a time). It caches by file mtime and size (at most 1024 logs, and
 it drops the oldest first). It does not read a changing log again within 30 seconds. Credits are
 `totalNanoAiu` of the `session.usage_record` events divided by 1e9 (verified: the log's
 `costPerBatch` rates equal GitHub's published per-token prices at 1 AI credit = $0.01). `usd` is
-credits times `usdPerCredit` in `usage.mjs`. A log without credits shows tokens instead. A task
+credits times `usdPerCredit` in `usage.ts`. A log without credits shows tokens instead. A task
 total shows credits only when every session has credits. A missing or unreadable session is `null`
 and shows nothing. Only numbers and model names leave the module.
 
 The dashboard sorts and groups factories in the sidebar with `compareFactories`
-and `factorySection` in `factory-data.mjs`. `paused`, `blocked`, and `finished`
+and `factorySection` in `factory-data.ts`. `paused`, `blocked`, and `finished`
 show in the Find work panel note ("Scheduled rules do not run while the factory
 is ..."). The dashboard opens task lists, and the read-only "Find work" rules and
 skipped list, in one panel docked on the right edge. The dashboard can move a task back or
@@ -506,7 +506,7 @@ server on purpose. The two plugins load independently.
 
 `factory.mjs reconcile` is a sweep that prints JSON findings and changes only the events
 log. It reads Rex with `--autostart=false` and a 10 second timeout, so a sweep never starts a Rex server. It appends a missing `attention.resolved` event (source `reconcile`, with a
-`reason`) for an attention item that `attention.mjs` finds resolved. It reports complete results
+`reason`) for an attention item that `attention.ts` finds resolved. It reports complete results
 newer than their task. It reports open issue-less task branches ahead of the default
 branch. It reports clean worktrees of merged tasks whose HEAD is in the default branch
 (`merged-worktree`). Remove such a worktree with `factory.mjs worktree delete NAME`, only if the run created it.
@@ -542,7 +542,7 @@ again after each wake or user message. It takes `factory.mjs broker cursor` and 
 the waiter before the startup sweep. Closing the panes of a task belongs to the step that records
 `resolved`.
 
-`attention.mjs` (`openAttention(file)`, shared by reconcile and the dashboard
+`attention.ts` (`openAttention(file)`, shared by reconcile and the dashboard
 server) returns the open attention items. An open item is an `attention.requested` event with no later
 `attention.resolved` event for its session. It has the task title when known. The function removes an item when a signal
 resolves it. One signal is the session log
@@ -591,7 +591,7 @@ The row stays until the session log, the pane, or the clock resolves it. Its but
 disabled meanwhile, so one click sends one answer. The coordinator still never answers.
 
 The same panel lists proposed `improve` changes, oldest first, before the attention
-rows, and the badge counts them too. `proposals.mjs` (`scanProposals(file)`) reads
+rows, and the badge counts them too. `proposals.ts` (`scanProposals(file)`) reads
 `improve.proposed` and `improve.decided` from the events log. The first decision per
 `proposal_id` wins, and a proposal never expires. The `/api/factory` payload has
 `proposals` (`id`, `rule`, `kind`, `title`, `evidence`, `recommended`, `result`, `at`),
@@ -610,41 +610,37 @@ or scheduled rule remains actionable.
 
 ## Generated modules
 
-`default-branch`, `state-dir`, `worker-name`, `gate`, `proposals`, `sessions`,
-`usage`, `session-metrics`, `shot`, `archive`, `attention`, `migrate`,
-`reconcile`, `pr-watch`, `worktree`, `factory-data`, `factory`, `tasks`, `conflict`, `broker` and
-`serve` in
-`skills/lifecycle/`, and `guard`, `attention` and `stop-hook` in `hooks/`, are
-TypeScript, checked with `strict` on. Edit the `.ts`, run `bun run build` in `plugins/factory`, and
-commit the `.ts` and the generated `.mjs` together. The other modules are still
-hand-written `.mjs`. A hook bundle imports its siblings (`gate.mjs`, `broker.mjs`)
-as external `.mjs` files. `attention` loads `broker.mjs` lazily, so a hook
-that exits early pays no start cost for it. `stop-hook` and `serve` read
-`import.meta.url` to find their files (`skills/lifecycle/` for `stop-hook`;
-`dashboard.html` is served from `skills/lifecycle/` beside `serve.mjs`). Both stay
-valid because a bundle sits at the path of its source. `dashboard.html` is a
-static asset, not TypeScript. `dashboard.ts` is the browser entry. `scripts/build.ts`
-bundles it for the browser with `factory-data`, `marked` and `dompurify` inlined (see the brief popup above).
-`factory-data.ts` exports the `factory/v1` types (`Factory`,
-`Task`, `Worker`, and the others). `factory-data.mjs` stays, because the Node
-bundles import it. The dashboard loads only `dashboard.mjs` in the browser. So
-`factory-data.ts` and the other sources of `dashboard.ts` must not import `node:` modules.
+All factory code is TypeScript, checked with `strict` on: the modules in
+`skills/lifecycle/` and the hooks `guard`, `attention` and `stop-hook` in `hooks/`.
+Edit the `.ts`, run `bun run build` in `plugins/factory`, and commit the `.ts` and
+the two generated bundles together. Only two `.mjs` files are committed:
+`skills/lifecycle/factory.mjs` and `skills/lifecycle/dashboard.mjs`. Do not add a
+bundle for one module.
 
-`factory.ts` is a dispatcher: `factory.mjs COMMAND ARGS`. It loads the module of
-each command with `await import()` only when the command runs. The commands are
+`factory.ts` is a dispatcher: `factory.mjs COMMAND ARGS`. Modules import each other
+as `./name.ts`. The build of `factory.ts` bundles all of them, so `factory.mjs`
+needs no sibling file, no Bun and no `node_modules`. It loads the module of each
+command with `await import()` only when the command runs. The commands are
 `write` (the writer, in `tasks.ts`), `broker`, `reconcile`, `serve`, `worktree`,
 `worker-name`, `shot`, `archive`, `session-metrics`, `migrate` and `pr-watch`.
-`hook guard|attention|stop` runs a hook. Each module exports `main(argv)`. If the
-first argument is not a command, `factory.mjs FILE ARGS` runs `write`, as the old
-writer did. Hooks, docs, usage text and tests call `factory.mjs`. The old bundles
-stay for now, but nothing runs them. `serve.mjs` imports `update` and `ConflictError`
-from it, so `factory.mjs` exports both (`factory.d.mts` has their types). `update`
-loads the writer when it is first called. The build of `factory.ts` bundles the
-`.ts` source of each `.mjs` import, so the file does not need its siblings. It
-removes the final `if (process.argv[1] ...)` guard of every module, because
-inside `factory.mjs` the guard of each module would be true. The waiter check of
-`broker.ts` accepts `broker.mjs wait` and `factory.mjs broker wait`.
-`dispatcher.test.ts` runs every command and hook.
+`hook guard|attention|stop` runs a hook. Each module exports `main(argv)`, and the
+dispatcher calls it. A module has no `process.argv[1]` guard. An unknown first
+argument prints the usage and exits 2. Hooks, docs, usage text and tests call
+`factory.mjs`. Tests import the `.ts` sources, or spawn `factory.mjs`. The process
+checks of `broker.ts`, the guard and `session-metrics.ts` match
+`factory.mjs broker wait` and `factory.mjs pr-watch`. `dispatcher.test.ts` runs every
+command and hook.
+
+`serve.ts` serves `dashboard.html` from `skills/lifecycle/`. It finds the file
+through `import.meta.url`, which is the path of `factory.mjs` in the bundle. So
+`factory.mjs` must stay in `skills/lifecycle/`. `stop-hook` also finds its files this
+way. `dashboard.html` is a static asset, not TypeScript. `dashboard.ts` is the
+browser entry. `scripts/build.ts` bundles it for the browser with `factory-data`,
+`marked` and `dompurify` inlined (see the brief popup above). `factory-data.ts`
+exports the `factory/v1` types (`Factory`, `Task`, `Worker`, and the others). Other
+modules import these types and do not declare their own. The dashboard loads only
+`dashboard.mjs` in the browser. So `factory-data.ts` and the other sources of
+`dashboard.ts` must not import `node:` modules.
 
 ## Validation
 
