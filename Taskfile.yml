@@ -6,6 +6,11 @@ tasks:
       - task --list
     silent: true
 
+  setup:
+    desc: Use the checked-in Git hooks of this repository
+    cmds:
+      - git config core.hooksPath .githooks
+
   build:
     desc: Rebuild the generated bundles of every plugin
     cmds:

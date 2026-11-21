@@ -33,7 +33,7 @@ jobs:
           for plugin in factory coordination; do
             bun run --cwd "plugins/$plugin" typecheck
           done
-      - run: node --test plugins
+      - run: node --test plugins scripts
       - run: |
           for plugin in factory coordination; do
             bun run --cwd "plugins/$plugin" build

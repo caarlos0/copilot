@@ -48,11 +48,22 @@ sources (`factory`, `coordination`) owns its own `package.json`, `bun.lock` and
 files that run with `node`, so consumers need no Bun and no `node_modules`. In
 that plugin directory, install with `bun install --frozen-lockfile`, then run
 `bun run typecheck`. Run all tests from the repository root with
-`node --test plugins`. `task build` and `task typecheck` run every plugin.
+`node --test plugins scripts`. `task build` and `task typecheck` run every plugin.
+
+Run `task setup` once in each clone. It sets `core.hooksPath` to `.githooks`.
+The `.githooks/pre-commit` hook then rebuilds the bundles of a plugin when you
+stage one of these files: a `.ts` source that is not a test, `package.json`,
+or `bun.lock` of that plugin. A staged `scripts/build.ts` rebuilds every plugin.
+The hook stages the `.mjs` files that it builds. It fails if Bun is not
+installed, if `node_modules` is missing, or if the plugin has unstaged changes,
+because the build reads the working tree. To skip it, use `git commit --no-verify`.
+CI still checks for drift.
 
 A `.mjs` with a same-named `.ts` beside it is a generated bundle. Edit the
 `.ts`, run `bun run build` in the plugin directory (`scripts/build.ts`, shared by
-all plugins), and commit both files. A new bundle also needs a line in the
+all plugins), and commit both files. `.gitattributes` marks every `.mjs` file in
+`plugins/factory` and `plugins/coordination` as `linguist-generated`, so GitHub
+collapses its diff. Do not write a `.mjs` file by hand in these plugins. A new bundle also needs a line in the
 entry list of its plugin in `scripts/build.ts`; the build ignores a `.ts` file
 that is not in the list. Never
 edit the `.mjs`. CI runs the build of every plugin, then `git diff --exit-code`. Sibling

@@ -1,0 +1,37 @@
+#!/bin/sh
+# Rebuild the generated bundles of each plugin whose build input is staged, and stage them.
+# Install with `task setup`.
+set -eu
+
+staged=$(git diff --cached --name-only --no-renames)
+all=false
+if printf '%s\n' "$staged" | grep -Eq '^scripts/build\.ts$'; then
+  all=true
+fi
+
+for package in plugins/*/package.json; do
+  [ -f "$package" ] || continue
+  plugin=${package%/package.json}
+  if ! $all; then
+    printf '%s\n' "$staged" | grep -E "^$plugin/(package\.json|bun\.lock|.+\.ts)$" | grep -Evq '\.test\.ts$' || continue
+  fi
+
+  if ! command -v bun >/dev/null 2>&1; then
+    echo "pre-commit: bun is not installed, so $plugin cannot be rebuilt." >&2
+    echo "Install the Bun version in .github/workflows/test.yml, or commit with --no-verify." >&2
+    exit 1
+  fi
+  if [ ! -d "$plugin/node_modules" ]; then
+    echo "pre-commit: run 'bun install --cwd $plugin --frozen-lockfile' first." >&2
+    exit 1
+  fi
+  # The build reads the working tree. Unstaged edits would enter the staged bundle.
+  if ! git diff --quiet -- "$plugin" scripts/build.ts ':(exclude,glob)**/*.mjs'; then
+    echo "pre-commit: $plugin has unstaged changes, so its bundles would not match the staged sources." >&2
+    echo "Stage or discard them, or commit with --no-verify." >&2
+    exit 1
+  fi
+
+  bun run --cwd "$plugin" build
+  git add -- ":(glob)$plugin/**/*.mjs"
+done
