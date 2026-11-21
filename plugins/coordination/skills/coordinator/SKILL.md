@@ -106,7 +106,7 @@ verify identity before sending input. Do not duplicate possibly running work.
 
 ### Write validated updates
 
-Resolve `coordinator.mjs` beside this loaded skill and run it with Node or Bun.
+Resolve `coordinator.mjs` beside this loaded skill and run it with Node.
 Hold and verify your project/role owner lock first. Create the state directory
 if needed. Pass the canonical handoff path and explicit flags:
 
@@ -215,7 +215,7 @@ beside this loaded `SKILL.md`, and run it from that skill directory:
 node coordinator.mjs serve
 ```
 
-Bun can run the same script instead of Node. No packages need to be installed.
+It needs no packages and no Bun.
 The default state directory is `~/.local/state/copilot-coordinator/`; override
 it with `--directory PATH`. The server binds only to `127.0.0.1`, defaults to
 port 8765, and prints its HTTP URL. Use `--port PORT` if that port is occupied;
@@ -261,7 +261,7 @@ Do not repeatedly read its output or inspect worker state while waiting. The
 command watches parent directories, including atomic result replacements,
 checks current contents after registering watches, and exits with one JSON
 object whose `changed` array contains absolute result paths. It has no timer,
-network access, or dependency on the board server. Bun can run it too.
+network access, or dependency on the board server.
 
 The cursor records content hashes, not task success. Reuse one cursor per
 project/role, record its path and the waiter's process handle in the handoff,

@@ -138,7 +138,10 @@ task release:terminals
 task release:coding
 ```
 
-Use `task release:<plugin>` to release one plugin. The task uses `svu next`
+Use `task release:<plugin>` to release one plugin. For `factory` and
+`coordination`, the task first runs `bun run build` in the plugin directory and
+stops if `git diff --exit-code` shows a change. It needs Bun 1.4.5 and
+`bun install --frozen-lockfile` in that plugin. The task uses `svu next`
 with that plugin's tag prefix and directory to choose its next version, with
 a patch bump when no commit triggers a larger bump. Only that plugin's manifest
 and marketplace entry are updated.
@@ -171,8 +174,20 @@ edits. Once the repository is published, uninstall its installed plugins,
 remove the local marketplace with `copilot plugin marketplace remove caarlos0`,
 then follow the GitHub installation steps.
 
-Run the coordination and factory checks from the repository root:
+Run the coordination and factory checks from the repository root. A fresh
+checkout needs Bun 1.4.5 and the install step first, because the tests import
+libraries from each plugin's `node_modules`:
 
 ```sh
-node --test plugins/coordination/skills/coordinator/*.test.ts plugins/factory/skills/lifecycle/*.test.ts
+bun install --cwd plugins/factory --frozen-lockfile
+bun install --cwd plugins/coordination --frozen-lockfile
+node --test plugins scripts
 ```
+
+The `factory` and `coordination` plugins are written in TypeScript. Edit the
+`.ts` files, then run `bun run build` in the plugin directory (use
+`bun run typecheck` to check types). Four generated `.mjs` bundles are
+committed: `factory.mjs` and `dashboard.mjs` (factory), and `coordinator.mjs` and
+`board-data.mjs` (coordination). Never edit them by hand. Users of the plugins
+need only Node, not Bun or `node_modules`. Run `task setup` once in each clone so
+a pre-commit hook rebuilds the bundles for you.

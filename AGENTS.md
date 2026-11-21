@@ -13,7 +13,11 @@ structure or workflows change.
 - `Taskfile.yml` provides `task release:<plugin>`. From a clean `main`, it uses
   `svu next` scoped to that plugin's tags and directory, updates only its manifest
   and marketplace entry, creates a signed-off release commit and annotated
-  `<plugin>/v<version>` tag, and pushes both atomically.
+  `<plugin>/v<version>` tag, and pushes both atomically. A plugin with a
+  `package.json` (`factory`, `coordination`) is built first. The task stops
+  before it tags if `git diff --exit-code` shows that the build changed a
+  bundle. This needs Bun 1.4.5 and `bun install --frozen-lockfile` in that
+  plugin.
 - `plugins/<plugin>/agents/*.agent.md` defines agent roles and model choices.
   Keep roles distinct and put reusable procedures in skills.
 - `plugins/<plugin>/skills/<name>/SKILL.md` contains reusable procedures.
@@ -47,8 +51,11 @@ sources (`factory`, `coordination`) owns its own `package.json`, `bun.lock` and
 `tsconfig.json`, and there is no root package file. Plugins ship plain `.mjs`
 files that run with `node`, so consumers need no Bun and no `node_modules`. In
 that plugin directory, install with `bun install --frozen-lockfile`, then run
-`bun run typecheck`. Run all tests from the repository root with
+`bun run typecheck` and `bun run build`. Run all tests from the repository root with
 `node --test plugins scripts`. `task build` and `task typecheck` run every plugin.
+A fresh checkout needs `bun install --frozen-lockfile` in `plugins/factory` and
+`plugins/coordination` before `node --test` works, because the tests import
+`valibot` and other libraries from `node_modules`. CI pins Bun 1.4.5.
 
 Run `task setup` once in each clone. It sets `core.hooksPath` to `.githooks`.
 The `.githooks/pre-commit` hook then rebuilds the bundles of a plugin when you
@@ -115,8 +122,9 @@ in a new session. Avoid also loading an installed copy. Check discovery with
 `copilot --plugin-dir /path/to/copilot/plugins/coding skill list --json`.
 Each plugin's `AGENTS.md` lists its own tests.
 
-`.github/workflows/test.yml` runs the typecheck, then `node --test`, on Ubuntu
-and macOS for every pull request and every push to `main`. Tests are
+`.github/workflows/test.yml` runs the install, the typecheck, `node --test`, and
+then the build with `git diff --exit-code`, on Ubuntu and macOS for every pull
+request and every push to `main`. Tests are
 TypeScript (`*.test.ts`, `node:test`, ESM). Node 22.18 or later strips the types
 and finds every `*.test.ts` file, so a new test needs no workflow change. A test
 is not a bundle: the build skips `*.test.ts`. Tests import the `.ts` sources, and

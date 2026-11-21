@@ -25,7 +25,7 @@ Scheduled passes remain finite; general one-shot workers do not watch GitHub.
 
 The skill ships `board.html`, `handoff.example.json`, and a dependency-free
 loopback server. Run `node coordinator.mjs serve` from the resolved coordinator skill
-directory, or use Bun. Use one server for all runs; do not generate HTML per run.
+directory. Use one server for all runs; do not generate HTML per run.
 Shared JSON validation lives beside the skill in `board-data.mjs`, a valibot
 schema bundled in (stages end at each cross-field rule, so the first error keeps
 the field order).
@@ -55,7 +55,11 @@ worktrees and unfinished work.
 `board-data`, `handoff`, `wait`, `serve` and `coordinator` in `skills/coordinator/` are
 TypeScript, checked with `strict` on. Edit the `.ts`, run `bun run build` in
 `plugins/coordination`, and commit the `.ts` and the two generated bundles together.
-Only two `.mjs` files are committed: `coordinator.mjs` and `board-data.mjs`.
+Do not edit a `.mjs` file. Only two `.mjs` files are committed, and both are generated:
+`coordinator.mjs` and `board-data.mjs`. A fresh checkout needs
+`bun install --frozen-lockfile` in `plugins/coordination` before you build, typecheck
+or test (CI pins Bun 1.4.5). The pre-commit hook rebuilds the bundles when you stage a
+non-test `.ts` file, and `.gitattributes` marks them as generated.
 `coordinator.mjs` is a dispatcher: it loads `handoff`, `wait` or `serve` only when
 you name it (`node coordinator.mjs wait ARGS`). It needs no Bun and no
 `node_modules`. The skill and the tests use it. Each of these three modules exports
@@ -70,6 +74,12 @@ The build fails when a coordination module imports a file outside this plugin,
 so it stays independent of the factory plugin.
 
 ## Validation
+
+Run these in `plugins/coordination` after `bun install --frozen-lockfile`:
+
+- `bun run typecheck` for all TypeScript changes.
+- `bun run build`, then `git diff --exit-code`, to check that the committed
+  bundles match the sources.
 
 Run from the repository root:
 

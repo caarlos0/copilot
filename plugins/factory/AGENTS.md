@@ -613,9 +613,13 @@ or scheduled rule remains actionable.
 All factory code is TypeScript, checked with `strict` on: the modules in
 `skills/lifecycle/` and the hooks `guard`, `attention` and `stop-hook` in `hooks/`.
 Edit the `.ts`, run `bun run build` in `plugins/factory`, and commit the `.ts` and
-the two generated bundles together. Only two `.mjs` files are committed:
+the two generated bundles together. Do not edit a `.mjs` file. Only two `.mjs`
+files are committed, and both are generated:
 `skills/lifecycle/factory.mjs` and `skills/lifecycle/dashboard.mjs`. Do not add a
-bundle for one module.
+bundle for one module. A fresh checkout needs `bun install --frozen-lockfile` in
+`plugins/factory` before you build, typecheck or test (CI pins Bun 1.4.5). The
+pre-commit hook rebuilds the bundles when you stage a non-test `.ts` file, and
+`.gitattributes` marks them as generated.
 
 `factory.ts` is a dispatcher: `factory.mjs COMMAND ARGS`. Modules import each other
 as `./name.ts`. The build of `factory.ts` bundles all of them, so `factory.mjs`
@@ -644,7 +648,15 @@ modules import these types and do not declare their own. The dashboard loads onl
 
 ## Validation
 
-Run `node --test plugins/factory/skills/lifecycle/*.test.ts` from the
-repository root for factory data, writer, migration, server, dashboard, and
-result notification changes. Run `node --test plugins/factory/hooks/*.test.ts` for
-the session, stop, and guard hooks.
+Run these in `plugins/factory` after `bun install --frozen-lockfile`:
+
+- `bun run typecheck` for all TypeScript changes.
+- `bun run build`, then `git diff --exit-code`, to check that the committed
+  bundles match the sources.
+
+Run from the repository root:
+
+- `node --test plugins/factory/skills/lifecycle/*.test.ts` for factory data,
+  writer, migration, server, dashboard, and result notification changes.
+- `node --test plugins/factory/hooks/*.test.ts` for the session, stop, and
+  guard hooks.

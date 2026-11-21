@@ -183,7 +183,7 @@ only after you verify that the owner stopped. If you are not sure, stop and
 report the blocker. Release only your own lock when the factory stops.
 
 All writes use `factory.mjs write`, including operator changes through the dashboard.
-Resolve it beside this loaded skill and run it with Node or Bun. Never
+Resolve it beside this loaded skill and run it with Node. Never
 edit the file by hand and never use ad hoc scripts. Hold the owner lock for
 agent writes. The helper takes a separate, short-lived `<file>.write.lock` for
 each write. If the lock is busy, reread and reconcile. Never retry a stale

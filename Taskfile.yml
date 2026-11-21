@@ -98,6 +98,12 @@ tasks:
     cmds:
       - |
         set -eu
+        if [ -f "plugins/{{.PLUGIN}}/package.json" ]; then
+          bun run --cwd "plugins/{{.PLUGIN}}" build
+        fi
+        git diff --exit-code
+      - |
+        set -eu
         version="{{.TAG}}"
         version=${version#*/v}
         file="plugins/{{.PLUGIN}}/plugin.json"
