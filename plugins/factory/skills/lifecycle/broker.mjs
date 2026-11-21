@@ -411,11 +411,11 @@ async function armedWait(factory, { since, timeout, exclude, due, reconcile }) {
 }
 var usage = `Factory event broker: a durable event log that only grows, with a waiter that wakes at once.
 
-Usage: node broker.mjs wait FACTORY_FILE [--since CURSOR] [--timeout SECONDS]
-                       [--exclude-source SOURCE ...] [--due]
-       node broker.mjs emit FACTORY_FILE TYPE [--task ID] [--source SOURCE] [--data JSON]
-       node broker.mjs cursor FACTORY_FILE
-       node broker.mjs armed FACTORY_FILE
+Usage: node factory.mjs broker wait FACTORY_FILE [--since CURSOR] [--timeout SECONDS]
+                                  [--exclude-source SOURCE ...] [--due]
+       node factory.mjs broker emit FACTORY_FILE TYPE [--task ID] [--source SOURCE] [--data JSON]
+       node factory.mjs broker cursor FACTORY_FILE
+       node factory.mjs broker armed FACTORY_FILE
 
 The log is <owner.repo>-factory-events.jsonl beside FACTORY_FILE (mode 0600). A cursor is a
 byte offset in the log. Events are notifications. The factory JSON file stays the source of truth.
@@ -428,12 +428,12 @@ wait    Waits until an event exists after the cursor, prints {"events":[...],"cu
         --timeout S exits 0 with "events":[] and "timeout":true after S seconds.
         --due also returns a synthetic rule.due event (data.rules = rule IDs) when an enabled
         rule with "every" is due. It follows the factory file, so edits of run-status and rules
-        move the due time while it waits. Set last_run_at with factory.mjs --rule ID --ran.
+        move the due time while it waits. Set last_run_at with factory.mjs write --rule ID --ran.
         If you do not, the next wait returns the event again. Do not use --due while no
         slot is free for the rule.
         --due also returns a synthetic reconcile.due event (data.every = "5m") every 5 minutes
         after the waiter starts, while the run is active. The window is per waiter, so a wake
-        does not start it at once. After this event, run reconcile.mjs and arm the waiter again.
+        does not start it at once. After this event, run factory.mjs reconcile and arm the waiter again.
 emit    Appends one event and prints it. Types: ${Object.keys(eventTypes).join(", ")}.
         Needed data keys: ${Object.entries(eventTypes).map(([type, { data }]) => `${type}: ${data.join(", ")}`).join("; ")}.
         worker.result outcome: ${workerOutcomes.join(", ")}. --source defaults to worker.
@@ -459,7 +459,7 @@ emit    Appends one event and prints it. Types: ${Object.keys(eventTypes).join("
         factory. The decision always wakes it.
         pr.merged is a hint from the implementation worker (role, pr, merge_commit, head). The
         factory verifies the merge on GitHub before it resolves the task.
-        factory.mjs emits task.moved, task.updated, and feedback.pending after every task write.
+        factory.mjs write emits task.moved, task.updated, and feedback.pending after every task write.
         It emits budget.updated, limits.updated, or lever.updated (no --task) after every write
         of that setting.
 cursor  Prints {"cursor":"N"} for the current end of the log.
@@ -467,7 +467,7 @@ armed   Read-only. Prints {"armed":true,"pid":N} and exits 0 when a waiter for t
         alive. Prints {"armed":false} and exits 1 when no waiter is alive. wait records its PID in
         <owner.repo>-factory-waiter.pid and removes it on exit. A PID file is stale in these cases:
         the process is gone; the command line of the process (ps -o command=) is not
-        "broker.mjs wait" (a reused PID); or the parent of the process is gone (ppid 1), so
+        "factory.mjs broker wait" (a reused PID); or the parent of the process is gone (ppid 1), so
         the process is an orphan that nobody reads. wait refuses to start when stdout goes to
         a file or to /dev/null. Without a usable ps, a live PID counts as the waiter.
         A second wait for the same factory exits 1 unless the first waiter is stale, so only one

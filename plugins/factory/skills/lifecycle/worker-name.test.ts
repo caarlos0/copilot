@@ -3,10 +3,11 @@ import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { test } from "node:test";
 
-const script = join(import.meta.dirname, "worker-name.mjs");
+const script = join(import.meta.dirname, "factory.mjs");
+const workerName = join(import.meta.dirname, "worker-name.mjs");
 
 async function load() {
-  return (await import(script)).workerName;
+  return (await import(workerName)).workerName;
 }
 
 test("maps each role to its verb", async () => {
@@ -65,7 +66,7 @@ test("rejects an unknown role and a missing ref", async () => {
 test("CLI prints the name", () => {
   const run = spawnSync(
     process.execPath,
-    [script, "--role", "implementation", "--ref", "#42", "--summary", "Fix login redirect"],
+    [script, "worker-name", "--role", "implementation", "--ref", "#42", "--summary", "Fix login redirect"],
     { encoding: "utf8" },
   );
   assert.equal(run.status, 0);
@@ -73,7 +74,7 @@ test("CLI prints the name", () => {
 });
 
 test("CLI exits 1 with usage on a bad role", () => {
-  const run = spawnSync(process.execPath, [script, "--role", "nope", "--ref", "#1"], { encoding: "utf8" });
+  const run = spawnSync(process.execPath, [script, "worker-name", "--role", "nope", "--ref", "#1"], { encoding: "utf8" });
   assert.equal(run.status, 1);
   assert.match(run.stderr, /Usage:/);
 });

@@ -7,7 +7,7 @@ import { realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { parseArgs, promisify } from "node:util";
 var run = promisify(execFile);
-var USAGE = `Usage: pr-watch.mjs [PR] [--repo OWNER/REPO] [--merge] [--interval S] [--timeout S]
+var USAGE = `Usage: node factory.mjs pr-watch [PR] [--repo OWNER/REPO] [--merge] [--interval S] [--timeout S]
 
 Watch a pull request. Print one JSON line at the first event.
 

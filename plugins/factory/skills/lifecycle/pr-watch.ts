@@ -39,7 +39,7 @@ type Snapshot = {
 type Limit = { cost: number; remaining: number; resetAt: string };
 type Event = { event: string; [key: string]: unknown };
 
-const USAGE = `Usage: pr-watch.mjs [PR] [--repo OWNER/REPO] [--merge] [--interval S] [--timeout S]
+const USAGE = `Usage: node factory.mjs pr-watch [PR] [--repo OWNER/REPO] [--merge] [--interval S] [--timeout S]
 
 Watch a pull request. Print one JSON line at the first event.
 

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
-const script = join(import.meta.dirname, "shot.mjs");
+const script = join(import.meta.dirname, "factory.mjs");
 const load = () => import("./shot.mjs");
 
 test("parseShotArgs applies defaults", async () => {
@@ -32,10 +32,10 @@ test("parseShotArgs rejects bad numbers and unknown flags", async () => {
 });
 
 test("the script exits 2 on bad arguments and prints help with 0", () => {
-  const bad = spawnSync(process.execPath, [script, "--widths", "x"], { encoding: "utf8" });
+  const bad = spawnSync(process.execPath, [script, "shot", "--widths", "x"], { encoding: "utf8" });
   assert.equal(bad.status, 2);
   assert.match(bad.stderr, /--widths/);
-  const help = spawnSync(process.execPath, [script, "--help"], { encoding: "utf8" });
+  const help = spawnSync(process.execPath, [script, "shot", "--help"], { encoding: "utf8" });
   assert.equal(help.status, 0);
-  assert.match(help.stdout, /Usage: node shot\.mjs/);
+  assert.match(help.stdout, /Usage: node factory\.mjs shot/);
 });

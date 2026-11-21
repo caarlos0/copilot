@@ -51,7 +51,7 @@ test("a new file belongs in the new directory", async (t) => {
 });
 
 async function dashboard(t: TestContext, directory: string) {
-  const child = spawn(process.execPath, [join(import.meta.dirname, "serve.mjs"), "--port", "0"], {
+  const child = spawn(process.execPath, [join(import.meta.dirname, "factory.mjs"), "serve", "--port", "0"], {
     env: { ...process.env, HOME: directory },
     stdio: ["ignore", "pipe", "pipe"],
   });

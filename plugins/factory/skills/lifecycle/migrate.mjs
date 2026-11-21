@@ -238,9 +238,9 @@ async function main(argv) {
     if (options.help) {
       console.log(`Migrate legacy coordinator handoffs into one factory.json.
 
-Usage: node migrate.mjs --project owner/repo [--directory PATH] [--dry-run] [--archive]
+Usage: node factory.mjs migrate --project owner/repo [--directory PATH] [--dry-run] [--archive]
                         [--ignore-locks]
-       bun migrate.mjs --project owner/repo [options]
+       bun factory.mjs migrate --project owner/repo [options]
 
 Reads <owner.repo>-implementer.json and <owner.repo>-coordinator.json and writes
 <owner.repo>-factory.json in ~/.local/state/copilot-factory. Each handoff is read from there, else from

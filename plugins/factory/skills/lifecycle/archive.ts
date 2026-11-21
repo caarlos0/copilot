@@ -102,7 +102,7 @@ const largeFile = 100 * 1024 * 1024;
 const workerRoles = ["investigation", "implementation", "review"];
 // Scratch files that workers leave beside the factory file; nothing names them, so only age removes them.
 const workerScratch = /^(completion\d|discovery[-\d]|queue-).*\.(json|txt)$/;
-const usage = "Usage: node archive.mjs clean FACTORY_FILE [--older-than 14d] [--run]";
+const usage = "Usage: node factory.mjs archive clean FACTORY_FILE [--older-than 14d] [--run]";
 
 function parseAge(value: string) {
   const match = /^(\d+)([dh])$/.exec(value);

@@ -1162,7 +1162,7 @@ async function main(argv) {
     process.exitCode = errorMessage(error) === usage ? 2 : 1;
   }
 }
-var import_write_file_atomic, errorCode = (error) => error.code, errorMessage = (error) => error.message, dayFile, archiveDirectory = (file) => join(dirname(file), `${basename(file, extname(file))}-archive`), dayOf = (task) => new Date(task.updated_at).toISOString().slice(0, 10), day = 86400000, hour = 3600000, largeFile, workerRoles2, workerScratch, usage = "Usage: node archive.mjs clean FACTORY_FILE [--older-than 14d] [--run]", pendingFeedback = (task) => task.feedback && task.feedback.acknowledged_id !== task.feedback.id;
+var import_write_file_atomic, errorCode = (error) => error.code, errorMessage = (error) => error.message, dayFile, archiveDirectory = (file) => join(dirname(file), `${basename(file, extname(file))}-archive`), dayOf = (task) => new Date(task.updated_at).toISOString().slice(0, 10), day = 86400000, hour = 3600000, largeFile, workerRoles2, workerScratch, usage = "Usage: node factory.mjs archive clean FACTORY_FILE [--older-than 14d] [--run]", pendingFeedback = (task) => task.feedback && task.feedback.acknowledged_id !== task.feedback.id;
 var init_archive = __esm(() => {
   init_factory_data();
   import_write_file_atomic = __toESM(require_lib(), 1);
@@ -1739,11 +1739,11 @@ var init_broker = __esm(() => {
   };
   usage2 = `Factory event broker: a durable event log that only grows, with a waiter that wakes at once.
 
-Usage: node broker.mjs wait FACTORY_FILE [--since CURSOR] [--timeout SECONDS]
-                       [--exclude-source SOURCE ...] [--due]
-       node broker.mjs emit FACTORY_FILE TYPE [--task ID] [--source SOURCE] [--data JSON]
-       node broker.mjs cursor FACTORY_FILE
-       node broker.mjs armed FACTORY_FILE
+Usage: node factory.mjs broker wait FACTORY_FILE [--since CURSOR] [--timeout SECONDS]
+                                  [--exclude-source SOURCE ...] [--due]
+       node factory.mjs broker emit FACTORY_FILE TYPE [--task ID] [--source SOURCE] [--data JSON]
+       node factory.mjs broker cursor FACTORY_FILE
+       node factory.mjs broker armed FACTORY_FILE
 
 The log is <owner.repo>-factory-events.jsonl beside FACTORY_FILE (mode 0600). A cursor is a
 byte offset in the log. Events are notifications. The factory JSON file stays the source of truth.
@@ -1756,12 +1756,12 @@ wait    Waits until an event exists after the cursor, prints {"events":[...],"cu
         --timeout S exits 0 with "events":[] and "timeout":true after S seconds.
         --due also returns a synthetic rule.due event (data.rules = rule IDs) when an enabled
         rule with "every" is due. It follows the factory file, so edits of run-status and rules
-        move the due time while it waits. Set last_run_at with factory.mjs --rule ID --ran.
+        move the due time while it waits. Set last_run_at with factory.mjs write --rule ID --ran.
         If you do not, the next wait returns the event again. Do not use --due while no
         slot is free for the rule.
         --due also returns a synthetic reconcile.due event (data.every = "5m") every 5 minutes
         after the waiter starts, while the run is active. The window is per waiter, so a wake
-        does not start it at once. After this event, run reconcile.mjs and arm the waiter again.
+        does not start it at once. After this event, run factory.mjs reconcile and arm the waiter again.
 emit    Appends one event and prints it. Types: ${Object.keys(eventTypes).join(", ")}.
         Needed data keys: ${Object.entries(eventTypes).map(([type, { data }]) => `${type}: ${data.join(", ")}`).join("; ")}.
         worker.result outcome: ${workerOutcomes.join(", ")}. --source defaults to worker.
@@ -1787,7 +1787,7 @@ emit    Appends one event and prints it. Types: ${Object.keys(eventTypes).join("
         factory. The decision always wakes it.
         pr.merged is a hint from the implementation worker (role, pr, merge_commit, head). The
         factory verifies the merge on GitHub before it resolves the task.
-        factory.mjs emits task.moved, task.updated, and feedback.pending after every task write.
+        factory.mjs write emits task.moved, task.updated, and feedback.pending after every task write.
         It emits budget.updated, limits.updated, or lever.updated (no --task) after every write
         of that setting.
 cursor  Prints {"cursor":"N"} for the current end of the log.
@@ -1795,7 +1795,7 @@ armed   Read-only. Prints {"armed":true,"pid":N} and exits 0 when a waiter for t
         alive. Prints {"armed":false} and exits 1 when no waiter is alive. wait records its PID in
         <owner.repo>-factory-waiter.pid and removes it on exit. A PID file is stale in these cases:
         the process is gone; the command line of the process (ps -o command=) is not
-        "broker.mjs wait" (a reused PID); or the parent of the process is gone (ppid 1), so
+        "factory.mjs broker wait" (a reused PID); or the parent of the process is gone (ppid 1), so
         the process is an orphan that nobody reads. wait refuses to start when stdout goes to
         a file or to /dev/null. Without a usable ps, a live PID counts as the waiter.
         A second wait for the same factory exits 1 unless the first waiter is stale, so only one
@@ -2524,31 +2524,31 @@ async function main3(argv) {
     if (values.help) {
       console.log(`Create or update a factory.json file. The command validates all flags.
 
-Usage: node factory.mjs FILE [RUN OPTIONS] [TASK OPTIONS]
-       bun factory.mjs FILE [RUN OPTIONS] [TASK OPTIONS]
+Usage: node factory.mjs write FILE [RUN OPTIONS] [TASK OPTIONS]
+       bun factory.mjs write FILE [RUN OPTIONS] [TASK OPTIONS]
 
 Create a factory (FILE is <owner.repo>-factory.json):
-  node factory.mjs FILE --project owner/repo --run-goal "Run the factory for owner/repo" \\
+  node factory.mjs write FILE --project owner/repo --run-goal "Run the factory for owner/repo" \\
     --rex-session "$REX_SESSION"
 
 Add a task (link its GitHub issue, or use --issue null for work without an issue):
-  node factory.mjs FILE --task issue-42 --title "Fix login" \\
+  node factory.mjs write FILE --task issue-42 --title "Fix login" \\
     --issue https://github.com/owner/repo/issues/42 --next-action "Start investigation"
-  node factory.mjs FILE --task favicon --title "Add a favicon" --issue null \\
+  node factory.mjs write FILE --task favicon --title "Add a favicon" --issue null \\
     --next-action "Start investigation"
 
 Move a task (the state change and its history entry are one write):
-  node factory.mjs FILE --task issue-42 --state investigation --note "Worker started"
-  node factory.mjs FILE --task issue-42 --state blocked --blocker "Needs a product decision"
-  node factory.mjs FILE --task issue-42 --state resolved --resolution merged
+  node factory.mjs write FILE --task issue-42 --state investigation --note "Worker started"
+  node factory.mjs write FILE --task issue-42 --state blocked --blocker "Needs a product decision"
+  node factory.mjs write FILE --task issue-42 --state resolved --resolution merged
 
 Restore archived work (ask the user first. The add command prints this command when a new task
 matches an archived ID, issue, or PR):
-  node factory.mjs FILE --task issue-42 --restore --state initial --note "User wants it again" \\
+  node factory.mjs write FILE --task issue-42 --restore --state initial --note "User wants it again" \\
     --expected-revision N
 
 Merge two tasks that hold the same work (a duplicate-task finding prints this command):
-  node factory.mjs FILE --merge-task issue-42 --from pr-57
+  node factory.mjs write FILE --merge-task issue-42 --from pr-57
   KEEP is the task that is furthest along. The order is review, implementation, investigation,
   initial. Then the task with a PR. Then the older task. OTHER becomes resolved as duplicate with
   details.merged_into KEEP. KEEP gets the issue, PR, and links of OTHER. The command fails when
@@ -3089,7 +3089,7 @@ async function duplicateTasks(file, tasks) {
       kind: "duplicate-task",
       keep: keep.id,
       merge: rest.map((task) => task.id),
-      command: rest.map((task) => `node ${join7(import.meta.dirname, "factory.mjs")} ${file} --merge-task ${keep.id} --from ${task.id}`).join(" && ")
+      command: rest.map((task) => `node ${factoryScript} write ${file} --merge-task ${keep.id} --from ${task.id}`).join(" && ")
     };
   });
 }
@@ -3215,7 +3215,7 @@ async function reconcile(file, branchOverride, blockedAfter = intervalMs("24h"),
       };
       if (task.pr) {
         const branch = git3(worktree.path, "rev-parse", "--abbrev-ref", "HEAD");
-        finding.command = `node ${worktreeScript} delete ${branch} --merged-pr ${task.pr}`;
+        finding.command = `node ${factoryScript} worktree delete ${branch} --merged-pr ${task.pr}`;
       }
       findings.push(finding);
     } catch {
@@ -3231,7 +3231,7 @@ async function reconcile(file, branchOverride, blockedAfter = intervalMs("24h"),
         task: task.id,
         role,
         window: worker.window ?? null,
-        fix: `node ${join7(import.meta.dirname, "factory.mjs")} ${file} --task ${task.id} --workers '${JSON.stringify({ [role]: { status: "closed" } })}'`
+        fix: `node ${factoryScript} write ${file} --task ${task.id} --workers '${JSON.stringify({ [role]: { status: "closed" } })}'`
       });
     }
   }
@@ -3333,10 +3333,10 @@ async function main4(argv) {
     process.exitCode = 1;
   }
 }
-var usage3 = "Usage: node reconcile.mjs FACTORY_FILE [--default-branch NAME] [--blocked-after 24h] [--attention-after 30m]", git3 = (cwd, ...args) => execFileSync3("git", ["-C", cwd, ...args], {
+var usage3 = "Usage: node factory.mjs reconcile FACTORY_FILE [--default-branch NAME] [--blocked-after 24h] [--attention-after 30m]", git3 = (cwd, ...args) => execFileSync3("git", ["-C", cwd, ...args], {
   encoding: "utf8",
   stdio: ["ignore", "pipe", "ignore"]
-}).trim(), worktreeScript, closes, rexJSON = (...args) => JSON.parse(execFileSync3("rex", ["--autostart=false", ...args, "--json"], {
+}).trim(), factoryScript, closes, rexJSON = (...args) => JSON.parse(execFileSync3("rex", ["--autostart=false", ...args, "--json"], {
   encoding: "utf8",
   stdio: ["ignore", "pipe", "pipe"],
   timeout: 1e4
@@ -3349,7 +3349,7 @@ var init_reconcile = __esm(() => {
   init_gate();
   init_proposals();
   init_state_dir();
-  worktreeScript = join7(dirname5(fileURLToPath(import.meta.url)), "worktree.mjs");
+  factoryScript = join7(dirname5(fileURLToPath(import.meta.url)), "factory.mjs");
   closes = /\b(?:fix(?:e[sd])?|close[sd]?|resolve[sd]?)\s*:?\s+#(\d+)/gi;
   quietAfter = intervalMs("10m");
 });
@@ -3535,10 +3535,10 @@ async function main5(argv) {
     if (values.help) {
       console.log(`Measure Copilot sessions without reading their content.
 
-Usage: node session-metrics.mjs --registry FILE [--since ISO | --active-since ISO] [--directory DIR]
-       node session-metrics.mjs [--directory DIR] [--active-since ISO] SESSION_UUID...
+Usage: node factory.mjs session-metrics --registry FILE [--since ISO | --active-since ISO] [--directory DIR]
+       node factory.mjs session-metrics [--directory DIR] [--active-since ISO] SESSION_UUID...
 
-FILE is the <owner.repo>-factory-sessions.jsonl registry that factory.mjs keeps beside the
+FILE is the <owner.repo>-factory-sessions.jsonl registry that factory.mjs write keeps beside the
 factory file. --since keeps sessions registered at or after that time, and always keeps the
 long-lived factory session (role factory). Their totals are cumulative over the whole session.
 --active-since keeps every session with an event at or after that time, however early it
@@ -3586,7 +3586,7 @@ var init_session_metrics = __esm(() => {
   idleOver = 10 * 60000;
   commandPatterns = {
     sleep: /\bsleep\s+\d/,
-    gh_wait: /\bgh\s+wait\b|\bpr-watch\.mjs\b/,
+    gh_wait: /\bgh\s+wait\b|\bpr-watch\.mjs\b|\bfactory\.mjs\s+pr-watch\b/,
     watch: /--watch\b|\bgh\s+run\s+watch\b/
   };
   statusRead = /\bgh\s+(?:pr\s+(?:view|checks)|run\s+(?:view|list))\b/;
@@ -3765,8 +3765,8 @@ Run with --help for usage.`);
   if (options.help) {
     console.log(`Serve the factory dashboard on 127.0.0.1 (no token) or on --host (token required).
 
-Usage: node serve.mjs [--directory PATH] [--port PORT] [--host ADDR] [--token TOKEN]
-       bun serve.mjs [--directory PATH] [--port PORT] [--host ADDR] [--token TOKEN]
+Usage: node factory.mjs serve [--directory PATH] [--port PORT] [--host ADDR] [--token TOKEN]
+       bun factory.mjs serve [--directory PATH] [--port PORT] [--host ADDR] [--token TOKEN]
 
   --directory PATH  Use only this state directory. Default: both
                     ~/.local/state/copilot-factory and the legacy
@@ -4573,9 +4573,9 @@ function main7(argv) {
   }
 }
 var usage4 = `Usage:
-  node worktree.mjs create NAME [--pr N] [--base REF] [-- CMD...]
-  node worktree.mjs delete NAME [--force] [--default-branch NAME] [--merged-pr URL_OR_NUMBER]
-  node worktree.mjs path NAME
+  node factory.mjs worktree create NAME [--pr N] [--base REF] [-- CMD...]
+  node factory.mjs worktree delete NAME [--force] [--default-branch NAME] [--merged-pr URL_OR_NUMBER]
+  node factory.mjs worktree path NAME
 
 Run the command in the project checkout. NAME is the branch name. The output is
 JSON on stdout. With "-- CMD", create prints its JSON to stderr, runs CMD in the
@@ -4663,7 +4663,7 @@ ${usage5}`);
   }
 }
 var usage5 = `Usage:
-  node worker-name.mjs --role ROLE --ref REF [--summary TEXT]
+  node factory.mjs worker-name --role ROLE --ref REF [--summary TEXT]
 
 Prints the --name of a worker Copilot session: "<Verb> <ref>: <summary>".
 ROLE is investigation, implementation, review, backlog (Find work) or improve.
@@ -4717,12 +4717,12 @@ function findBrowser(requested) {
   return browsers.find((candidate) => candidate.startsWith("/") ? existsSync3(candidate) : spawnSync2("which", [candidate], { stdio: "ignore" }).status === 0);
 }
 function startServer(directory) {
-  const child = spawn2(process.execPath, [join12(here, "serve.mjs"), "--directory", directory, "--port", "0"], {
+  const child = spawn2(process.execPath, [join12(here, "factory.mjs"), "serve", "--directory", directory, "--port", "0"], {
     stdio: ["ignore", "pipe", "inherit"]
   });
   const url = new Promise((ready, reject) => {
     child.once("error", reject);
-    child.once("exit", () => reject(new Error("serve.mjs exited before it printed a URL.")));
+    child.once("exit", () => reject(new Error("factory.mjs serve exited before it printed a URL.")));
     child.stdout.once("data", (chunk) => ready(String(chunk).split(`
 `)[0].trim()));
   });
@@ -4791,7 +4791,7 @@ ${(run.stderr || "").trim().split(`
 }
 var here, browsers, usage6 = `Screenshot the factory dashboard to PNG files.
 
-Usage: node shot.mjs [--widths 1280,390] [--height 900] [--data FILE] [--out DIR] [--browser PATH]
+Usage: node factory.mjs shot [--widths 1280,390] [--height 900] [--data FILE] [--out DIR] [--browser PATH]
 
   --widths LIST   Comma-separated window widths in pixels (default: 1280,390)
   --height PX     Window height in pixels (default: 900)
@@ -4800,7 +4800,7 @@ Usage: node shot.mjs [--widths 1280,390] [--height 900] [--data FILE] [--out DIR
   --browser PATH  Chrome or Edge binary (default: the first one found; or $CHROME)
   -h, --help      Show help
 
-Starts serve.mjs on a free port (never 8766) with a private copy of the data,
+Starts factory.mjs serve on a free port (never 8766) with a private copy of the data,
 runs headless Chrome once per width, and prints one PNG path per line.
 Exits 2 for invalid arguments, 1 when the browser cannot render.`;
 var init_shot = __esm(() => {
@@ -5049,9 +5049,9 @@ async function main10(argv) {
     if (options.help) {
       console.log(`Migrate legacy coordinator handoffs into one factory.json.
 
-Usage: node migrate.mjs --project owner/repo [--directory PATH] [--dry-run] [--archive]
+Usage: node factory.mjs migrate --project owner/repo [--directory PATH] [--dry-run] [--archive]
                         [--ignore-locks]
-       bun migrate.mjs --project owner/repo [options]
+       bun factory.mjs migrate --project owner/repo [options]
 
 Reads <owner.repo>-implementer.json and <owner.repo>-coordinator.json and writes
 <owner.repo>-factory.json in ~/.local/state/copilot-factory. Each handoff is read from there, else from
@@ -5535,7 +5535,7 @@ async function main11(argv) {
     }
   }
 }
-var run3, USAGE = `Usage: pr-watch.mjs [PR] [--repo OWNER/REPO] [--merge] [--interval S] [--timeout S]
+var run3, USAGE = `Usage: node factory.mjs pr-watch [PR] [--repo OWNER/REPO] [--merge] [--interval S] [--timeout S]
 
 Watch a pull request. Print one JSON line at the first event.
 

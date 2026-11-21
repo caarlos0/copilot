@@ -18,15 +18,15 @@ async function directory(t: TestContext) {
 const commands: [string[], number, RegExp][] = [
   [["write", "--help"], 0, /Create or update a factory\.json/],
   [["broker", "--help"], 0, /Factory event broker/],
-  [["reconcile"], 1, /Usage: node reconcile\.mjs/],
+  [["reconcile"], 1, /Usage: node factory\.mjs reconcile/],
   [["serve", "--help"], 0, /Serve the factory dashboard/],
   [["worktree", "--help"], 0, /Usage:/],
   [["worker-name"], 1, /unknown role/],
   [["shot", "--help"], 0, /Screenshot the factory dashboard/],
-  [["archive"], 2, /Usage: node archive\.mjs clean/],
+  [["archive"], 2, /Usage: node factory\.mjs archive clean/],
   [["session-metrics", "--help"], 0, /Measure Copilot sessions/],
   [["migrate", "--help"], 0, /Migrate legacy coordinator handoffs/],
-  [["pr-watch", "--help"], 0, /Usage: pr-watch\.mjs/],
+  [["pr-watch", "--help"], 0, /Usage: node factory\.mjs pr-watch/],
 ];
 
 for (const [args, status, text] of commands) {

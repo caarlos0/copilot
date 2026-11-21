@@ -546,7 +546,7 @@ var hour = 3600000;
 var largeFile = 100 * 1024 * 1024;
 var workerRoles = ["investigation", "implementation", "review"];
 var workerScratch = /^(completion\d|discovery[-\d]|queue-).*\.(json|txt)$/;
-var usage = "Usage: node archive.mjs clean FACTORY_FILE [--older-than 14d] [--run]";
+var usage = "Usage: node factory.mjs archive clean FACTORY_FILE [--older-than 14d] [--run]";
 function parseAge(value) {
   const match = /^(\d+)([dh])$/.exec(value);
   if (!match)

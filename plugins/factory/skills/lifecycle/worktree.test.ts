@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { test, type TestContext } from "node:test";
 
-const script = join(import.meta.dirname, "worktree.mjs");
+const script = join(import.meta.dirname, "factory.mjs");
 
 async function fixture(t: TestContext, { template = "{repoPath}/../wts/{repo}/{branch}" }: { template?: string | null } = {}) {
   const root = await realpath(await mkdtemp(join(tmpdir(), "worktree-test-")));
@@ -31,7 +31,7 @@ async function fixture(t: TestContext, { template = "{repoPath}/../wts/{repo}/{b
   git(root, "init", "-q", "-b", "main", repo);
   git(repo, "commit", "-q", "--allow-empty", "-m", "base");
   const helper = (cwd: string, ...args: string[]) => {
-    const result = spawnSync(process.execPath, [script, ...args], { cwd, encoding: "utf8", env });
+    const result = spawnSync(process.execPath, [script, "worktree", ...args], { cwd, encoding: "utf8", env });
     let json = null;
     try {
       json = JSON.parse(result.stdout);
@@ -211,7 +211,7 @@ test("--pr checks the PR out in a new worktree through gh", async (t) => {
   const f = await fixture(t);
   f.git(f.repo, "remote", "add", "origin", "git@github.com:acme/proj.git");
   const gh = await stubGh(f, "https://github.com/acme/proj/pull/12");
-  const result = spawnSync(process.execPath, [script, "create", "pr-12", "--pr", "12"], { cwd: f.repo, encoding: "utf8", env: gh.env });
+  const result = spawnSync(process.execPath, [script, "worktree", "create", "pr-12", "--pr", "12"], { cwd: f.repo, encoding: "utf8", env: gh.env });
   assert.equal(result.status, 0, result.stderr);
   const json = JSON.parse(result.stdout);
   assert.equal(json.path, join(f.root, "wts", "proj", "pr-12"));
@@ -223,7 +223,7 @@ test("--pr refuses a PR from another repository", async (t) => {
   const f = await fixture(t);
   f.git(f.repo, "remote", "add", "origin", "https://github.com/acme/proj.git");
   const gh = await stubGh(f, "https://github.com/other/thing/pull/12");
-  const result = spawnSync(process.execPath, [script, "create", "pr-12", "--pr", "12"], { cwd: f.repo, encoding: "utf8", env: gh.env });
+  const result = spawnSync(process.execPath, [script, "worktree", "create", "pr-12", "--pr", "12"], { cwd: f.repo, encoding: "utf8", env: gh.env });
   assert.equal(result.status, 2);
   assert.equal(existsSync(join(f.root, "wts", "proj", "pr-12")), false);
 });
@@ -244,7 +244,7 @@ echo '{"merged":${merged},"head":{"sha":"${sha(tip)}"}}'
   await chmod(join(bin, "gh"), 0o755);
   const env = { ...f.env, PATH: `${bin}${delimiter}${process.env.PATH}` };
   const del = (...args: string[]) => {
-    const result = spawnSync(process.execPath, [script, "delete", "squashed", ...args], { cwd: f.repo, encoding: "utf8", env });
+    const result = spawnSync(process.execPath, [script, "worktree", "delete", "squashed", ...args], { cwd: f.repo, encoding: "utf8", env });
     return { status: result.status, json: JSON.parse(result.stdout) };
   };
   return { f, path, del };

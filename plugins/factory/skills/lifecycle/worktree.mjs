@@ -9,9 +9,9 @@ import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { defaultBranch } from "./default-branch.mjs";
 var usage = `Usage:
-  node worktree.mjs create NAME [--pr N] [--base REF] [-- CMD...]
-  node worktree.mjs delete NAME [--force] [--default-branch NAME] [--merged-pr URL_OR_NUMBER]
-  node worktree.mjs path NAME
+  node factory.mjs worktree create NAME [--pr N] [--base REF] [-- CMD...]
+  node factory.mjs worktree delete NAME [--force] [--default-branch NAME] [--merged-pr URL_OR_NUMBER]
+  node factory.mjs worktree path NAME
 
 Run the command in the project checkout. NAME is the branch name. The output is
 JSON on stdout. With "-- CMD", create prints its JSON to stderr, runs CMD in the

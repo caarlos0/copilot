@@ -23,7 +23,7 @@ async function server(t: TestContext, env: NodeJS.ProcessEnv = {}) {
   await writeFile(join(directory, "unrelated-notes.md"), "private\n");
   await writeFile(join(outside, "secret.md"), "secret\n");
   await symlink(join(outside, "secret.md"), join(directory, "owner.repo-issue-9-investigation-brief.md"));
-  const child = spawn(process.execPath, [join(import.meta.dirname, "serve.mjs"), "--directory", directory, "--port", "0"], {
+  const child = spawn(process.execPath, [join(import.meta.dirname, "factory.mjs"), "serve", "--directory", directory, "--port", "0"], {
     stdio: ["ignore", "pipe", "pipe"],
     env: { ...process.env, ...env },
   });
@@ -325,7 +325,7 @@ test("CLI and dashboard share the write lock; overlapping moves cannot overwrite
   await writeFile(`${file}.write.lock`, "", { flag: "wx" });
   const locked = await move(url, unblocked);
   assert.equal(locked.status, 409);
-  const cli = spawnSync(process.execPath, [join(import.meta.dirname, "factory.mjs"), file,
+  const cli = spawnSync(process.execPath, [join(import.meta.dirname, "factory.mjs"), "write", file,
     "--task", unblocked.task, "--state", "initial"], { encoding: "utf8" });
   assert.equal(cli.status, 1, cli.stderr);
   assert.match(cli.stderr, /write is locked/);
@@ -481,7 +481,7 @@ test("the CLI and the dashboard share the write lock for settings writes", async
   const original = await readFile(file, "utf8");
   await writeFile(`${file}.write.lock`, "", { flag: "wx" });
   assert.equal((await settings(url, { set: { budget: 4 }, expected: seen })).status, 409);
-  const cli = spawnSync(process.execPath, [join(import.meta.dirname, "factory.mjs"), file,
+  const cli = spawnSync(process.execPath, [join(import.meta.dirname, "factory.mjs"), "write", file,
     "--budget", '{"max_parallel_workers":4}'], { encoding: "utf8" });
   assert.equal(cli.status, 1, cli.stderr);
   assert.match(cli.stderr, /write is locked/);
@@ -493,7 +493,7 @@ test("a dashboard move emits an event the factory waiter wakes on", async (t) =>
   const file = join(directory, factoryFile);
   const response = await move(url, unblocked);
   assert.equal(response.status, 200, await response.clone().text());
-  const waited = spawnSync(process.execPath, [join(import.meta.dirname, "broker.mjs"), "wait", file,
+  const waited = spawnSync(process.execPath, [join(import.meta.dirname, "factory.mjs"), "broker", "wait", file,
     "--since", "0", "--exclude-source", "coordinator", "--timeout", "5"], { encoding: "utf8" });
   assert.equal(waited.status, 0, waited.stderr);
   const { events } = JSON.parse(waited.stdout);

@@ -12,7 +12,7 @@ import { hooksInactive } from "./gate.mjs";
 import { scanProposals } from "./proposals.mjs";
 import { readJSON } from "./state-dir.mjs";
 
-const usage = "Usage: node reconcile.mjs FACTORY_FILE [--default-branch NAME] [--blocked-after 24h] [--attention-after 30m]";
+const usage = "Usage: node factory.mjs reconcile FACTORY_FILE [--default-branch NAME] [--blocked-after 24h] [--attention-after 30m]";
 
 type Worker = { status?: string; session?: string; window?: string; pane?: string; brief?: string; result?: string; launched_at?: string };
 type Task = {
@@ -46,7 +46,7 @@ function isAncestor(cwd: string, branch: string) {
   }
 }
 
-const worktreeScript = join(dirname(fileURLToPath(import.meta.url)), "worktree.mjs");
+const factoryScript = join(dirname(fileURLToPath(import.meta.url)), "factory.mjs");
 
 const closes = /\b(?:fix(?:e[sd])?|close[sd]?|resolve[sd]?)\s*:?\s+#(\d+)/gi;
 
@@ -92,7 +92,7 @@ async function duplicateTasks(file: string, tasks: Task[]) {
       kind: "duplicate-task",
       keep: keep.id,
       merge: rest.map((task) => task.id),
-      command: rest.map((task) => `node ${join(import.meta.dirname, "factory.mjs")} ${file} --merge-task ${keep.id} --from ${task.id}`).join(" && "),
+      command: rest.map((task) => `node ${factoryScript} write ${file} --merge-task ${keep.id} --from ${task.id}`).join(" && "),
     };
   });
 }
@@ -224,7 +224,7 @@ async function reconcile(file: string, branchOverride?: string, blockedAfter = i
     const worktree = task.worktree;
     if (task.resolution?.outcome !== "merged" || !worktree?.path || !existsSync(worktree.path)) continue;
     try {
-      // A squash-merged PR branch is never in the default branch; `worktree.mjs` verifies the PR with gh.
+      // A squash-merged PR branch is never in the default branch; `factory.mjs worktree` verifies the PR with gh.
       if (git(worktree.path, "status", "--porcelain") !== "" || !(task.pr || isAncestor(worktree.path, defaultBranch(worktree.path, branchOverride) ?? "main"))) continue;
       const finding: Finding = {
         kind: "merged-worktree",
@@ -234,7 +234,7 @@ async function reconcile(file: string, branchOverride?: string, blockedAfter = i
       };
       if (task.pr) {
         const branch = git(worktree.path, "rev-parse", "--abbrev-ref", "HEAD");
-        finding.command = `node ${worktreeScript} delete ${branch} --merged-pr ${task.pr}`;
+        finding.command = `node ${factoryScript} worktree delete ${branch} --merged-pr ${task.pr}`;
       }
       findings.push(finding);
     } catch {
@@ -251,7 +251,7 @@ async function reconcile(file: string, branchOverride?: string, blockedAfter = i
         task: task.id,
         role,
         window: worker.window ?? null,
-        fix: `node ${join(import.meta.dirname, "factory.mjs")} ${file} --task ${task.id} --workers '${JSON.stringify({ [role]: { status: "closed" } })}'`,
+        fix: `node ${factoryScript} write ${file} --task ${task.id} --workers '${JSON.stringify({ [role]: { status: "closed" } })}'`,
       });
     }
   }

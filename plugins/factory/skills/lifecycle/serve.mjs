@@ -545,8 +545,8 @@ Run with --help for usage.`);
   if (options.help) {
     console.log(`Serve the factory dashboard on 127.0.0.1 (no token) or on --host (token required).
 
-Usage: node serve.mjs [--directory PATH] [--port PORT] [--host ADDR] [--token TOKEN]
-       bun serve.mjs [--directory PATH] [--port PORT] [--host ADDR] [--token TOKEN]
+Usage: node factory.mjs serve [--directory PATH] [--port PORT] [--host ADDR] [--token TOKEN]
+       bun factory.mjs serve [--directory PATH] [--port PORT] [--host ADDR] [--token TOKEN]
 
   --directory PATH  Use only this state directory. Default: both
                     ~/.local/state/copilot-factory and the legacy

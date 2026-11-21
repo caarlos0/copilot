@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { test, type TestContext } from "node:test";
 
-const script = join(import.meta.dirname, "pr-watch.mjs");
+const script = join(import.meta.dirname, "factory.mjs");
 
 // A fake gh that answers `pr view` and replays queued `api graphql` responses.
 // With FAKE_GH_PAGE_SIZE it pages both connections like GitHub: the first call
@@ -112,7 +112,7 @@ async function fixture(t: TestContext, responses: unknown[], extraEnv: Record<st
   await chmod(gh, 0o755);
   await Promise.all(responses.map((response, i) => writeFile(join(directory, "responses", `${i + 1}.json`), JSON.stringify(response))));
   const watch = (...args: string[]) => {
-    const out = spawnSync(process.execPath, [script, "--interval", "0.01", ...args], {
+    const out = spawnSync(process.execPath, [script, "pr-watch", "--interval", "0.01", ...args], {
       encoding: "utf8",
       timeout: 30000,
       env: { ...process.env, ...extraEnv, FAKE_GH_DIR: directory, PR_WATCH_MIN_INTERVAL: "0", PATH: `${join(directory, "bin")}${delimiter}${process.env.PATH}` },
@@ -300,7 +300,7 @@ test("--timeout exits 0 with a timeout event", async (t) => {
 test("--help needs no gh, a bad flag exits 2, and the default interval minimum is enforced", () => {
   const env = { ...process.env, PATH: "/nonexistent", PR_WATCH_MIN_INTERVAL: undefined };
   delete env.PR_WATCH_MIN_INTERVAL;
-  const run = (...args: string[]) => spawnSync(process.execPath, [script, ...args], { encoding: "utf8", env });
+  const run = (...args: string[]) => spawnSync(process.execPath, [script, "pr-watch", ...args], { encoding: "utf8", env });
   assert.equal(run("--help").status, 0);
   assert.equal(run("--bogus").status, 2);
   assert.equal(run("7", "--interval", "5").status, 2);

@@ -36,7 +36,7 @@ async function fixture(t: TestContext) {
   });
   const factory = join(directory, "owner.repo-factory.json");
   const log = join(directory, "owner.repo-factory-events.jsonl");
-  const run = (...args: string[]) => spawnSync(process.execPath, [script, ...args], { encoding: "utf8" });
+  const run = (...args: string[]) => spawnSync(process.execPath, [factoryScript, "broker", ...args], { encoding: "utf8" });
   // A worker.result needs the saved file it names, so the helper writes a matching one.
   const emit = (type: string, { source, task = "t1", data = result.data }: { source?: string; task?: string; data?: string } = {}): BrokerEvent => {
     if (type === "worker.result") data = JSON.stringify(withResult(directory, task, JSON.parse(data)));
@@ -46,7 +46,7 @@ async function fixture(t: TestContext) {
   };
   // Resolves with a function that returns the parsed output once the waiter is armed and exits.
   async function wait(...args: string[]): Promise<() => Promise<WaitOutput>> {
-    const child = spawn(process.execPath, [script, "wait", factory, ...args], { stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(process.execPath, [factoryScript, "broker", "wait", factory, ...args], { stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     const finished = new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
@@ -138,7 +138,7 @@ test("concurrent emitters never interleave or drop lines", async (t) => {
   const count = 24;
   const runs = Array.from({ length: count }, (_, index) => new Promise<void>((resolve, reject) => {
     const child = spawn(process.execPath, [
-      script, "emit", f.factory, "worker.result", "--task", `t${index}`,
+      factoryScript, "broker", "emit", f.factory, "worker.result", "--task", `t${index}`,
       "--data", JSON.stringify(withResult(f.directory, `t${index}`, { role: "implementation", outcome: "working", pad: "x".repeat(2000) })),
     ], { stdio: "ignore" });
     child.once("error", reject);
@@ -332,7 +332,7 @@ test("wait returns pr.merged like any other event", async (t) => {
 test("factory.mjs writes emit task.moved, task.updated, and dashboard feedback events", async (t) => {
   const f = await fixture(t);
   const factory = (...args: string[]) => {
-    const out = spawnSync(process.execPath, [factoryScript, f.factory, ...args], { encoding: "utf8" });
+    const out = spawnSync(process.execPath, [factoryScript, "write", f.factory, ...args], { encoding: "utf8" });
     assert.equal(out.status, 0, out.stderr);
   };
   factory("--project", "owner/repo", "--run-goal", "Run it");
@@ -418,7 +418,7 @@ test("attention events never wake a waiter that skips their source, and other re
 
   // reconcile.mjs and the sweep around the log must not trip over a task-less event.
   await writeFile(f.factory, JSON.stringify({ status: "finished", tasks: [] }));
-  const swept = spawnSync(process.execPath, [join(import.meta.dirname, "reconcile.mjs"), f.factory], { encoding: "utf8" });
+  const swept = spawnSync(process.execPath, [factoryScript, "reconcile", f.factory], { encoding: "utf8" });
   assert.equal(swept.status, 0, swept.stderr);
   assert.deepEqual(JSON.parse(swept.stdout), { findings: [], errors: [] });
 });
@@ -426,7 +426,7 @@ test("attention events never wake a waiter that skips their source, and other re
 test("--due follows run-status and rule edits made while the waiter is armed", async (t) => {
   const f = await fixture(t);
   const factory = (...args: string[]) => {
-    const out = spawnSync(process.execPath, [factoryScript, f.factory, ...args], { encoding: "utf8" });
+    const out = spawnSync(process.execPath, [factoryScript, "write", f.factory, ...args], { encoding: "utf8" });
     assert.equal(out.status, 0, out.stderr);
   };
   const lastRun = new Date(Date.now() - 2 * 60 * 1000).toISOString();
@@ -450,7 +450,7 @@ test("--due follows run-status and rule edits made while the waiter is armed", a
 test("--due re-arms its timer when a rule edit moves the due time", async (t) => {
   const f = await fixture(t);
   const factory = (...args: string[]) => {
-    const out = spawnSync(process.execPath, [factoryScript, f.factory, ...args], { encoding: "utf8" });
+    const out = spawnSync(process.execPath, [factoryScript, "write", f.factory, ...args], { encoding: "utf8" });
     assert.equal(out.status, 0, out.stderr);
   };
   const rules = (every: string, lastRun: string) => JSON.stringify([{ id: "backlog", description: "Find work", enabled: true, kind: "backlog", every, last_run_at: lastRun }]);
@@ -565,7 +565,7 @@ test("a waiter whose parent is gone (ppid 1) counts as no waiter", async (t) => 
   await mkdir(bin);
   // A fake ps reports the parent PID from $FAKE_PPID, so the test needs no real ps or orphan.
   await writeFile(join(bin, "ps"), `#!/bin/sh\necho "  $FAKE_PPID node broker.mjs wait /f.json"\n`, { mode: 0o755 });
-  const armed = (ppid: number) => spawnSync(process.execPath, [script, "armed", f.factory], {
+  const armed = (ppid: number) => spawnSync(process.execPath, [factoryScript, "broker", "armed", f.factory], {
     encoding: "utf8",
     env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, FAKE_PPID: String(ppid) },
   });
@@ -587,7 +587,7 @@ test("wait refuses to start when stdout goes to a file or /dev/null", async (t) 
   const fd = openSync(file, "w");
   t.after(() => closeSync(fd));
   for (const stdout of ["ignore", fd] as const) {
-    const out = spawnSync(process.execPath, [script, "wait", f.factory, "--timeout", "1"], { encoding: "utf8", stdio: ["ignore", stdout, "pipe"] });
+    const out = spawnSync(process.execPath, [factoryScript, "broker", "wait", f.factory, "--timeout", "1"], { encoding: "utf8", stdio: ["ignore", stdout, "pipe"] });
     assert.equal(out.status, 2, `stdout ${stdout}`);
     assert.match(String(out.stderr), /Never run it in the background/);
   }

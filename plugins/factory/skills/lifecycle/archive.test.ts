@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { test, type TestContext } from "node:test";
 
-const script = join(import.meta.dirname, "archive.mjs");
+const script = join(import.meta.dirname, "factory.mjs");
 const example = JSON.parse(readFileSync(join(import.meta.dirname, "factory.example.json"), "utf8"));
 const resolvedTask = example.tasks.find((task: { state: string }) => task.state === "resolved");
 const openTask = example.tasks.find((task: { state: string }) => task.state === "initial");
@@ -40,7 +40,7 @@ async function fixture(t: TestContext, tasks: unknown[], archived: unknown[] = [
     return path;
   };
   const clean = (...args: string[]) => {
-    const result = spawnSync(process.execPath, [script, "clean", file, ...args], { encoding: "utf8" });
+    const result = spawnSync(process.execPath, [script, "archive", "clean", file, ...args], { encoding: "utf8" });
     assert.equal(result.status, 0, result.stderr);
     return JSON.parse(result.stdout);
   };

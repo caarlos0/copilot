@@ -683,31 +683,31 @@ export async function main(argv: string[]) {
     if (values.help) {
       console.log(`Create or update a factory.json file. The command validates all flags.
 
-Usage: node factory.mjs FILE [RUN OPTIONS] [TASK OPTIONS]
-       bun factory.mjs FILE [RUN OPTIONS] [TASK OPTIONS]
+Usage: node factory.mjs write FILE [RUN OPTIONS] [TASK OPTIONS]
+       bun factory.mjs write FILE [RUN OPTIONS] [TASK OPTIONS]
 
 Create a factory (FILE is <owner.repo>-factory.json):
-  node factory.mjs FILE --project owner/repo --run-goal "Run the factory for owner/repo" \\
+  node factory.mjs write FILE --project owner/repo --run-goal "Run the factory for owner/repo" \\
     --rex-session "$REX_SESSION"
 
 Add a task (link its GitHub issue, or use --issue null for work without an issue):
-  node factory.mjs FILE --task issue-42 --title "Fix login" \\
+  node factory.mjs write FILE --task issue-42 --title "Fix login" \\
     --issue https://github.com/owner/repo/issues/42 --next-action "Start investigation"
-  node factory.mjs FILE --task favicon --title "Add a favicon" --issue null \\
+  node factory.mjs write FILE --task favicon --title "Add a favicon" --issue null \\
     --next-action "Start investigation"
 
 Move a task (the state change and its history entry are one write):
-  node factory.mjs FILE --task issue-42 --state investigation --note "Worker started"
-  node factory.mjs FILE --task issue-42 --state blocked --blocker "Needs a product decision"
-  node factory.mjs FILE --task issue-42 --state resolved --resolution merged
+  node factory.mjs write FILE --task issue-42 --state investigation --note "Worker started"
+  node factory.mjs write FILE --task issue-42 --state blocked --blocker "Needs a product decision"
+  node factory.mjs write FILE --task issue-42 --state resolved --resolution merged
 
 Restore archived work (ask the user first. The add command prints this command when a new task
 matches an archived ID, issue, or PR):
-  node factory.mjs FILE --task issue-42 --restore --state initial --note "User wants it again" \\
+  node factory.mjs write FILE --task issue-42 --restore --state initial --note "User wants it again" \\
     --expected-revision N
 
 Merge two tasks that hold the same work (a duplicate-task finding prints this command):
-  node factory.mjs FILE --merge-task issue-42 --from pr-57
+  node factory.mjs write FILE --merge-task issue-42 --from pr-57
   KEEP is the task that is furthest along. The order is review, implementation, investigation,
   initial. Then the task with a PR. Then the older task. OTHER becomes resolved as duplicate with
   details.merged_into KEEP. KEEP gets the issue, PR, and links of OTHER. The command fails when

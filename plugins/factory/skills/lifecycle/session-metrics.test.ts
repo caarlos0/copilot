@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { test, type TestContext } from "node:test";
 
-const script = join(import.meta.dirname, "session-metrics.mjs");
+const script = join(import.meta.dirname, "factory.mjs");
 const first = "11111111-1111-4111-8111-111111111111";
 const second = "22222222-2222-4222-8222-222222222222";
 const start = Date.parse("2026-05-01T12:00:00Z");
@@ -25,6 +25,7 @@ const events = [
   ...bash(3, "b", "gh pr checks 5 -R secret/repo --watch --fail-fast", false),
   ...bash(3, "c", "gh wait 5"),
   ...bash(3, "e", "node /skills/lifecycle/pr-watch.mjs 5 --merge"),
+  ...bash(3, "f", "node /skills/lifecycle/factory.mjs pr-watch 5 --merge"),
   event(3, "tool.execution_start", { toolCallId: "d", toolName: "ask_user", arguments: { message: "SECRET-QUESTION" } }),
   event(3, "tool.execution_complete", { toolCallId: "d", success: true }),
   event(4, "session.usage_record", { usage: { model: "m1", cost: 1, inputTokens: 100, outputTokens: 10, cacheReadTokens: 50, duration: 2000, copilotUsage: { totalNanoAiu: 1500000000 } } }),
@@ -47,7 +48,7 @@ async function fixture(t: TestContext, { registry = [{ id: first, role: "impleme
   await writeFile(join(directory, first, "events.jsonl"), `${events.join("\n")}\n`);
   const file = join(directory, "owner.repo-factory-sessions.jsonl");
   await writeFile(file, registry.map((entry) => `${JSON.stringify(entry)}\n`).join(""));
-  const run = (...args: string[]) => spawnSync(process.execPath, [script, "--directory", directory, ...args], { encoding: "utf8" });
+  const run = (...args: string[]) => spawnSync(process.execPath, [script, "session-metrics", "--directory", directory, ...args], { encoding: "utf8" });
   return { directory, file, run };
 }
 
@@ -68,18 +69,18 @@ test("measures waits, commands, tools, and usage without exposing content", asyn
   assert.equal(report.sessions.length, 1);
   assert.deepEqual(report.sessions[0], {
     id: first, role: "implementation", task: "issue-1",
-    events: 20, skipped_lines: 1,
+    events: 22, skipped_lines: 1,
     started_at: "2026-05-01T12:00:00.000Z", ended_at: "2026-05-01T12:21:15.000Z", wall_minutes: 21.25,
     user_messages: 2, turns: 3,
     idle: { minutes: 21, over_10_minutes: 1, longest_minutes: 20 },
-    tools: { bash: { calls: 4, failures: 1 }, ask_user: { calls: 1, failures: 0 } },
-    commands: { sleep: 1, gh_wait: 2, watch: 1, status_reads: 1 },
+    tools: { bash: { calls: 5, failures: 1 }, ask_user: { calls: 1, failures: 0 } },
+    commands: { sleep: 1, gh_wait: 3, watch: 1, status_reads: 1 },
     usage: { cost: 3, nano_aiu: 1500000000, input_tokens: 300, output_tokens: 30, cache_read_tokens: 50, model_seconds: 5, models: ["m1", "m2"] },
   });
   assert.deepEqual(report.totals, {
     sessions: 1, wall_minutes: 21.25, user_messages: 2, turns: 3,
     idle_minutes: 21, idle_over_10_minutes: 1, ask_user_calls: 1,
-    commands: { sleep: 1, gh_wait: 2, watch: 1, status_reads: 1 },
+    commands: { sleep: 1, gh_wait: 3, watch: 1, status_reads: 1 },
     usage: { cost: 3, nano_aiu: 1500000000, input_tokens: 300, output_tokens: 30, cache_read_tokens: 50, model_seconds: 5 },
   });
 });

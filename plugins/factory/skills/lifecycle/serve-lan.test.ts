@@ -10,13 +10,13 @@ const example = JSON.parse(readFileSync(join(import.meta.dirname, "factory.examp
 const factoryFile = "owner.repo-factory.json";
 const unblocked = { task: "issue-5", state: "initial", comment: "This is now unblocked.", revision: 0 };
 
-// Spawns serve.mjs with the given extra args and resolves once it has printed its first
+// Spawns factory.mjs serve with the given extra args and resolves once it has printed its first
 // ready URL. The stderr accumulated so far is returned too, for the plain-HTTP warning.
 async function server(t: TestContext, args: string[] = [], existing?: string) {
   const directory = existing ?? await mkdtemp(join(tmpdir(), "factory-dashboard-lan-test-"));
   await writeFile(join(directory, factoryFile), JSON.stringify(example));
   const child = spawn(process.execPath,
-    [join(import.meta.dirname, "serve.mjs"), "--directory", directory, "--port", "0", ...args], { stdio: ["ignore", "pipe", "pipe"] });
+    [join(import.meta.dirname, "factory.mjs"), "serve", "--directory", directory, "--port", "0", ...args], { stdio: ["ignore", "pipe", "pipe"] });
   const closed = new Promise((resolve) => child.once("close", resolve));
   t.after(async () => {
     child.kill();

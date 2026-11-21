@@ -98,8 +98,8 @@ async function serve(argv: string[]) {
   if (options.help) {
     console.log(`Serve the factory dashboard on 127.0.0.1 (no token) or on --host (token required).
 
-Usage: node serve.mjs [--directory PATH] [--port PORT] [--host ADDR] [--token TOKEN]
-       bun serve.mjs [--directory PATH] [--port PORT] [--host ADDR] [--token TOKEN]
+Usage: node factory.mjs serve [--directory PATH] [--port PORT] [--host ADDR] [--token TOKEN]
+       bun factory.mjs serve [--directory PATH] [--port PORT] [--host ADDR] [--token TOKEN]
 
   --directory PATH  Use only this state directory. Default: both
                     ~/.local/state/copilot-factory and the legacy
@@ -227,7 +227,7 @@ An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
   // The coordinator records only `result` in a worker record, so the brief is found by the
   // convention <project>-<task>-<role>-brief.md (a recorded `brief` wins). The map has the
   // briefs whose file still exists, so the dashboard shows no link for one that
-  // `archive.mjs clean` deleted. The brief of the task itself is `briefs/<task>.md` (key `task`),
+  // `factory.mjs archive clean` deleted. The brief of the task itself is `briefs/<task>.md` (key `task`),
   // so a task without worker records, as most resolved tasks, still has its link.
   const briefName = (file: string, task: { id: string }, role: string, worker: Worker) =>
     worker.brief ?? `${file.replace(factoryFile, "")}-${task.id}-${role}-brief.md`;

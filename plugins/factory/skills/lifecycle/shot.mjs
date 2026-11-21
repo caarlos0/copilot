@@ -17,7 +17,7 @@ var browsers = [
 ];
 var usage = `Screenshot the factory dashboard to PNG files.
 
-Usage: node shot.mjs [--widths 1280,390] [--height 900] [--data FILE] [--out DIR] [--browser PATH]
+Usage: node factory.mjs shot [--widths 1280,390] [--height 900] [--data FILE] [--out DIR] [--browser PATH]
 
   --widths LIST   Comma-separated window widths in pixels (default: 1280,390)
   --height PX     Window height in pixels (default: 900)
@@ -26,7 +26,7 @@ Usage: node shot.mjs [--widths 1280,390] [--height 900] [--data FILE] [--out DIR
   --browser PATH  Chrome or Edge binary (default: the first one found; or $CHROME)
   -h, --help      Show help
 
-Starts serve.mjs on a free port (never 8766) with a private copy of the data,
+Starts factory.mjs serve on a free port (never 8766) with a private copy of the data,
 runs headless Chrome once per width, and prints one PNG path per line.
 Exits 2 for invalid arguments, 1 when the browser cannot render.`;
 function parseShotArgs(argv, env = process.env) {
@@ -55,12 +55,12 @@ function findBrowser(requested) {
   return browsers.find((candidate) => candidate.startsWith("/") ? existsSync(candidate) : spawnSync("which", [candidate], { stdio: "ignore" }).status === 0);
 }
 function startServer(directory) {
-  const child = spawn(process.execPath, [join(here, "serve.mjs"), "--directory", directory, "--port", "0"], {
+  const child = spawn(process.execPath, [join(here, "factory.mjs"), "serve", "--directory", directory, "--port", "0"], {
     stdio: ["ignore", "pipe", "inherit"]
   });
   const url = new Promise((ready, reject) => {
     child.once("error", reject);
-    child.once("exit", () => reject(new Error("serve.mjs exited before it printed a URL.")));
+    child.once("exit", () => reject(new Error("factory.mjs serve exited before it printed a URL.")));
     child.stdout.once("data", (chunk) => ready(String(chunk).split(`
 `)[0].trim()));
   });

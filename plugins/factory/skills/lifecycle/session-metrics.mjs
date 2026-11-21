@@ -12,7 +12,7 @@ var idleOver = 10 * 60000;
 var minutes = (ms) => Math.round(ms / 600) / 100;
 var commandPatterns = {
   sleep: /\bsleep\s+\d/,
-  gh_wait: /\bgh\s+wait\b|\bpr-watch\.mjs\b/,
+  gh_wait: /\bgh\s+wait\b|\bpr-watch\.mjs\b|\bfactory\.mjs\s+pr-watch\b/,
   watch: /--watch\b|\bgh\s+run\s+watch\b/
 };
 var statusRead = /\bgh\s+(?:pr\s+(?:view|checks)|run\s+(?:view|list))\b/;
@@ -185,10 +185,10 @@ async function main(argv) {
     if (values.help) {
       console.log(`Measure Copilot sessions without reading their content.
 
-Usage: node session-metrics.mjs --registry FILE [--since ISO | --active-since ISO] [--directory DIR]
-       node session-metrics.mjs [--directory DIR] [--active-since ISO] SESSION_UUID...
+Usage: node factory.mjs session-metrics --registry FILE [--since ISO | --active-since ISO] [--directory DIR]
+       node factory.mjs session-metrics [--directory DIR] [--active-since ISO] SESSION_UUID...
 
-FILE is the <owner.repo>-factory-sessions.jsonl registry that factory.mjs keeps beside the
+FILE is the <owner.repo>-factory-sessions.jsonl registry that factory.mjs write keeps beside the
 factory file. --since keeps sessions registered at or after that time, and always keeps the
 long-lived factory session (role factory). Their totals are cumulative over the whole session.
 --active-since keeps every session with an event at or after that time, however early it

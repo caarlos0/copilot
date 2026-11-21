@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { test, type TestContext } from "node:test";
 
-const script = join(import.meta.dirname, "reconcile.mjs");
+const script = join(import.meta.dirname, "factory.mjs");
 const window = "window:01a1ea3c-952d-7bdf-a621-95363a2bc34f";
 
 // The waiter check reads the PID's command line, so the PID must belong to a "broker.mjs wait" process.
@@ -61,7 +61,7 @@ async function fixture(t: TestContext, rex: string, branch = "main") {
       const pidFile = join(directory, "owner.repo-factory-waiter.pid");
       if (waiter === null) await rm(pidFile, { force: true });
       else await writeFile(pidFile, `${waiter}\n`);
-      const result = spawnSync(process.execPath, [script, file, ...args], {
+      const result = spawnSync(process.execPath, [script, "reconcile", file, ...args], {
         encoding: "utf8",
         env: { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH}`, ...env },
       });
@@ -322,7 +322,7 @@ test("a merged task with a PR gets the delete command with --merged-pr, even whe
   assert.deepEqual(errors, []);
   assert.deepEqual(findings, [{
     kind: "merged-worktree", task: "squashed", path: f.repo, created_by_run: true,
-    command: `node ${join(import.meta.dirname, "worktree.mjs")} delete work --merged-pr ${pr}`,
+    command: `node ${join(import.meta.dirname, "factory.mjs")} worktree delete work --merged-pr ${pr}`,
   }]);
 });
 
@@ -338,7 +338,7 @@ test("reports a running worker of a resolved task with the fix command", async (
   assert.deepEqual(findings.map(({ fix, ...rest }) => rest), [
     { kind: "stale-running", task: "done", role: "implementation", window: "window:gone" },
   ]);
-  assert.equal(findings[0].fix, `node ${join(import.meta.dirname, "factory.mjs")} ${f.file} --task done --workers '{"implementation":{"status":"closed"}}'`);
+  assert.equal(findings[0].fix, `node ${join(import.meta.dirname, "factory.mjs")} write ${f.file} --task done --workers '{"implementation":{"status":"closed"}}'`);
 });
 
 test("reports an attention item open longer than --attention-after, and records the ones the session log closed", async (t) => {
@@ -421,7 +421,7 @@ test("reports a running worker that ended its turn over 10 minutes ago and saved
 test("--attention-after must be a duration", async (t) => {
   const f = await fixture(t, fakeRex);
   await writeFile(f.file, JSON.stringify({ status: "active", tasks: [] }));
-  const result = spawnSync(process.execPath, [script, f.file, "--attention-after", "soon"], { encoding: "utf8" });
+  const result = spawnSync(process.execPath, [script, "reconcile", f.file, "--attention-after", "soon"], { encoding: "utf8" });
   assert.equal(result.status, 1);
   assert.match(result.stderr, /--attention-after must look like/);
 });
@@ -476,7 +476,7 @@ test("reports tasks that share an issue or PR through links, and keeps the furth
   const duplicates = findings.filter(({ kind }) => kind === "duplicate-task");
   assert.equal(duplicates.length, 1);
   assert.deepEqual({ keep: duplicates[0].keep, merge: duplicates[0].merge }, { keep: "pr-5", merge: ["issue-1"] });
-  assert.match(duplicates[0].command, /factory\.mjs .*owner\.repo-factory\.json --merge-task pr-5 --from issue-1$/);
+  assert.match(duplicates[0].command, /factory\.mjs write .*owner\.repo-factory\.json --merge-task pr-5 --from issue-1$/);
 });
 
 test("asks GitHub which issues an open PR task closes, and skips it when gh fails", async (t) => {

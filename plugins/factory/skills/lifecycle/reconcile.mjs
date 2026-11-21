@@ -14,7 +14,7 @@ import { defaultBranch } from "./default-branch.mjs";
 import { hooksInactive } from "./gate.mjs";
 import { scanProposals } from "./proposals.mjs";
 import { readJSON } from "./state-dir.mjs";
-var usage = "Usage: node reconcile.mjs FACTORY_FILE [--default-branch NAME] [--blocked-after 24h] [--attention-after 30m]";
+var usage = "Usage: node factory.mjs reconcile FACTORY_FILE [--default-branch NAME] [--blocked-after 24h] [--attention-after 30m]";
 var git = (cwd, ...args) => execFileSync("git", ["-C", cwd, ...args], {
   encoding: "utf8",
   stdio: ["ignore", "pipe", "ignore"]
@@ -29,7 +29,7 @@ function isAncestor(cwd, branch) {
     throw error;
   }
 }
-var worktreeScript = join(dirname(fileURLToPath(import.meta.url)), "worktree.mjs");
+var factoryScript = join(dirname(fileURLToPath(import.meta.url)), "factory.mjs");
 var closes = /\b(?:fix(?:e[sd])?|close[sd]?|resolve[sd]?)\s*:?\s+#(\d+)/gi;
 async function closedIssues(pr) {
   try {
@@ -68,7 +68,7 @@ async function duplicateTasks(file, tasks) {
       kind: "duplicate-task",
       keep: keep.id,
       merge: rest.map((task) => task.id),
-      command: rest.map((task) => `node ${join(import.meta.dirname, "factory.mjs")} ${file} --merge-task ${keep.id} --from ${task.id}`).join(" && ")
+      command: rest.map((task) => `node ${factoryScript} write ${file} --merge-task ${keep.id} --from ${task.id}`).join(" && ")
     };
   });
 }
@@ -200,7 +200,7 @@ async function reconcile(file, branchOverride, blockedAfter = intervalMs("24h"),
       };
       if (task.pr) {
         const branch = git(worktree.path, "rev-parse", "--abbrev-ref", "HEAD");
-        finding.command = `node ${worktreeScript} delete ${branch} --merged-pr ${task.pr}`;
+        finding.command = `node ${factoryScript} worktree delete ${branch} --merged-pr ${task.pr}`;
       }
       findings.push(finding);
     } catch {
@@ -216,7 +216,7 @@ async function reconcile(file, branchOverride, blockedAfter = intervalMs("24h"),
         task: task.id,
         role,
         window: worker.window ?? null,
-        fix: `node ${join(import.meta.dirname, "factory.mjs")} ${file} --task ${task.id} --workers '${JSON.stringify({ [role]: { status: "closed" } })}'`
+        fix: `node ${factoryScript} write ${file} --task ${task.id} --workers '${JSON.stringify({ [role]: { status: "closed" } })}'`
       });
     }
   }

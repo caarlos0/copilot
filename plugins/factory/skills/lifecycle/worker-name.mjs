@@ -4,7 +4,7 @@
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 var usage = `Usage:
-  node worker-name.mjs --role ROLE --ref REF [--summary TEXT]
+  node factory.mjs worker-name --role ROLE --ref REF [--summary TEXT]
 
 Prints the --name of a worker Copilot session: "<Verb> <ref>: <summary>".
 ROLE is investigation, implementation, review, backlog (Find work) or improve.

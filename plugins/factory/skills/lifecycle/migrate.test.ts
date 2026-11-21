@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { test, type TestContext } from "node:test";
 
-const script = join(import.meta.dirname, "migrate.mjs");
+const script = join(import.meta.dirname, "factory.mjs");
 const at = "2026-05-01T10:00:00Z";
 const later = "2026-05-01T11:00:00Z";
 const pull = (n: number) => `https://github.com/owner/repo/pull/${n}`;
@@ -39,7 +39,7 @@ async function fixture(t: TestContext) {
   ]));
   return {
     directory,
-    run: (...args: string[]) => spawnSync(process.execPath, [script, "--project", "owner/repo", "--directory", directory, ...args], { encoding: "utf8" }),
+    run: (...args: string[]) => spawnSync(process.execPath, [script, "migrate", "--project", "owner/repo", "--directory", directory, ...args], { encoding: "utf8" }),
     read: async () => JSON.parse(await readFile(join(directory, "owner.repo-factory.json"), "utf8")),
   };
 }
@@ -226,9 +226,9 @@ test("--archive checks every destination before writing anything", async (t) => 
 
 test("fails on a missing project argument and on a project without legacy handoffs", async (t) => {
   const f = await fixture(t);
-  const usage = spawnSync(process.execPath, [script, "--directory", f.directory], { encoding: "utf8" });
+  const usage = spawnSync(process.execPath, [script, "migrate", "--directory", f.directory], { encoding: "utf8" });
   assert.equal(usage.status, 2);
-  const none = spawnSync(process.execPath, [script, "--project", "other/thing", "--directory", f.directory], { encoding: "utf8" });
+  const none = spawnSync(process.execPath, [script, "migrate", "--project", "other/thing", "--directory", f.directory], { encoding: "utf8" });
   assert.equal(none.status, 1);
   assert.match(none.stderr, /No implementer or coordinator handoff/);
 });
@@ -242,7 +242,7 @@ test("reads each handoff from the new directory, else the legacy one, and writes
   await mkdir(current, { recursive: true });
   await writeFile(join(legacy, "owner.repo-implementer.json"), JSON.stringify(handoff("implementer", [old("old-1", "pending")])));
   await writeFile(join(current, "owner.repo-coordinator.json"), JSON.stringify(handoff("coordinator", [old("new-1", "pending")])));
-  const result = spawnSync(process.execPath, [script, "--project", "owner/repo"], { encoding: "utf8", env: { ...process.env, HOME: home } });
+  const result = spawnSync(process.execPath, [script, "migrate", "--project", "owner/repo"], { encoding: "utf8", env: { ...process.env, HOME: home } });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(JSON.parse(result.stdout).tasks, 2);
   assert.deepEqual(await readdir(legacy), ["owner.repo-implementer.json"]);
