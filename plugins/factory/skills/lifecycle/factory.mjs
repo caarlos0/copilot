@@ -3868,8 +3868,12 @@ An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
     }
     return proposalScans.get(target).open;
   }
-  const briefName2 = (file, task, role, worker) => worker.brief ?? `${file.replace(factoryFile2, "")}-${task.id}-${role}-brief.md`;
   const taskBriefName = (task) => `briefs/${task.id}.md`;
+  const briefNames = (file, task, role, worker) => [
+    ...worker.brief ? [worker.brief] : [],
+    `${file.replace(factoryFile2, "")}-${task.id}-${role}-brief.md`,
+    taskBriefName(task)
+  ];
   const briefFile = (name) => name.startsWith("briefs/") ? localFile(name.slice("briefs/".length), "briefs") : localFile(name);
   async function existingBrief(name) {
     try {
@@ -3883,11 +3887,15 @@ An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
   async function taskBriefs(file, data) {
     const briefs = {};
     for (const task of data.tasks) {
-      const names = Object.entries(task.workers).flatMap(([role, worker]) => worker ? [[role, briefName2(file, task, role, worker)]] : []);
-      names.push(["task", taskBriefName(task)]);
-      for (const [role, name] of names) {
-        if (await existingBrief(name))
-          (briefs[task.id] ??= {})[role] = name;
+      const roles = Object.entries(task.workers).flatMap(([role, worker]) => worker ? [[role, briefNames(file, task, role, worker)]] : []);
+      roles.push(["task", [taskBriefName(task)]]);
+      for (const [role, names] of roles) {
+        for (const name of names) {
+          if (await existingBrief(name)) {
+            (briefs[task.id] ??= {})[role] = name;
+            break;
+          }
+        }
       }
     }
     return briefs;
@@ -4259,7 +4267,7 @@ p{margin:0;color:#f87171}
         const file = url.searchParams.get("file");
         const data = await loadFactory(file);
         const name = url.searchParams.get("name");
-        const referenced = data.tasks.some((task) => taskBriefName(task) === name || Object.entries(task.workers).some(([role, worker]) => worker && (briefName2(file, task, role, worker) === name || worker.result === name))) || data.rules.some((rule) => rule.worker && (rule.worker.brief === name || rule.worker.result === name));
+        const referenced = data.tasks.some((task) => taskBriefName(task) === name || Object.entries(task.workers).some(([role, worker]) => worker && (briefNames(file, task, role, worker).includes(name) || worker.result === name))) || data.rules.some((rule) => rule.worker && (rule.worker.brief === name || rule.worker.result === name));
         if (!name || !referenced) {
           throw new HttpError(403, "Artifact is not referenced by the selected factory.");
         }

@@ -294,10 +294,11 @@ need no `node_modules`. To update the libraries, run `bun update marked dompurif
 `plugins/factory` and rebuild.
 The test DOM uses the real `marked` and stubs DOMPurify. Both popups load the
 file through `/api/artifact`, so the access checks of the server apply. The coordinator records only
-`result` in a worker record, so `factory.mjs serve` finds the brief of each task worker by the name
-`<project>-<task>-<role>-brief.md` (a recorded `brief` wins). It sends the names whose file exists as
+`result` in a worker record, so `factory.mjs serve` finds the brief of each task worker by the first of
+these names whose file exists: a recorded `brief`, `<project>-<task>-<role>-brief.md`, then the brief of
+the task itself, `briefs/<task>.md`. It sends the names whose file exists as
 `briefs` (`{task: {role: name}}`, in the ETag). `/api/artifact` serves the same names. The
-brief of the task itself, `briefs/<task>.md` in the state directory, is in the map under the role
+brief of the task itself, `briefs/<task>.md` in the state directory, is also in the map under the role
 `task`, so a task with no worker record (most resolved tasks) has its link. It sits on the first
 history step. This is the only folder that the server reads. A link out of it is refused. The
 dashboard shows the `brief` link, on every task state, only for a name in that map. A brief that

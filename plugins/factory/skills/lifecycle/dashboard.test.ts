@@ -2968,6 +2968,34 @@ test("a resolved task without workers shows the task brief from briefs/, and the
   assert.equal(card().querySelectorAll("a").filter((node: Json) => node.textContent === "brief").length, 0);
 });
 
+test("every worker of a resolved task shows a brief link, found by any known name", async (t) => {
+  const ui = await dashboard(t);
+  const data = structuredClone(example);
+  const task = data.tasks.find((item: Json) => item.id === "issue-3");
+  task.workers = {
+    investigation: { status: "closed", mode: "one-shot", brief: "recorded-brief.md", result: "owner.repo-issue-3-investigation-result.json" },
+    implementation: { status: "closed", result: "owner.repo-issue-3-implementation-result.json" },
+    review: { status: "closed", result: "owner.repo-issue-3-review-result.json" },
+  };
+  await mkdir(join(ui.directory, "briefs"));
+  await writeFile(join(ui.directory, "briefs", "issue-3.md"), "# Task three\n");
+  await writeFile(join(ui.directory, "recorded-brief.md"), "# Recorded\n");
+  await writeFile(join(ui.directory, "owner.repo-issue-3-review-brief.md"), "# Review\n");
+  await writeFile(join(ui.directory, factoryFile), JSON.stringify(data));
+  await ui.run("refresh()");
+  const card = ui.run(`taskRow(${JSON.stringify(ui.run("snapshot.tasks.find((item) => item.id === 'issue-3')"))}, new Set())`);
+
+  const href = (name: string) => `/api/artifact?file=${encodeURIComponent(factoryFile)}&name=${encodeURIComponent(name)}`;
+  const briefs = card.querySelectorAll("a").filter((node: Json) => node.textContent === "brief").map((node: Json) => node.href);
+  assert.deepEqual(briefs.sort(), [
+    "briefs/issue-3.md", "briefs/issue-3.md", "owner.repo-issue-3-review-brief.md", "recorded-brief.md",
+  ].map(href).sort(), "The task and the implementation use briefs/, the others their own file.");
+  assert.equal(card.querySelectorAll("a").filter((node: Json) => node.textContent === "result").length, 3);
+  for (const name of ["recorded-brief.md", "owner.repo-issue-3-review-brief.md", "briefs/issue-3.md"]) {
+    assert.equal((await get(ui.url, href(name))).status, 200, name);
+  }
+});
+
 test("the brief link opens the popup with the brief rendered as sanitized Markdown", async (t) => {
   const ui = await dashboard(t);
   const name = "owner.repo-issue-9-implementation-brief.md";

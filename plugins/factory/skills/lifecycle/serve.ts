@@ -224,14 +224,17 @@ An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
     return proposalScans.get(target)!.open;
   }
 
-  // The coordinator records only `result` in a worker record, so the brief is found by the
-  // convention <project>-<task>-<role>-brief.md (a recorded `brief` wins). The map has the
-  // briefs whose file still exists, so the dashboard shows no link for one that
-  // `factory.mjs archive clean` deleted. The brief of the task itself is `briefs/<task>.md` (key `task`),
-  // so a task without worker records, as most resolved tasks, still has its link.
-  const briefName = (file: string, task: { id: string }, role: string, worker: Worker) =>
-    worker.brief ?? `${file.replace(factoryFile, "")}-${task.id}-${role}-brief.md`;
+  // The coordinator records only `result` in a worker record, so the brief of a worker is the first
+  // name whose file exists: a recorded `brief`, the convention <project>-<task>-<role>-brief.md, or
+  // the brief of the task itself, `briefs/<task>.md` (also key `task`, so a task without worker
+  // records, as most resolved tasks, still has its link). The map has the briefs whose file still
+  // exists, so the dashboard shows no link for one that `factory.mjs archive clean` deleted.
   const taskBriefName = (task: { id: string }) => `briefs/${task.id}.md`;
+  const briefNames = (file: string, task: { id: string }, role: string, worker: Worker) => [
+    ...worker.brief ? [worker.brief] : [],
+    `${file.replace(factoryFile, "")}-${task.id}-${role}-brief.md`,
+    taskBriefName(task),
+  ];
   const briefFile = (name: string) => name.startsWith("briefs/") ? localFile(name.slice("briefs/".length), "briefs") : localFile(name);
 
   async function existingBrief(name: string) {
@@ -247,11 +250,16 @@ An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
   async function taskBriefs(file: string, data: Factory) {
     const briefs: Record<string, Record<string, string>> = {};
     for (const task of data.tasks) {
-      const names = Object.entries(task.workers)
-        .flatMap(([role, worker]) => worker ? [[role, briefName(file, task, role, worker)]] : []);
-      names.push(["task", taskBriefName(task)]);
-      for (const [role, name] of names) {
-        if (await existingBrief(name)) (briefs[task.id] ??= {})[role] = name;
+      const roles: [string, string[]][] = Object.entries(task.workers)
+        .flatMap(([role, worker]) => worker ? [[role, briefNames(file, task, role, worker)]] : []);
+      roles.push(["task", [taskBriefName(task)]]);
+      for (const [role, names] of roles) {
+        for (const name of names) {
+          if (await existingBrief(name)) {
+            (briefs[task.id] ??= {})[role] = name;
+            break;
+          }
+        }
       }
     }
     return briefs;
@@ -682,7 +690,7 @@ p{margin:0;color:#f87171}
         const data = await loadFactory(file);
         const name = url.searchParams.get("name");
         const referenced = data.tasks.some((task) => taskBriefName(task) === name || Object.entries(task.workers)
-          .some(([role, worker]) => worker && (briefName(file!, task, role, worker) === name || worker.result === name))) ||
+          .some(([role, worker]) => worker && (briefNames(file!, task, role, worker).includes(name!) || worker.result === name))) ||
           data.rules.some((rule) => rule.worker && (rule.worker.brief === name || rule.worker.result === name));
         if (!name || !referenced) {
           throw new HttpError(403, "Artifact is not referenced by the selected factory.");
