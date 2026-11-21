@@ -1,0 +1,4 @@
+# Every .mjs file in these plugins is a bundle that `bun run build` generates from a .ts file.
+# Hand-written code in these plugins must not use the .mjs extension.
+plugins/factory/**/*.mjs linguist-generated=true
+plugins/coordination/**/*.mjs linguist-generated=true
