@@ -187,8 +187,13 @@ the factory state directory. Keep the flags identical to the lifecycle skill's
 "Launch rules":
 
 ```text
---add-dir "$HOME/.copilot" --add-dir "$HOME/Developer/worktrees" --add-dir "<state directory>"
+--add-dir "$HOME/Developer/worktrees" --add-dir "<state directory>"
 ```
+
+Only the `improve` worker also gets `--add-dir "$HOME/.copilot/session-state"`,
+so it can read the `events.jsonl` of other sessions. No worker gets
+`--add-dir "$HOME/.copilot"`, because that grants read and write access to the
+settings, the permission config, the session database and all sessions.
 
 `hooks.json` also ships a `preToolUse` guard (`factory.mjs hook guard`) for the
 coordinator. It uses the same gate as the stop hook (owner lock session, with

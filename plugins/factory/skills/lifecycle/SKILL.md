@@ -1085,7 +1085,7 @@ edits, commits, or pushes. Use a new worktree for every task:
 ```sh
 WT=$(node /abs/path/to/factory.mjs worktree create fix-login)   # run in the main checkout
 NAME=$(node /abs/path/to/factory.mjs worker-name --role implementation --ref '#42' --summary 'Fix login redirect')
-rex window new -c "$(echo "$WT" | jq -r .path)" -- env FACTORY_TASK=fix-login FACTORY_ROLE=implementation FACTORY_FILE="$FILE" copilot --agent coding:caarlos0 --model claude-sonnet-5.5 --name "$NAME" --yolo --sandbox --add-dir "$HOME/.copilot" --add-dir "$HOME/Developer/worktrees" --add-dir "$STATE_DIR" -i 'Read /abs/brief.md and do it.'
+rex window new -c "$(echo "$WT" | jq -r .path)" -- env FACTORY_TASK=fix-login FACTORY_ROLE=implementation FACTORY_FILE="$FILE" copilot --agent coding:caarlos0 --model claude-sonnet-5.5 --name "$NAME" --yolo --sandbox --add-dir "$HOME/Developer/worktrees" --add-dir "$STATE_DIR" -i 'Read /abs/brief.md and do it.'
 ```
 
 `$STATE_DIR` is the factory state directory. Replace `$HOME/Developer/worktrees`
@@ -1231,12 +1231,16 @@ the same list in `plugins/factory/AGENTS.md`.
 Every worker launch also carries these flags, after `--sandbox`:
 
 ```text
---add-dir "$HOME/.copilot" --add-dir "$HOME/Developer/worktrees" --add-dir "<state directory>"
+--add-dir "$HOME/Developer/worktrees" --add-dir "<state directory>"
 ```
 
-Without them, workers get sandbox-bypass prompts when they read session logs,
-other worktrees, or the state directory. `--add-dir` makes those paths readable
-and writable, so no prompt appears. The worktree root comes from
+Without them, workers get sandbox-bypass prompts when they read other
+worktrees or the state directory. `--add-dir` makes those paths readable
+and writable, so no prompt appears. Only the `improve` worker also gets
+`--add-dir "$HOME/.copilot/session-state"`, so it can read the `events.jsonl` of
+other sessions. No worker gets `--add-dir "$HOME/.copilot"`: it grants read and
+write access to the settings, the permission config, the session database and
+all sessions. The worktree root comes from
 `worktreePathTemplate` in `$COPILOT_HOME/settings.json` (default
 `~/Developer/worktrees`). The
 state directory is the factory state directory that holds the factory file.

@@ -121,7 +121,9 @@ If you use `session_store_sql`, obey these rules:
    not propose a grant for a command that the worker deny flags block. Write the
    command name or path only. Never copy a full command line, its arguments, or
    its output into the result. You never apply a grant. Do not change launch
-   scripts in this step. Another task covers `--add-dir`.
+   scripts in this step. Never propose `--add-dir "$HOME/.copilot"`: it grants
+   access to the whole Copilot home. Your own launch already has
+   `--add-dir "$HOME/.copilot/session-state"`.
 5. **Pick one change, or none.** Choose the change with the largest expected
    effect on one metric. If the window has fewer than 3 worker sessions, prefer
    no change. If the cause is outside the factory (for example a CI outage), say
