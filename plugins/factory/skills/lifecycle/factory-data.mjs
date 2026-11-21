@@ -145,28 +145,28 @@ function byRecency(tasks) {
   return [...tasks].sort((a, b) => time(b) - time(a) || a.id.localeCompare(b.id));
 }
 function cardSummary(task) {
-  const time = (worker) => Date.parse(worker.summary_at) || 0;
-  const found = Object.entries(task.workers ?? {}).filter(([, worker]) => worker?.summary);
+  const time = (worker2) => Date.parse(worker2.summary_at) || 0;
+  const found = Object.entries(task.workers ?? {}).filter(([, worker2]) => worker2?.summary);
   const [role, worker] = found.find(([name]) => name === task.state) ?? found.sort(([, a], [, b]) => time(b) - time(a))[0] ?? [];
   return worker ? { role, text: worker.summary } : null;
 }
 function rankTasks(tasks, query, limit = 20) {
-  const text = query.trim().toLowerCase();
-  if (!text)
+  const text2 = query.trim().toLowerCase();
+  if (!text2)
     return byRecency(tasks).slice(0, limit);
-  const terms = text.split(/\s+/);
+  const terms = text2.split(/\s+/);
   const rank = (task) => {
     const id = task.id.toLowerCase();
     const title = task.title.toLowerCase();
-    if (id === text)
+    if (id === text2)
       return 0;
-    if (id.startsWith(text))
+    if (id.startsWith(text2))
       return 1;
-    if (title.startsWith(text))
+    if (title.startsWith(text2))
       return 2;
-    if (id.includes(text))
+    if (id.includes(text2))
       return 3;
-    return title.includes(text) ? 4 : 5;
+    return title.includes(text2) ? 4 : 5;
   };
   const searchable = (task) => [task.id, task.title, task.state, task.resolution?.outcome, task.issue, task.pr, ...task.links].filter(Boolean).join(`
 `).toLowerCase();
@@ -576,13 +576,13 @@ function fitProjectLabel(label, width, measure) {
   const slash = label.indexOf("/");
   const repo = label.slice(slash + 1);
   const steps = slash > 0 ? [label, `${label[0]}/${repo}`, repo] : [label];
-  const fits = steps.find((text) => measure(text) <= width);
+  const fits = steps.find((text2) => measure(text2) <= width);
   if (fits !== undefined)
     return fits;
   for (let keep = repo.length - 1;keep > 0; keep--) {
-    const text = `…${repo.slice(-keep)}`;
-    if (measure(text) <= width)
-      return text;
+    const text2 = `…${repo.slice(-keep)}`;
+    if (measure(text2) <= width)
+      return text2;
   }
   return "…";
 }

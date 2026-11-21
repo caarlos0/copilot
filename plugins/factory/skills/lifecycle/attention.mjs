@@ -132,7 +132,7 @@ async function scanAttention(file, { now = Date.now(), panes } = {}) {
   }
   const answers = new Map;
   let live = panes ? panes.map((id) => ({ id, session: null })) : panes;
-  const open = [];
+  const open2 = [];
   const resolved = [];
   for (const event of requests.values()) {
     const { session, kind, text: message, role = null, pane = null, options = [] } = event.data;
@@ -158,9 +158,9 @@ async function scanAttention(file, { now = Date.now(), panes } = {}) {
     if (reason)
       resolved.push({ item, reason });
     else
-      open.push(item);
+      open2.push(item);
   }
-  return { open, resolved };
+  return { open: open2, resolved };
 }
 async function openAttention(file, options) {
   return (await scanAttention(file, options)).open;

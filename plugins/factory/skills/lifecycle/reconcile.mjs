@@ -231,9 +231,9 @@ async function reconcile(file, branchOverride, blockedAfter = intervalMs("24h"),
   }
   for (const rule of factory.rules ?? []) {
     const worker = rule.worker;
-    const file = worker?.result ? join(directory, worker.result) : null;
-    const result = file ? await readJSON(file) : null;
-    const at = result && (Date.parse(result.updated_at) || (await stat(file)).mtimeMs);
+    const file2 = worker?.result ? join(directory, worker.result) : null;
+    const result = file2 ? await readJSON(file2) : null;
+    const at = result && (Date.parse(result.updated_at) || (await stat(file2)).mtimeMs);
     const finished = result?.outcome === "complete" && (!rule.last_run_at || at > Date.parse(rule.last_run_at));
     if (!finished) {
       checkMissing(worker, { kind: "worker-missing", rule: rule.id, role: "rule", worktree: null });
