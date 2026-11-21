@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { after, test } from "node:test";
 import hooks from "../hooks.json" with { type: "json" };
 
-const guard = join(import.meta.dirname, "guard.mjs");
+const factory = join(import.meta.dirname, "..", "skills", "lifecycle", "factory.mjs");
 
 const home = mkdtempSync(join(tmpdir(), "guard-home-"));
 const scratch = mkdtempSync(join(tmpdir(), "guard-tmp-"));
@@ -22,7 +22,7 @@ const env = { PATH: process.env.PATH, HOME: home, TMPDIR: scratch, FACTORY_COORD
 
 function run(payload: unknown) {
   const input = typeof payload === "string" ? payload : JSON.stringify(payload);
-  const out = spawnSync("node", [guard], { input, encoding: "utf8", env });
+  const out = spawnSync("node", [factory, "hook", "guard"], { input, encoding: "utf8", env });
   assert.equal(out.status, 0, out.stderr);
   return out.stdout ? JSON.parse(out.stdout) : null;
 }
@@ -76,6 +76,9 @@ test("denies bash rule breaks and names the rule", () => {
     ["node /p/broker.mjs wait /f.json >$TMPDIR/w.json 2>&1", "waiter-async-bash"],
     ["node /p/broker.mjs wait /f.json &> out.txt", "waiter-async-bash"],
     ["sh -c 'node /p/broker.mjs wait /f.json &'", "waiter-async-bash"],
+    ["node /p/factory.mjs broker wait /f.json --since 1 &", "waiter-async-bash"],
+    ["nohup node /p/factory.mjs broker wait /f.json", "waiter-async-bash"],
+    ["node /p/factory.mjs broker wait /f.json >$TMPDIR/w.json 2>&1", "waiter-async-bash"],
   ];
   for (const [command, rule] of cases) denied(bash(command), rule);
 });
@@ -103,6 +106,8 @@ test("allows near misses", () => {
     "node /p/broker.mjs wait /f.json --since 1 --exclude-source coordinator --due",
     "node /p/broker.mjs wait /f.json 2>&1",
     "node /p/broker.mjs wait /f.json 2>/dev/null",
+    "node /p/factory.mjs broker wait /f.json --since 1 --due",
+    "node /p/factory.mjs broker emit /f.json worker.result & node /p/factory.mjs broker armed /f.json",
     "node /p/broker.mjs cursor /f.json > $TMPDIR/c.json",
     "node /p/broker.mjs emit /f.json worker.result & node /p/broker.mjs armed /f.json",
     "git status && node /p/broker.mjs armed /f.json",

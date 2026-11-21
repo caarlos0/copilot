@@ -28,8 +28,8 @@ var BASH_RULES = [
   },
   {
     name: "waiter-async-bash",
-    reason: "Run `broker.mjs wait` as async bash and read its output. A waiter that runs with `&`, nohup, setsid, or disown, or with stdout sent to a file, has no reader. Its wake never reaches you.",
-    deny: (c) => /^(?:\S*\/)?(?:node|bun)\s+\S*broker\.mjs\s+wait\b/.test(c) && (/\s&$/.test(c) || /(?:^|\s)(?:1|&)?>>?\s*(?!&)\S/.test(c))
+    reason: "Run `factory.mjs broker wait` as async bash and read its output. A waiter that runs with `&`, nohup, setsid, or disown, or with stdout sent to a file, has no reader. Its wake never reaches you.",
+    deny: (c) => /^(?:\S*\/)?(?:node|bun)\s+\S*(?:broker\.mjs|factory\.mjs\s+broker)\s+wait\b/.test(c) && (/\s&$/.test(c) || /(?:^|\s)(?:1|&)?>>?\s*(?!&)\S/.test(c))
   },
   {
     name: "copilot-autopilot",

@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import hooks from "../hooks.json" with { type: "json" };
 
-const script = join(import.meta.dirname, "attention.mjs");
+const script = join(import.meta.dirname, "..", "skills", "lifecycle", "factory.mjs");
 const pluginRoot = join(import.meta.dirname, "..");
 const fixtures = join(import.meta.dirname, "fixtures");
 const load = async (name: string) => JSON.parse(await readFile(join(fixtures, name), "utf8"));
@@ -31,7 +31,7 @@ async function setup(t: TestContext) {
     }
   };
   const run = (payload: string | Record<string, unknown>, env: Record<string, string> = {}) =>
-    spawnSync(process.execPath, [script], {
+    spawnSync(process.execPath, [script, "hook", "attention"], {
       encoding: "utf8",
       input: typeof payload === "string" ? payload : JSON.stringify({ ...payload, cwd: directory }),
       env: { PATH: process.env.PATH, TMPDIR: scratch, HOME: directory, FACTORY_FILE: file, ...env },
@@ -45,7 +45,7 @@ test("hooks.json declares the notification, permissionRequest and ask_user preTo
   assert.equal(hooks.hooks.permissionRequest.length, 1);
   for (const entry of [...hooks.hooks.notification, ...hooks.hooks.permissionRequest, hooks.hooks.preToolUse[1]]) {
     assert.equal(entry.type, "command");
-    assert.ok(entry.bash.includes("hooks/attention.mjs"));
+    assert.ok(entry.bash.includes("factory.mjs\" hook attention"));
     assert.ok(entry.timeoutSec > 0 && entry.timeoutSec <= 30);
   }
 });

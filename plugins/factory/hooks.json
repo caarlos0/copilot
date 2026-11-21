@@ -11,33 +11,33 @@
     "preToolUse": [
       {
         "type": "command",
-        "bash": "[ \"$FACTORY_COORDINATOR\" != 0 ] || exit 0; command -v node >/dev/null || exit 0; root=\"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$COPILOT_PLUGIN_ROOT}}\"; [ -f \"$root/hooks/guard.mjs\" ] || { echo 'factory guard: plugin root not found. The guard does not run.' >&2; exit 0; }; exec node \"$root/hooks/guard.mjs\"",
+        "bash": "[ \"$FACTORY_COORDINATOR\" != 0 ] || exit 0; command -v node >/dev/null || exit 0; root=\"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$COPILOT_PLUGIN_ROOT}}\"; [ -f \"$root/skills/lifecycle/factory.mjs\" ] || { echo 'factory guard: plugin root not found. The guard does not run.' >&2; exit 0; }; exec node \"$root/skills/lifecycle/factory.mjs\" hook guard",
         "timeoutSec": 25
       },
       {
         "type": "command",
-        "bash": "input=$(cat); case \"$input\" in *ask_user*) ;; *) exit 0 ;; esac; command -v node >/dev/null || exit 0; root=\"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$COPILOT_PLUGIN_ROOT}}\"; [ -f \"$root/hooks/attention.mjs\" ] || exit 0; printf '%s' \"$input\" | node \"$root/hooks/attention.mjs\"; exit 0",
+        "bash": "input=$(cat); case \"$input\" in *ask_user*) ;; *) exit 0 ;; esac; command -v node >/dev/null || exit 0; root=\"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$COPILOT_PLUGIN_ROOT}}\"; [ -f \"$root/skills/lifecycle/factory.mjs\" ] || exit 0; printf '%s' \"$input\" | node \"$root/skills/lifecycle/factory.mjs\" hook attention; exit 0",
         "timeoutSec": 25
       }
     ],
     "permissionRequest": [
       {
         "type": "command",
-        "bash": "command -v node >/dev/null || exit 0; root=\"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$COPILOT_PLUGIN_ROOT}}\"; [ -f \"$root/hooks/attention.mjs\" ] || exit 0; node \"$root/hooks/attention.mjs\"; exit 0",
+        "bash": "command -v node >/dev/null || exit 0; root=\"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$COPILOT_PLUGIN_ROOT}}\"; [ -f \"$root/skills/lifecycle/factory.mjs\" ] || exit 0; node \"$root/skills/lifecycle/factory.mjs\" hook attention; exit 0",
         "timeoutSec": 25
       }
     ],
     "notification": [
       {
         "type": "command",
-        "bash": "command -v node >/dev/null || exit 0; root=\"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$COPILOT_PLUGIN_ROOT}}\"; [ -f \"$root/hooks/attention.mjs\" ] || exit 0; node \"$root/hooks/attention.mjs\"; exit 0",
+        "bash": "command -v node >/dev/null || exit 0; root=\"${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$COPILOT_PLUGIN_ROOT}}\"; [ -f \"$root/skills/lifecycle/factory.mjs\" ] || exit 0; node \"$root/skills/lifecycle/factory.mjs\" hook attention; exit 0",
         "timeoutSec": 25
       }
     ],
     "agentStop": [
       {
         "type": "command",
-        "bash": "[ \"$FACTORY_COORDINATOR\" != 0 ] || exit 0; root=\"${PLUGIN_ROOT:-$COPILOT_PLUGIN_ROOT}\"; [ -n \"$root\" ] || exit 0; [ -f \"$root/hooks/stop-hook.mjs\" ] || exit 0; exec node \"$root/hooks/stop-hook.mjs\"",
+        "bash": "[ \"$FACTORY_COORDINATOR\" != 0 ] || exit 0; root=\"${PLUGIN_ROOT:-$COPILOT_PLUGIN_ROOT}\"; [ -n \"$root\" ] || exit 0; [ -f \"$root/skills/lifecycle/factory.mjs\" ] || exit 0; exec node \"$root/skills/lifecycle/factory.mjs\" hook stop",
         "timeoutSec": 25
       }
     ]

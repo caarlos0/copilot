@@ -28,17 +28,17 @@ async function run() {
   if (factory.status === "finished")
     return;
   if (await waiterPid(await resolveFactory(file)) === null) {
-    block(`No broker waiter is armed and the run is not finished. Arm the waiter now. Run \`node ${join(lifecycle, "broker.mjs")} wait ${file} --since CURSOR --exclude-source coordinator --due\` as async bash with the latest cursor. If you have no cursor, run \`broker.mjs cursor\`. Then end the turn.`);
+    block(`No broker waiter is armed and the run is not finished. Arm the waiter now. Run \`node ${join(lifecycle, "factory.mjs")} broker wait ${file} --since CURSOR --exclude-source coordinator --due\` as async bash with the latest cursor. If you have no cursor, run \`factory.mjs broker cursor\`. Then end the turn.`);
     return;
   }
   if (input.stop_hook_active || input.stopHookActive)
     return;
-  const sweep = spawnSync(process.execPath, [join(lifecycle, "reconcile.mjs"), file], { encoding: "utf8", timeout: 15000 });
+  const sweep = spawnSync(process.execPath, [join(lifecycle, "factory.mjs"), "reconcile", file], { encoding: "utf8", timeout: 15000 });
   if (sweep.status !== 0)
     return;
   const { findings } = JSON.parse(sweep.stdout);
   if (findings?.length) {
-    block(`reconcile.mjs reports ${findings.length} finding(s). Act on each finding with factory.mjs. Keep the waiter armed. Then end the turn. If a finding needs the user, report it. Do not act on it. Findings: ${JSON.stringify(findings)}`);
+    block(`factory.mjs reconcile reports ${findings.length} finding(s). Act on each finding with factory.mjs write. Keep the waiter armed. Then end the turn. If a finding needs the user, report it. Do not act on it. Findings: ${JSON.stringify(findings)}`);
   }
 }
 async function main(_argv) {

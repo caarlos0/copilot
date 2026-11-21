@@ -7,9 +7,9 @@ import { test, type TestContext } from "node:test";
 import hooks from "../hooks.json" with { type: "json" };
 const [entry] = hooks.hooks.agentStop;
 
-// The waiter check reads the PID's command line, so the PID must belong to a "broker.mjs wait" process.
+// The waiter check reads the PID's command line, so the PID must belong to a "factory.mjs broker wait" process.
 function fakeWaiter(t: TestContext) {
-  const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)", "broker.mjs", "wait"], { stdio: "ignore" });
+  const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)", "factory.mjs", "broker", "wait"], { stdio: "ignore" });
   t.after(() => child.kill());
   return child.pid;
 }
@@ -80,7 +80,7 @@ test("blocks a non-finished run without an armed waiter, even after a prior bloc
   for (const stop_hook_active of [false, true]) {
     const out = f.run({ input: { stop_hook_active } });
     assert.equal(out.decision, "block");
-    assert.match(out.reason, /broker\.mjs wait .*owner\.repo-factory\.json --since CURSOR --exclude-source coordinator --due/);
+    assert.match(out.reason, /factory\.mjs broker wait .*owner\.repo-factory\.json --since CURSOR --exclude-source coordinator --due/);
   }
 });
 
