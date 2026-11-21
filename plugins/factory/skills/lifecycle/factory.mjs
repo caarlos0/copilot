@@ -526,6 +526,13 @@ function artifactName(value, field = "artifact") {
   }
   return value;
 }
+function briefName(value, field = "brief") {
+  text(value, field);
+  if (!/^(briefs\/)?[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(value)) {
+    throw new Error(`${field} must be a filename in the state directory or its briefs folder.`);
+  }
+  return value;
+}
 function githubURL(value, field = "link") {
   const url = new URL(text(value, field));
   if (url.origin !== "https://github.com" || url.username || url.password || !/^\/[^/]+\/[^/]+\/(issues|pull)\/\d+$/.test(url.pathname)) {
@@ -3800,12 +3807,12 @@ An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
   if (!directories.length)
     throw new Error(`No state directory exists. Checked: ${checked.join(", ")}`);
   const assets = dirname6(fileURLToPath2(import.meta.url));
-  async function localFile(value) {
+  async function localFile(value, folder = "") {
     if (!value || value.includes("\x00"))
       throw new HttpError(400, "A filename is required.");
     for (const { configured, directory } of directories) {
-      const candidate = resolve7(configured, value);
-      if (dirname6(candidate) !== directory && dirname6(candidate) !== configured) {
+      const candidate = resolve7(configured, folder, value);
+      if (dirname6(candidate) !== join10(directory, folder) && dirname6(candidate) !== join10(configured, folder)) {
         throw new HttpError(403, "File must be directly inside the configured state directory.");
       }
       let target;
@@ -3816,7 +3823,7 @@ An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
           continue;
         throw error;
       }
-      if (dirname6(target) !== directory || !(await stat8(target)).isFile()) {
+      if (dirname6(target) !== join10(directory, folder) || !(await stat8(target)).isFile()) {
         throw new HttpError(403, "File must be a regular file inside the state directory.");
       }
       return target;
@@ -3871,22 +3878,26 @@ An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
     }
     return proposalScans.get(target).open;
   }
-  const briefName = (file, task, role, worker) => worker.brief ?? `${file.replace(factoryFile2, "")}-${task.id}-${role}-brief.md`;
+  const briefName2 = (file, task, role, worker) => worker.brief ?? `${file.replace(factoryFile2, "")}-${task.id}-${role}-brief.md`;
+  const taskBriefName = (task) => `briefs/${task.id}.md`;
+  const briefFile = (name) => name.startsWith("briefs/") ? localFile(name.slice("briefs/".length), "briefs") : localFile(name);
+  async function existingBrief(name) {
+    try {
+      briefName(name);
+      await briefFile(name);
+      return true;
+    } catch {
+      return false;
+    }
+  }
   async function taskBriefs(file, data) {
     const briefs = {};
     for (const task of data.tasks) {
-      for (const [role, worker] of Object.entries(task.workers)) {
-        if (!worker)
-          continue;
-        const name = briefName(file, task, role, worker);
-        if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(name))
-          continue;
-        try {
-          await localFile(name);
-        } catch {
-          continue;
-        }
-        (briefs[task.id] ??= {})[role] = name;
+      const names = Object.entries(task.workers).flatMap(([role, worker]) => worker ? [[role, briefName2(file, task, role, worker)]] : []);
+      names.push(["task", taskBriefName(task)]);
+      for (const [role, name] of names) {
+        if (await existingBrief(name))
+          (briefs[task.id] ??= {})[role] = name;
       }
     }
     return briefs;
@@ -4258,11 +4269,11 @@ p{margin:0;color:#f87171}
         const file = url.searchParams.get("file");
         const data = await loadFactory(file);
         const name = url.searchParams.get("name");
-        const referenced = data.tasks.some((task) => Object.entries(task.workers).some(([role, worker]) => worker && (briefName(file, task, role, worker) === name || worker.result === name))) || data.rules.some((rule) => rule.worker && (rule.worker.brief === name || rule.worker.result === name));
+        const referenced = data.tasks.some((task) => taskBriefName(task) === name || Object.entries(task.workers).some(([role, worker]) => worker && (briefName2(file, task, role, worker) === name || worker.result === name))) || data.rules.some((rule) => rule.worker && (rule.worker.brief === name || rule.worker.result === name));
         if (!name || !referenced) {
           throw new HttpError(403, "Artifact is not referenced by the selected factory.");
         }
-        send(response, 200, await readFile9(await localFile(name)), "text/plain; charset=utf-8");
+        send(response, 200, await readFile9(await briefFile(name)), "text/plain; charset=utf-8");
       } else {
         throw new HttpError(404, "Not found.");
       }

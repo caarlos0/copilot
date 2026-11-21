@@ -529,7 +529,7 @@
     <noscript>The factory page needs JavaScript.</noscript>
     <script type="module">
       import { marked, DOMPurify } from "./dashboard.mjs";
-      import { states, outcomes, transitions, artifactName, githubURL, advisoryURL, validate, countByState, entered, byRecency, cardSummary, rankTasks, compareFactories, factorySection, factorySections, fitProjectLabel, sortReferences, cyclesOf, operatorStates, operatorOutcomes, unblockState, unblockChoice, stripRecommended, blockerClasses, blockerMeta, nextRun, nextDue, leverSpends, leverAutonomyCaps, maxParallelWorkers, maxRoleLimit, digitIndex } from "./dashboard.mjs";
+      import { states, outcomes, transitions, artifactName, briefName, githubURL, advisoryURL, validate, countByState, entered, byRecency, cardSummary, rankTasks, compareFactories, factorySection, factorySections, fitProjectLabel, sortReferences, cyclesOf, operatorStates, operatorOutcomes, unblockState, unblockChoice, stripRecommended, blockerClasses, blockerMeta, nextRun, nextDue, leverSpends, leverAutonomyCaps, maxParallelWorkers, maxRoleLimit, digitIndex } from "./dashboard.mjs";
 
       const SVG = "http://www.w3.org/2000/svg";
       const NODE = { w: 160, h: 110 };
@@ -1670,7 +1670,7 @@
       // A plain click opens the popup; the href keeps new tab, copy link and middle-click working.
       // A brief renders as Markdown, a result as JSON.
       function artifactLink(label, field, worker, context) {
-        const name = artifactName(worker[field], field);
+        const name = field === "brief" ? briefName(worker[field], field) : artifactName(worker[field], field);
         const href = `/api/artifact?${new URLSearchParams({ file: selection, name })}`;
         const node = link(label, href);
         node.addEventListener("click", (event) => {
@@ -1832,7 +1832,7 @@
       }
 
       // The server lists the briefs whose file exists (recorded or by naming convention); without that list, use the record.
-      const briefName = (task, role, worker) => snapshot.briefs ? snapshot.briefs[task.id]?.[role] : worker.brief;
+      const listedBrief = (task, role, worker) => snapshot.briefs ? snapshot.briefs[task.id]?.[role] : worker.brief;
 
       // The worker, merge decision and worktree link of a task, as lines for its history steps: a
       // worker goes on the latest step of its role's state (else the last step), the merge decision on
@@ -1845,6 +1845,13 @@
         };
         const open = task.state !== "resolved";
         const usage = snapshot.usage?.[task.id];
+        const taskBrief = snapshot.briefs?.[task.id]?.task;
+        if (taskBrief && extras.length) {
+          const line = element("div", null, "step-extra");
+          line.append(element("strong", "task"), " ");
+          appendArtifacts(line, { brief: taskBrief }, { task: task.id, role: "task" });
+          extras[0].push(line);
+        }
         for (const [role, worker] of Object.entries(task.workers).filter(([, item]) => item)) {
           const line = element("div", null, "step-extra");
           line.append(element("span", null, `dot ${worker.status}`));
@@ -1852,7 +1859,7 @@
           line.append(element("span", worker.status, "muted"));
           if (worker.name) line.append(...codeParts(worker.name));
           if (usage?.workers[role]) line.append(...stepChips(usage.workers[role]));
-          appendArtifacts(line, { ...worker, brief: briefName(task, role, worker) }, { task: task.id, role });
+          appendArtifacts(line, { ...worker, brief: listedBrief(task, role, worker) }, { task: task.id, role });
           extras[stepOf(role)]?.push(line);
         }
         if (task.pr && open) {

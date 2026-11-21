@@ -474,7 +474,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { gzipSync } from "node:zlib";
-import { countByState, isObject, validate } from "./factory-data.mjs";
+import { briefName as checkBriefName, countByState, isObject, validate } from "./factory-data.mjs";
 import { resolveAttention, scanStamp, sendAnswer } from "./attention.mjs";
 import { ConflictError, update } from "./factory.mjs";
 import { decideProposal, scanProposals } from "./proposals.mjs";
@@ -587,12 +587,12 @@ An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
   if (!directories.length)
     throw new Error(`No state directory exists. Checked: ${checked.join(", ")}`);
   const assets = dirname(fileURLToPath(import.meta.url));
-  async function localFile(value) {
+  async function localFile(value, folder = "") {
     if (!value || value.includes("\x00"))
       throw new HttpError(400, "A filename is required.");
     for (const { configured, directory } of directories) {
-      const candidate = resolve(configured, value);
-      if (dirname(candidate) !== directory && dirname(candidate) !== configured) {
+      const candidate = resolve(configured, folder, value);
+      if (dirname(candidate) !== join(directory, folder) && dirname(candidate) !== join(configured, folder)) {
         throw new HttpError(403, "File must be directly inside the configured state directory.");
       }
       let target;
@@ -603,7 +603,7 @@ An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
           continue;
         throw error;
       }
-      if (dirname(target) !== directory || !(await stat(target)).isFile()) {
+      if (dirname(target) !== join(directory, folder) || !(await stat(target)).isFile()) {
         throw new HttpError(403, "File must be a regular file inside the state directory.");
       }
       return target;
@@ -659,21 +659,25 @@ An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
     return proposalScans.get(target).open;
   }
   const briefName = (file, task, role, worker) => worker.brief ?? `${file.replace(factoryFile, "")}-${task.id}-${role}-brief.md`;
+  const taskBriefName = (task) => `briefs/${task.id}.md`;
+  const briefFile = (name) => name.startsWith("briefs/") ? localFile(name.slice("briefs/".length), "briefs") : localFile(name);
+  async function existingBrief(name) {
+    try {
+      checkBriefName(name);
+      await briefFile(name);
+      return true;
+    } catch {
+      return false;
+    }
+  }
   async function taskBriefs(file, data) {
     const briefs = {};
     for (const task of data.tasks) {
-      for (const [role, worker] of Object.entries(task.workers)) {
-        if (!worker)
-          continue;
-        const name = briefName(file, task, role, worker);
-        if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(name))
-          continue;
-        try {
-          await localFile(name);
-        } catch {
-          continue;
-        }
-        (briefs[task.id] ??= {})[role] = name;
+      const names = Object.entries(task.workers).flatMap(([role, worker]) => worker ? [[role, briefName(file, task, role, worker)]] : []);
+      names.push(["task", taskBriefName(task)]);
+      for (const [role, name] of names) {
+        if (await existingBrief(name))
+          (briefs[task.id] ??= {})[role] = name;
       }
     }
     return briefs;
@@ -1045,11 +1049,11 @@ p{margin:0;color:#f87171}
         const file = url.searchParams.get("file");
         const data = await loadFactory(file);
         const name = url.searchParams.get("name");
-        const referenced = data.tasks.some((task) => Object.entries(task.workers).some(([role, worker]) => worker && (briefName(file, task, role, worker) === name || worker.result === name))) || data.rules.some((rule) => rule.worker && (rule.worker.brief === name || rule.worker.result === name));
+        const referenced = data.tasks.some((task) => taskBriefName(task) === name || Object.entries(task.workers).some(([role, worker]) => worker && (briefName(file, task, role, worker) === name || worker.result === name))) || data.rules.some((rule) => rule.worker && (rule.worker.brief === name || rule.worker.result === name));
         if (!name || !referenced) {
           throw new HttpError(403, "Artifact is not referenced by the selected factory.");
         }
-        send(response, 200, await readFile(await localFile(name)), "text/plain; charset=utf-8");
+        send(response, 200, await readFile(await briefFile(name)), "text/plain; charset=utf-8");
       } else {
         throw new HttpError(404, "Not found.");
       }

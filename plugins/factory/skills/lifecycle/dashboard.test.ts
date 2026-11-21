@@ -2935,6 +2935,39 @@ test("a resolved task shows the brief link by naming convention, and none once t
   assert.equal(card().querySelectorAll("a").filter((node: Json) => node.textContent === "result").length, 2);
 });
 
+test("a resolved task without workers shows the task brief from briefs/, and the server refuses other files there", async (t) => {
+  const ui = await dashboard(t);
+  const data = structuredClone(example);
+  const task = data.tasks.find((item: Json) => item.id === "issue-3");
+  task.workers = {};
+  const outside = join(ui.directory, "..", "factory-brief-outside.md");
+  await writeFile(outside, "secret\n");
+  t.after(() => rm(outside, { force: true }));
+  await mkdir(join(ui.directory, "briefs"));
+  await writeFile(join(ui.directory, "briefs", "issue-3.md"), "# Task three\n");
+  await writeFile(join(ui.directory, "briefs", "other.md"), "private\n");
+  await symlink(outside, join(ui.directory, "briefs", "issue-9.md"));
+  await writeFile(join(ui.directory, factoryFile), JSON.stringify(data));
+  await ui.run("refresh()");
+  const card = () => ui.run(`taskRow(${JSON.stringify(ui.run("snapshot.tasks.find((item) => item.id === 'issue-3')"))}, new Set())`);
+
+  const href = `/api/artifact?file=${encodeURIComponent(factoryFile)}&name=${encodeURIComponent("briefs/issue-3.md")}`;
+  const briefs = card().querySelectorAll("a").filter((node: Json) => node.textContent === "brief");
+  assert.deepEqual(briefs.map((node: Json) => node.href), [href]);
+  const response = await get(ui.url, href);
+  assert.equal(response.status, 200);
+  assert.equal(await response.text(), "# Task three\n");
+
+  const artifact = (name: string) => get(ui.url, `/api/artifact?file=${encodeURIComponent(factoryFile)}&name=${encodeURIComponent(name)}`);
+  assert.equal((await artifact("briefs/other.md")).status, 403, "A file that no task names is refused.");
+  assert.equal((await artifact("briefs/issue-9.md")).status, 403, "A link that leaves the folder is refused.");
+  assert.equal((await artifact("briefs/../unrelated-notes.md")).status, 403);
+
+  await rm(join(ui.directory, "briefs", "issue-3.md"));
+  await ui.run("refresh()");
+  assert.equal(card().querySelectorAll("a").filter((node: Json) => node.textContent === "brief").length, 0);
+});
+
 test("the brief link opens the popup with the brief rendered as sanitized Markdown", async (t) => {
   const ui = await dashboard(t);
   const name = "owner.repo-issue-9-implementation-brief.md";

@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { gzipSync } from "node:zlib";
 import writeFileAtomic from "write-file-atomic";
-import { countByState, isObject, validate } from "./factory-data.mjs";
+import { briefName as checkBriefName, countByState, isObject, validate } from "./factory-data.mjs";
 import type { Factory, Worker } from "./factory-data.ts";
 import { resolveAttention, scanStamp, sendAnswer } from "./attention.mjs";
 import type { AttentionItem } from "./attention.ts";
@@ -143,11 +143,12 @@ An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
   if (!directories.length) throw new Error(`No state directory exists. Checked: ${checked.join(", ")}`);
   const assets = dirname(fileURLToPath(import.meta.url));
 
-  async function localFile(value: string | null) {
+  // `folder` names the one subdirectory, `briefs`, that holds task briefs.
+  async function localFile(value: string | null, folder = "") {
     if (!value || value.includes("\0")) throw new HttpError(400, "A filename is required.");
     for (const { configured, directory } of directories) {
-      const candidate = resolve(configured, value);
-      if (dirname(candidate) !== directory && dirname(candidate) !== configured) {
+      const candidate = resolve(configured, folder, value);
+      if (dirname(candidate) !== join(directory, folder) && dirname(candidate) !== join(configured, folder)) {
         throw new HttpError(403, "File must be directly inside the configured state directory.");
       }
       let target: string;
@@ -157,7 +158,7 @@ An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
         if (errorCode(error) === "ENOENT") continue;
         throw error;
       }
-      if (dirname(target) !== directory || !(await stat(target)).isFile()) {
+      if (dirname(target) !== join(directory, folder) || !(await stat(target)).isFile()) {
         throw new HttpError(403, "File must be a regular file inside the state directory.");
       }
       return target;
@@ -226,23 +227,31 @@ An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
   // The coordinator records only `result` in a worker record, so the brief is found by the
   // convention <project>-<task>-<role>-brief.md (a recorded `brief` wins). The map has the
   // briefs whose file still exists, so the dashboard shows no link for one that
-  // `archive.mjs clean` deleted.
+  // `archive.mjs clean` deleted. The brief of the task itself is `briefs/<task>.md` (key `task`),
+  // so a task without worker records, as most resolved tasks, still has its link.
   const briefName = (file: string, task: { id: string }, role: string, worker: Worker) =>
     worker.brief ?? `${file.replace(factoryFile, "")}-${task.id}-${role}-brief.md`;
+  const taskBriefName = (task: { id: string }) => `briefs/${task.id}.md`;
+  const briefFile = (name: string) => name.startsWith("briefs/") ? localFile(name.slice("briefs/".length), "briefs") : localFile(name);
+
+  async function existingBrief(name: string) {
+    try {
+      checkBriefName(name);
+      await briefFile(name);
+      return true;
+    } catch {
+      return false;
+    }
+  }
 
   async function taskBriefs(file: string, data: Factory) {
     const briefs: Record<string, Record<string, string>> = {};
     for (const task of data.tasks) {
-      for (const [role, worker] of Object.entries(task.workers)) {
-        if (!worker) continue;
-        const name = briefName(file, task, role, worker);
-        if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(name)) continue;
-        try {
-          await localFile(name);
-        } catch {
-          continue;
-        }
-        (briefs[task.id] ??= {})[role] = name;
+      const names = Object.entries(task.workers)
+        .flatMap(([role, worker]) => worker ? [[role, briefName(file, task, role, worker)]] : []);
+      names.push(["task", taskBriefName(task)]);
+      for (const [role, name] of names) {
+        if (await existingBrief(name)) (briefs[task.id] ??= {})[role] = name;
       }
     }
     return briefs;
@@ -672,13 +681,13 @@ p{margin:0;color:#f87171}
         const file = url.searchParams.get("file");
         const data = await loadFactory(file);
         const name = url.searchParams.get("name");
-        const referenced = data.tasks.some((task) => Object.entries(task.workers)
+        const referenced = data.tasks.some((task) => taskBriefName(task) === name || Object.entries(task.workers)
           .some(([role, worker]) => worker && (briefName(file!, task, role, worker) === name || worker.result === name))) ||
           data.rules.some((rule) => rule.worker && (rule.worker.brief === name || rule.worker.result === name));
         if (!name || !referenced) {
           throw new HttpError(403, "Artifact is not referenced by the selected factory.");
         }
-        send(response, 200, await readFile(await localFile(name)), "text/plain; charset=utf-8");
+        send(response, 200, await readFile(await briefFile(name)), "text/plain; charset=utf-8");
       } else {
         throw new HttpError(404, "Not found.");
       }

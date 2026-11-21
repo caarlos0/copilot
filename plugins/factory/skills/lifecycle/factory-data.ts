@@ -176,6 +176,15 @@ export function artifactName(value: any, field = "artifact") {
   return value;
 }
 
+// A brief is a worker brief in the state directory, or a task brief in its `briefs/` folder.
+export function briefName(value: any, field = "brief") {
+  text(value, field);
+  if (!/^(briefs\/)?[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(value)) {
+    throw new Error(`${field} must be a filename in the state directory or its briefs folder.`);
+  }
+  return value;
+}
+
 export function githubURL(value: unknown, field = "link") {
   const url = new URL(text(value, field));
   if (url.origin !== "https://github.com" || url.username || url.password ||

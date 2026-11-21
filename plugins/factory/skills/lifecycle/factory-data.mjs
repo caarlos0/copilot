@@ -58,6 +58,13 @@ function artifactName(value, field = "artifact") {
   }
   return value;
 }
+function briefName(value, field = "brief") {
+  text(value, field);
+  if (!/^(briefs\/)?[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(value)) {
+    throw new Error(`${field} must be a filename in the state directory or its briefs folder.`);
+  }
+  return value;
+}
 function githubURL(value, field = "link") {
   const url = new URL(text(value, field));
   if (url.origin !== "https://github.com" || url.username || url.password || !/^\/[^/]+\/[^/]+\/(issues|pull)\/\d+$/.test(url.pathname)) {
@@ -585,6 +592,7 @@ export {
   artifactName,
   blockerClasses,
   blockerMeta,
+  briefName,
   byRecency,
   cardSummary,
   checkTransition,
