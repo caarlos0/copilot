@@ -16,7 +16,7 @@ structure or workflows change.
   `<plugin>/v<version>` tag, and pushes both atomically. A plugin with a
   `package.json` (`factory`, `coordination`) is built first. The task stops
   before it tags if `git diff --exit-code` shows that the build changed a
-  bundle. This needs Bun 1.4.5 and `bun install --frozen-lockfile` in that
+  bundle. This needs the Bun version in `.bun-version` and `bun install --frozen-lockfile` in that
   plugin.
 - `plugins/<plugin>/agents/*.agent.md` defines agent roles and model choices.
   Keep roles distinct and put reusable procedures in skills.
@@ -55,7 +55,8 @@ that plugin directory, install with `bun install --frozen-lockfile`, then run
 `node --test plugins scripts`. `task build` and `task typecheck` run every plugin.
 A fresh checkout needs `bun install --frozen-lockfile` in `plugins/factory` and
 `plugins/coordination` before `node --test` works, because the tests import
-`valibot` and other libraries from `node_modules`. CI pins Bun 1.4.5.
+`valibot` and other libraries from `node_modules`. The file `.bun-version` pins
+Bun (1.4.5); CI reads it, and `scripts/build.ts` stops when the installed Bun differs.
 
 Run `task setup` once in each clone. It sets `core.hooksPath` to `.githooks`.
 The `.githooks/pre-commit` hook then rebuilds the bundles of a plugin when you
@@ -82,8 +83,8 @@ through `import.meta.url`, because the bundle sits in the same directory as the
 sources. The build fails when a
 plugin module imports a file outside its own plugin directory. A relative
 `import type` from a sibling `.ts` is erased, so the build cannot see it; keep
-those inside the plugin too. Use the same Bun version as CI: `bun-version` in
-`.github/workflows/test.yml` pins it. Output differs between Bun releases
+those inside the plugin too. Use the Bun version in `.bun-version`; CI reads
+the same file, and the build stops on another version. Output differs between Bun releases
 (local variable names), so a different Bun leaves a diff in unrelated bundles.
 Change the pin and regenerate all bundles in one commit.
 The build rewrites absolute checkout paths that Bun inlines

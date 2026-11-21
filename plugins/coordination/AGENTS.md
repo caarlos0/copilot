@@ -58,7 +58,7 @@ TypeScript, checked with `strict` on. Edit the `.ts`, run `bun run build` in
 Do not edit a `.mjs` file. Only two `.mjs` files are committed, and both are generated:
 `coordinator.mjs` and `board-data.mjs`. A fresh checkout needs
 `bun install --frozen-lockfile` in `plugins/coordination` before you build, typecheck
-or test (CI pins Bun 1.4.5). The pre-commit hook rebuilds the bundles when you stage a
+or test (`.bun-version` pins Bun, and the build stops on another version). The pre-commit hook rebuilds the bundles when you stage a
 non-test `.ts` file, and `.gitattributes` marks them as generated.
 `coordinator.mjs` is a dispatcher: it loads `handoff`, `wait` or `serve` only when
 you name it (`node coordinator.mjs wait ARGS`). It needs no Bun and no

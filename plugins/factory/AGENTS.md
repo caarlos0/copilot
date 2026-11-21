@@ -617,7 +617,7 @@ the two generated bundles together. Do not edit a `.mjs` file. Only two `.mjs`
 files are committed, and both are generated:
 `skills/lifecycle/factory.mjs` and `skills/lifecycle/dashboard.mjs`. Do not add a
 bundle for one module. A fresh checkout needs `bun install --frozen-lockfile` in
-`plugins/factory` before you build, typecheck or test (CI pins Bun 1.4.5). The
+`plugins/factory` before you build, typecheck or test (`.bun-version` pins Bun, and the build stops on another version). The
 pre-commit hook rebuilds the bundles when you stage a non-test `.ts` file, and
 `.gitattributes` marks them as generated.
 

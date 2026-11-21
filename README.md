@@ -140,7 +140,7 @@ task release:coding
 
 Use `task release:<plugin>` to release one plugin. For `factory` and
 `coordination`, the task first runs `bun run build` in the plugin directory and
-stops if `git diff --exit-code` shows a change. It needs Bun 1.4.5 and
+stops if `git diff --exit-code` shows a change. It needs the Bun version in `.bun-version` and
 `bun install --frozen-lockfile` in that plugin. The task uses `svu next`
 with that plugin's tag prefix and directory to choose its next version, with
 a patch bump when no commit triggers a larger bump. Only that plugin's manifest
@@ -175,7 +175,7 @@ remove the local marketplace with `copilot plugin marketplace remove caarlos0`,
 then follow the GitHub installation steps.
 
 Run the coordination and factory checks from the repository root. A fresh
-checkout needs Bun 1.4.5 and the install step first, because the tests import
+checkout needs the Bun version in `.bun-version` and the install step first, because the tests import
 libraries from each plugin's `node_modules`:
 
 ```sh
