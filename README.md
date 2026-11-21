@@ -1,182 +1,89 @@
 # caarlos0/copilot
 
-Personal Copilot agents and reusable skills, split into installable plugins.
+Agents and skills for [GitHub Copilot CLI](https://github.com/features/copilot/cli).
+They help you write code, review code, find vulnerabilities, and run many
+Copilot workers at the same time.
 
-| Plugin | Contents |
+Each plugin is small and does one job. Install only the ones you need.
+
+## Plugins
+
+| Plugin | What it gives you |
 | --- | --- |
-| `coding` | Development, code review, performance, and maintainer tools |
-| `security` | Secure design, vulnerability research, and security triage agents |
-| `fitness` | Personal trainer |
-| `terminals` | CLI design and TUI design |
-| `coordination` | Worker coordinators, durable handoffs, and task board |
-| `factory` | Lever-backed task lifecycle, Rex workers, and flowchart dashboard |
-| `home` | Electricity, solar, and battery planning |
+| [`coding`](plugins/coding) | Agents and skills for development, review, performance, and maintenance |
+| [`security`](plugins/security) | Agents for secure design, vulnerability hunting, and report triage |
+| [`terminals`](plugins/terminals) | Skills for command-line and terminal UI design |
+| [`coordination`](plugins/coordination) | Coordinators that run workers in Rex panes, with a task board |
+| [`factory`](plugins/factory) | A task lifecycle with GitHub issues, Rex workers, and a dashboard |
+| [`fitness`](plugins/fitness) | A personal trainer that reads your Hevy log |
+| [`home`](plugins/home) | An agent for household electricity, solar, and battery planning |
 
 ## Install
 
-Register the marketplace once, then install the plugins you want:
+1. Add the marketplace:
 
-```sh
-copilot plugin marketplace add caarlos0/copilot
-copilot plugin install coding@caarlos0
-copilot plugin install terminals@caarlos0
-copilot plugin install coordination@caarlos0
-copilot plugin install factory@caarlos0
-```
+   ```sh
+   copilot plugin marketplace add caarlos0/copilot
+   ```
 
-The other plugins use the same `<plugin>@caarlos0` form.
-Coordination and factory use coding workers and Rex's own skill, installed in
-`~/.agents/skills/` and discovered by Copilot.
-Coding uses the terminals plugin for CLI/TUI work. Security agents use coding
-skills for language conventions and reviews. Install those companion plugins
-for these workflows; Copilot does not install them as dependencies.
+2. Install a plugin:
 
-Factory also requires [github/lever](https://github.com/github/lever):
+   ```sh
+   copilot plugin install coding@caarlos0
+   ```
 
-```sh
-copilot plugin marketplace add github/lever
-copilot plugin install lever@lever
-```
+3. Start Copilot with one of its agents:
 
-Factory uses Lever's installed skills and templates, not bundled copies.
-Install these companion plugins before starting a factory session.
+   ```sh
+   copilot --agent coding:caarlos0
+   ```
 
-Some coding, coordination, and factory agents preload the external
-`i-have-adhd` skill. Install it separately with GitHub CLI:
+Agent names have the form `<plugin>:<agent>`. To update all plugins, run
+`copilot plugin update --all`.
 
-```sh
-gh skill install ayghri/i-have-adhd i-have-adhd --agent github-copilot --scope user --force
-```
+## Companions
 
-The `gh-stack` skill is also used for stacked pull requests:
+Copilot does not install plugin dependencies. Install these yourself when a
+plugin needs them.
 
-```sh
-gh skill install github/gh-stack --agent github-copilot --all --scope user --force
-```
+- `coding` uses the skills of `terminals` for command-line and TUI work.
+- `security` agents use the skills of `coding`.
+- `coordination` and `factory` need Rex, and they start `coding` workers.
+- `factory` also needs [github/lever](https://github.com/github/lever):
 
-Machine settings, personal instructions, and these external skill installs
-remain in [dotfiles](https://github.com/caarlos0/dotfiles).
-The plugins do not apply settings or grant tool or filesystem access.
+  ```sh
+  copilot plugin marketplace add github/lever
+  copilot plugin install lever@lever
+  ```
 
-## Use
+- Some agents preload the external `i-have-adhd` skill:
 
-Agent names include their plugin namespace:
+  ```sh
+  gh skill install ayghri/i-have-adhd i-have-adhd --agent github-copilot --scope user --force
+  ```
 
-```sh
-copilot --agent coding:caarlos0
-copilot --agent security:engineer
-copilot --agent fitness:personal-trainer
-copilot --agent coordination:general
-copilot --agent factory:general
-copilot --agent home:electric-engineer
-```
+- Stacked pull requests use the `gh-stack` skill:
 
-Coordination also provides `coordination:implement` and
-`coordination:review`. Coordinators require Rex and preload the
-shared coordinator skill. That skill cannot be invoked independently.
+  ```sh
+  gh skill install github/gh-stack --agent github-copilot --all --scope user --force
+  ```
 
-`factory:general` preloads its private `lifecycle` skill plus Lever's
-`autonomy-dial` and `progress-contract`. It merges implementation and
-coordination into one flow: `initial`, `investigation`, `implementation`,
-`review`, and `resolved`, with `blocked` as a side state. Every task has a
-GitHub issue.
-It takes work from rules or from links you give it, and it runs all workers as
-tabs in the Rex session it started in. It never creates or renames sessions.
-Worker briefs use Lever's template. Implementation workers use `pr-shepherd`
-for CI, feedback, and landing; review workers use `cross-model-review` at the
-resolved spend tier. Workers watch a PR with `factory.mjs pr-watch`, not a second
-delivery coordinator or an automatic cloud schedule.
-
-Lever's autonomy dial controls writes and merges, capped by repository rules.
-Without a merge grant, factory stays at L2 or below. At L3 with a matching
-grant or L4, the implementation worker can land after `may_merge` passes on
-the exact head, without another per-head approval. PR comments never grant
-authority. Existing comment-based records are historical evidence only.
-State lives in `<owner.repo>-factory.json` (`factory/v1`) in
-`~/.local/state/copilot-factory/` (or the legacy `~/.local/state/copilot-coordinator/`
-when only that exists). Run `node factory.mjs serve` from the
-`lifecycle` skill directory in the factory plugin for an animated flowchart
-dashboard. Click a state for a popup task list. Use a task's **Move** button to return a
-task to an earlier state, unblock it, or move it directly to **Resolved**, with
-a comment for the factory. Resolution requires an outcome (default: completed)
-and does not merge or close GitHub items.
-The comment stays in history and is marked pending until the factory has
-reconciled its workers. The dashboard does not stop running workers or grant
-merge authority. Move an old project with
-`node factory.mjs migrate --project owner/repo` from the same directory. It merges the
-implementer and coordinator handoffs and leaves the old files in place unless
-you pass `--archive`.
-
-Coordination's PR review workers run `review -k` for your own PRs and retain
-their panes through merge. Other authors' PRs use `review` and close after
-verified review results.
-Implementation panes stay open through PR creation and merge. A blocker keeps
-these retained panes open; waiting does not authorize a merge. The `review`
-command comes from your machine setup, not this plugin.
-
-Workers publish cumulative result files. A bundled filesystem waiter wakes
-unscheduled coordinators on result changes, without periodic pane checks or
-requiring the board server. Scheduled coordinator passes remain finite.
-
-Use `/coding:review` for code reviews and `/coding:simplifier` for a final
-behavior-preserving cleanup pass.
-
-## Update
-
-```sh
-copilot plugin update coding@caarlos0
-```
-
-Use `copilot plugin update --all` to update all installed plugins.
-
-## Release
-
-From a clean `main` branch, with Task, svu, and jq installed:
-
-```sh
-task release:terminals
-task release:coding
-```
-
-Use `task release:<plugin>` to release one plugin. For `factory` and
-`coordination`, the task first runs `bun run build` in the plugin directory and
-stops if `git diff --exit-code` shows a change. It needs the Bun version in `.bun-version` and
-`bun install --frozen-lockfile` in that plugin. The task uses `svu next`
-with that plugin's tag prefix and directory to choose its next version, with
-a patch bump when no commit triggers a larger bump. Only that plugin's manifest
-and marketplace entry are updated.
-It creates a signed-off `release(<plugin>): <plugin>/v<version>` commit and an
-annotated `<plugin>/v<version>` tag, then pushes `main` and that tag to `origin`
-in one atomic push. Other plugins keep their versions.
+The plugins do not change your settings. They do not grant tool or file access.
+Machine settings stay in [dotfiles](https://github.com/caarlos0/dotfiles).
 
 ## Develop
 
-Load a plugin checkout without installing it:
+Load a plugin from a checkout without installing it:
 
 ```sh
 copilot --plugin-dir /path/to/copilot/plugins/coding
 ```
 
-Use a new session after edits. Do not also load an installed copy of that
-plugin; disable it first with `copilot plugin disable coding@caarlos0`, and
-enable it again after development.
+Use a new session after each edit. Do not load an installed copy of the same
+plugin at the same time.
 
-To install from an unpublished checkout, register its local marketplace
-instead of the GitHub source, then use the same install commands:
-
-```sh
-copilot plugin marketplace add /path/to/copilot
-copilot plugin install coding@caarlos0
-```
-
-Local marketplace plugins load from the checkout. Use a new session after
-edits. Once the repository is published, uninstall its installed plugins,
-remove the local marketplace with `copilot plugin marketplace remove caarlos0`,
-then follow the GitHub installation steps.
-
-Run the coordination and factory checks from the repository root. A fresh
-checkout needs the Bun version in `.bun-version` and the install step first, because the tests import
-libraries from each plugin's `node_modules`:
+Run the tests from the repository root. `factory` and `coordination` need the
+Bun version in `.bun-version` first:
 
 ```sh
 bun install --cwd plugins/factory --frozen-lockfile
@@ -184,10 +91,23 @@ bun install --cwd plugins/coordination --frozen-lockfile
 node --test plugins scripts
 ```
 
-The `factory` and `coordination` plugins are written in TypeScript. Edit the
-`.ts` files, then run `bun run build` in the plugin directory (use
-`bun run typecheck` to check types). Four generated `.mjs` bundles are
-committed: `factory.mjs` and `dashboard.mjs` (factory), and `coordinator.mjs` and
-`board-data.mjs` (coordination). Never edit them by hand. Users of the plugins
-need only Node, not Bun or `node_modules`. Run `task setup` once in each clone so
-a pre-commit hook rebuilds the bundles for you.
+Run `task setup` once in each clone. It enables the pre-commit hook that
+rebuilds the generated `.mjs` bundles. Never edit those bundles by hand. Read
+[AGENTS.md](AGENTS.md) for the full rules.
+
+## Release
+
+From a clean `main` branch, with Task, svu, and jq installed:
+
+```sh
+task release:coding
+```
+
+Use `task release:<plugin>` for any plugin. The task picks the next version
+with `svu`, updates the manifest and marketplace entry of that plugin, and
+pushes a signed-off release commit and the `<plugin>/v<version>` tag. Other
+plugins keep their versions.
+
+## License
+
+[MIT](LICENSE.md)

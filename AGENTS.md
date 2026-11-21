@@ -9,7 +9,9 @@ structure or workflows change.
   coding, security, fitness, terminals, coordination, factory, and home. Keep each
   marketplace version in sync with its plugin's `plugin.json`.
 - Each plugin uses the supported legacy Copilot format with default `agents/`
-  and `skills/` locations. Include its own copy of `LICENSE.md`.
+  and `skills/` locations. Give each plugin a `README.md`. Keep it true when
+  its agents, skills, or build steps change. One `LICENSE.md` in the repository
+  root covers all plugins; do not copy it into a plugin.
 - `Taskfile.yml` provides `task release:<plugin>`. From a clean `main`, it uses
   `svu next` scoped to that plugin's tags and directory, updates only its manifest
   and marketplace entry, creates a signed-off release commit and annotated
