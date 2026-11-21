@@ -84,7 +84,7 @@ It takes work from rules or from links you give it, and it runs all workers as
 tabs in the Rex session it started in. It never creates or renames sessions.
 Worker briefs use Lever's template. Implementation workers use `pr-shepherd`
 for CI, feedback, and landing; review workers use `cross-model-review` at the
-resolved spend tier. Workers watch a PR with the bundled `pr-watch.mjs`, not a second
+resolved spend tier. Workers watch a PR with `factory.mjs pr-watch`, not a second
 delivery coordinator or an automatic cloud schedule.
 
 Lever's autonomy dial controls writes and merges, capped by repository rules.
@@ -94,7 +94,7 @@ the exact head, without another per-head approval. PR comments never grant
 authority. Existing comment-based records are historical evidence only.
 State lives in `<owner.repo>-factory.json` (`factory/v1`) in
 `~/.local/state/copilot-factory/` (or the legacy `~/.local/state/copilot-coordinator/`
-when only that exists). Run `node serve.mjs` from the
+when only that exists). Run `node factory.mjs serve` from the
 `lifecycle` skill directory in the factory plugin for an animated flowchart
 dashboard. Click a state for a popup task list. Use a task's **Move** button to return a
 task to an earlier state, unblock it, or move it directly to **Resolved**, with
@@ -103,7 +103,7 @@ and does not merge or close GitHub items.
 The comment stays in history and is marked pending until the factory has
 reconciled its workers. The dashboard does not stop running workers or grant
 merge authority. Move an old project with
-`node migrate.mjs --project owner/repo` from the same directory. It merges the
+`node factory.mjs migrate --project owner/repo` from the same directory. It merges the
 implementer and coordinator handoffs and leaves the old files in place unless
 you pass `--archive`.
 

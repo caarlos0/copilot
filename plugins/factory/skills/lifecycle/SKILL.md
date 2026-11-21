@@ -26,7 +26,7 @@ The coordinator may only:
 - write briefs;
 - launch and monitor workers;
 - verify results against Git and GitHub evidence;
-- record state with `factory.mjs`;
+- record state with `factory.mjs write`;
 - merge a verified, committed worker branch with `git merge --ff-only`, only
   where "Merge" and the autonomy dial allow it;
 - release panes and report.
@@ -53,7 +53,7 @@ for a worker to investigate. Do not investigate it yourself.
 The coordinator never uses the `task`, `read_agent` or `write_agent` tools for
 factory work. Every worker, including backlog, discovery, and improve workers,
 is a Copilot session in a Rex tab with a brief, a result file, and
-`broker.mjs emit`.
+`factory.mjs broker emit`.
 
 ```
 initial -> investigation -> implementation <-> review -> resolved
@@ -158,8 +158,8 @@ for `<owner.repo>-factory.json` in the new directory first, then in the legacy
 directory. Use the first file that exists, where it is, even if both
 directories exist. Create a new factory only in the new directory. The lock,
 events log, waiter PID, archive, and sessions file stay beside the factory
-file, in the same directory. `serve.mjs` lists and serves the factories of both
-directories (the new one wins on a name clash). `migrate.mjs` reads each
+file, in the same directory. `factory.mjs serve` lists and serves the factories of both
+directories (the new one wins on a name clash). `factory.mjs migrate` reads each
 handoff the same way. Never move files out of a legacy directory while a
 factory runs. To switch, stop the factories, then run
 `mv ~/.local/state/copilot-coordinator
@@ -177,12 +177,12 @@ write `owner.json` inside it with `copilot_session` (your session ID, from
 `$COPILOT_AGENT_SESSION_ID`), `rex_session`, `pane`, `claimed_at` and
 `purpose`. The coordinator hooks (stop and guard) activate only for the session
 recorded there. A lock without `copilot_session` leaves them off, and
-`reconcile.mjs` reports `hooks-inactive`. If the lock exists, verify its owner
+`factory.mjs reconcile` reports `hooks-inactive`. If the lock exists, verify its owner
 and send new work to that factory. Do not start a second writer. Reclaim a lock
 only after you verify that the owner stopped. If you are not sure, stop and
 report the blocker. Release only your own lock when the factory stops.
 
-All writes use `factory.mjs`, including operator changes through the dashboard.
+All writes use `factory.mjs write`, including operator changes through the dashboard.
 Resolve it beside this loaded skill and run it with Node or Bun. Never
 edit the file by hand and never use ad hoc scripts. Hold the owner lock for
 agent writes. The helper takes a separate, short-lived `<file>.write.lock` for
@@ -194,13 +194,13 @@ active.
 
 ```sh
 FILE=~/.local/state/copilot-factory/owner.repo-factory.json
-node factory.mjs "$FILE" --project owner/repo --run-goal "Run the factory for owner/repo" \
+node factory.mjs write "$FILE" --project owner/repo --run-goal "Run the factory for owner/repo" \
   --rex-session "$REX_SESSION" --session SESSION_UUID
-node factory.mjs "$FILE" --task issue-42 --title "Fix login redirect" \
+node factory.mjs write "$FILE" --task issue-42 --title "Fix login redirect" \
   --issue https://github.com/owner/repo/issues/42 --next-action "Start the investigation worker"
-node factory.mjs "$FILE" --task issue-42 --state investigation --note "Investigation worker planned" \
+node factory.mjs write "$FILE" --task issue-42 --state investigation --note "Investigation worker planned" \
   --workers '{"investigation":{"status":"unknown","mode":"one-shot","result":"owner.repo-issue-42-investigation-result.json"}}'
-node factory.mjs "$FILE" --task issue-42 \
+node factory.mjs write "$FILE" --task issue-42 \
   --workers '{"investigation":{"status":"running","session":"SESSION_UUID","pane":"PANE","window":"WINDOW"}}'
 ```
 
@@ -229,7 +229,7 @@ The helper:
 - moves `resolved` tasks last updated more than seven days ago into
   `<owner.repo>-factory-archive/YYYY-MM-DD.json` (by last update day) when you
   add or restore a task. It does not move tasks with pending dashboard feedback.
-  Nothing is deleted. Artifact files stay on disk until `archive.mjs clean`
+  Nothing is deleted. Artifact files stay on disk until `factory.mjs archive clean`
   removes them (see "Clean the state directory").
 - refuses a new task whose `id`, `issue`, or `pr` matches an archived task, and
   prints the match. See "Archived work".
@@ -246,14 +246,14 @@ from the history. Do not store counters.
 ### Clean the state directory
 
 Task artifacts accumulate in the state directory (briefs, results, instructions
-directories, archived copies, staging files). Run `archive.mjs clean` beside
+directories, archived copies, staging files). Run `factory.mjs archive clean` beside
 this skill from time to time, and when a listing of the directory becomes slow.
 On a `reconcile.due`, once each day and at startup, run
-`archive.mjs clean "$FILE" --older-than 1d --run`.
+`factory.mjs archive clean "$FILE" --older-than 1d --run`.
 
 ```sh
-node archive.mjs clean "$FILE"                     # dry run: prints what it would delete
-node archive.mjs clean "$FILE" --older-than 30d --run
+node factory.mjs archive clean "$FILE"                     # dry run: prints what it would delete
+node factory.mjs archive clean "$FILE" --older-than 30d --run
 ```
 
 It is a dry run unless you pass `--run`. `--older-than` takes days or hours
@@ -274,18 +274,18 @@ over 100 MB that no factory file names and that is older than 24 hours as
 
 Artifacts stay flat in the state directory. Grouping new ones under
 `<project>-tasks/<task>/` is a follow-up. It changes every brief and result
-path in this skill, the examples, and `reconcile.mjs` together.
+path in this skill, the examples, and `factory.mjs reconcile` together.
 
 ## Write before action; reconcile with reality
 
 The factory file is the only task tracker. Never track tasks or task progress
 only in chat, session SQL, a board, or another file. Worker result files are
 evidence, not a second tracker. Mirror each result and its disposition in the
-factory file with `factory.mjs`.
+factory file with `factory.mjs write`.
 
 Before you launch a worker, create its task in the factory file if the task
 does not exist. Then write the planned role with `unknown` status, worktree, and
-exact result filename with `factory.mjs`. Set `next_action` to the launch.
+exact result filename with `factory.mjs write`. Set `next_action` to the launch.
 If either write fails or is refused, stop. Resolve the conflict and reread the
 file before any launch. The worker starts at launch with its brief in the
 command (see "Launch rules"), so the planned role with `unknown` status must
@@ -296,10 +296,10 @@ reconcile the pane record.
 
 Before each result, branch-head change, merge attempt, and worker or worktree
 release, write the intended action to `next_action` or `details` of the task
-with `factory.mjs`. Workers must pause at each such milestone
+with `factory.mjs write`. Workers must pause at each such milestone
 until the factory confirms that write. After the action, write the observed
 result, the full head or merge commit SHA, and the worker status with
-`factory.mjs` in the same turn, before any follow-up action. For a result,
+`factory.mjs write` in the same turn, before any follow-up action. For a result,
 first mirror its summary, evidence, and result path. Then verify it and record
 the state change and disposition. Mirror the `summary` of the result into
 `workers.<role>.summary` (text, at most 2000 characters; shorten it, never cut
@@ -321,7 +321,7 @@ live state. Run `git worktree list --porcelain` and
 factory Rex session, every active result file, and each linked PR. Compare
 task state, worker status and IDs, worktree and branch, full head, and merge
 outcome. Record newly found work before you act on it. Repair every mismatch
-with `factory.mjs`. Do not assume that a pane, branch, result, or merge is
+with `factory.mjs write`. Do not assume that a pane, branch, result, or merge is
 finished from an old record. For a task without an issue that is merged into
 the default branch, verify the ancestry and merge commit. Then resolve it as
 `merged` with the full SHA in `details.merge_commit`. Keep unknown work intact
@@ -334,17 +334,17 @@ one thing: it appends the missing `attention.resolved` event (source
 gone, or that is more than 24 hours old.
 
 ```sh
-node reconcile.mjs /abs/state/owner.repo-factory.json [--default-branch NAME] [--blocked-after 24h] [--attention-after 30m]
+node factory.mjs reconcile /abs/state/owner.repo-factory.json [--default-branch NAME] [--blocked-after 24h] [--attention-after 30m]
 ```
 
 Without `--default-branch`, it uses the default branch (`origin/HEAD`, else a
-local `main` or `master`), as `worktree.mjs` and `broker.mjs` do.
+local `main` or `master`), as `factory.mjs worktree` and `factory.mjs broker` do.
 
 It prints `{findings, errors}` as JSON. Run it at startup, on every wake, on
 every user message, and before every report. A missed waiter wake must never
 leave work undone. Treat each finding as unfinished work:
 
-- `no-waiter`: the run is `active`, or a task is open, and no `broker.mjs wait`
+- `no-waiter`: the run is `active`, or a task is open, and no `factory.mjs broker wait`
   is alive for this factory. Arm one now (see "Receive worker events"), then
   continue the sweep. If you arm it first at startup, this finding never
   appears.
@@ -369,7 +369,7 @@ leave work undone. Treat each finding as unfinished work:
   `--rule ID --rule-worker null`, and close the window (see "Find more work").
 - `merged-worktree`: the worktree of a `merged` task is clean and its HEAD is in
   the default branch, or the task has a merged PR. If `created_by_run` is true,
-  remove the worktree with `worktree.mjs delete NAME` as in "Release panes". For
+  remove the worktree with `factory.mjs worktree delete NAME` as in "Release panes". For
   a task with a PR, the finding carries the exact `command`, which has
   `--merged-pr URL`. Do not remove a reused worktree (`false`).
 - `duplicate-task`: two or more tasks hold one piece of work. The issue or PR of
@@ -382,7 +382,7 @@ leave work undone. Treat each finding as unfinished work:
   then the one with a PR; then the older one), `merge` (the other IDs) and the
   exact `command`. Before you run the command, note the `window` and `pane` of
   every worker of the tasks in `merge`. The write sets those workers to
-  `closed`. Run the `command`. `factory.mjs --merge-task KEEP --from OTHER`
+  `closed`. Run the `command`. `factory.mjs write --merge-task KEEP --from OTHER`
   resolves OTHER as `duplicate` with `details.merged_into`. It moves the issue,
   PR and links of OTHER to KEEP. KEEP keeps its own workers, worktree and state.
   Then close the panes of the merged tasks as in "Release panes" (resolved
@@ -420,7 +420,7 @@ leave work undone. Treat each finding as unfinished work:
   but its window is not in the live Rex session. It carries the role, window,
   pane, worktree, brief, and result. Recover it as in "Recover after a restart".
 - `stale-running`: a resolved task has a worker that is still recorded as
-  `running`. `factory.mjs` closes every worker of a task when it moves to
+  `running`. `factory.mjs write` closes every worker of a task when it moves to
   `resolved` (unless the write sets a status), so this means an old record. Run
   the `fix` command in the finding. Workers of resolved tasks never count
   against the budget.
@@ -472,7 +472,7 @@ On every wake and recovery, read the factory file before you interpret results:
    revision:
 
    ```sh
-   node factory.mjs "$FILE" --task issue-42 --expected-revision 7 --ack-feedback FEEDBACK_ID
+   node factory.mjs write "$FILE" --task issue-42 --expected-revision 7 --ack-feedback FEEDBACK_ID
    ```
 
 5. Reread the incremented revision. Further task writes require both
@@ -535,7 +535,7 @@ a PR, check if an open task already names its issue. Also check the reverse.
 The helper refuses a new task if its issue or PR is in the `links` of another
 open task. The helper names that task. Work on that task instead. Tasks that
 are already duplicates show as `duplicate-task` findings. The factory merges
-them with `factory.mjs --merge-task KEEP --from OTHER` (see "Write before action; reconcile with reality").
+them with `factory.mjs write --merge-task KEEP --from OTHER` (see "Write before action; reconcile with reality").
 
 ### Archived work
 
@@ -561,7 +561,7 @@ The factory does not stop or wait after a single pass. On startup, recovery,
 every waiter wake, and each user update, finish one complete work sweep before
 ending the turn:
 
-1. Reconcile dashboard feedback first. Run `reconcile.mjs`. Then inspect every
+1. Reconcile dashboard feedback first. Run `factory.mjs reconcile`. Then inspect every
    changed result, worker pane, PR, and worktree. Do not leave a result or
    worktree unreconciled. Send a follow-up to every `blocked` task or waiting
    worker that has a worker-fixable cause ("Never park a worker-fixable task").
@@ -618,7 +618,7 @@ is a search rule. It follows the same start, request, and queue-drain rules.
 2. An enabled `search` or `backlog` rule runs on start, on a user request, and
    in each queue-drain sweep when capacity is free. A rule with `every` also
    runs when due. This happens only while the factory is `active` and running.
-   `broker.mjs wait --due` returns a `rule.due` event (see "Receive worker
+   `factory.mjs broker wait --due` returns a `rule.due` event (see "Receive worker
    events"). A paused, blocked, or finished
    factory runs no scheduled rule. A rule never runs when the factory is
    not running.
@@ -658,7 +658,7 @@ tells it to follow these rules:
 - If a query fails, do not repeat it. Count events in `events.jsonl` instead.
 
 Add the shared result-event instruction to a backlog or improve brief also.
-Its worker reports with `broker.mjs emit worker.result`. It uses the rule ID as
+Its worker reports with `factory.mjs broker emit worker.result`. It uses the rule ID as
 `--task`.
 
 `limits` sets the maximum parallel workers: `investigation` and
@@ -677,7 +677,7 @@ belongs to a task that is not `resolved`, and count the rule workers. Start a
 worker only when the count stays within the budget. The per-role `limits` also
 apply. Lowering the budget below the running count never stops a worker. Start
 no new worker until the count falls below the budget. Change it with
-`factory.mjs --budget '{"max_parallel_workers":N}'`. The operator can also edit
+`factory.mjs write --budget '{"max_parallel_workers":N}'`. The operator can also edit
 it in the dashboard settings. Reread `limits` after every dashboard
 `limits.updated` event. The budget is a worker count, not the Lever spend budget.
 
@@ -705,7 +705,7 @@ work". It changes nothing without the user's answer. Its worker follows
    it.
 3. For a due `improve` rule, read its `last_run_at` first. This is
    `WINDOW_START`; use 7 days ago if the rule never ran. Then stamp the rule
-   with `--rule ID --ran`. Run `node session-metrics.mjs --registry REGISTRY
+   with `--rule ID --ran`. Run `node factory.mjs session-metrics --registry REGISTRY
    --active-since WINDOW_START` yourself. Write the output to
    `<project>-self-improve-metrics.json` in the state directory (temporary
    file, then rename), and keep that path. The worker's sandbox cannot read
@@ -719,7 +719,7 @@ work". It changes nothing without the user's answer. Its worker follows
    `WINDOW_START`, the resolved spend budget, and absolute paths to these
    files: the metrics file from step 3, the registry, `improve.md`, the factory
    file, and the result file. The worker reads the metrics file and does not run
-   `session-metrics.mjs`. The worker has no write authority.
+   `factory.mjs session-metrics`. The worker has no write authority.
 5. Read the result. If `change` is null, record the worker as closed and say
    nothing. Otherwise do not ask in chat. The user decides in the dashboard's
    "Waiting for you" list. Emit one `improve.proposed` for each change, with a
@@ -727,7 +727,7 @@ work". It changes nothing without the user's answer. Its worker follows
    change. Keep arming the waiter:
 
    ```sh
-   node broker.mjs emit FACTORY_FILE improve.proposed --source improve --data \
+   node factory.mjs broker emit FACTORY_FILE improve.proposed --source improve --data \
      '{"rule":"self-improve","change":"limit","title":"Lower the implementation cap","evidence":"Short text, no session content","recommended":"accept","proposal_id":"UNIQUE","result":"<project>-self-improve-result.json"}'
    ```
 
@@ -743,7 +743,7 @@ work". It changes nothing without the user's answer. Its worker follows
    For `declined`, change nothing. In both cases add `"decision": {"status":
    "applied" | "declined" | "noted", "at", "note", "proposal_id"}` to the result
    file. Use a temporary file and a rename. Then the next run can check the
-   prediction. A proposal never expires. `reconcile.mjs` reports no finding
+   prediction. A proposal never expires. `factory.mjs reconcile` reports no finding
    for an undecided proposal. It reports `improve-decided-unapplied` when a
    decision event exists and the result file has a `change` but no `decision`.
    In that case, apply the change and write the `decision` now.
@@ -806,7 +806,7 @@ its `class` and `owner` in the `--blocker` JSON. Old blockers without them stay 
 | `approval` | A review or approval gate needs a named person | a login |
 
 The dashboard shows both in the Unblock popup. The Blocked box has one row for each class, and the row filters the list.
-`reconcile.mjs` reports `stale-blocked` after 24 hours. These causes are
+`factory.mjs reconcile` reports `stale-blocked` after 24 hours. These causes are
 worker-fixable. They never justify `blocked`, a wait, or a schedule:
 
 - a conflict with the default branch;
@@ -888,7 +888,7 @@ metrics: polling, failed edits, steering messages, and idle workers.
 ```text
 Standing cost lines:
 1. Never poll. No sleep loops and no self-wake schedule shorter than 20
-   minutes. Wait with `node PR_WATCH` or the blocking waiter.
+   minutes. Wait with `node FACTORY pr-watch` or the blocking waiter.
 2. View a file before you edit it. Use edit, not create, for a file that
    exists.
 3. This brief has the default for every decision you may face. Use it and do
@@ -909,9 +909,9 @@ any later follow-up.
 
 Every implementation brief for a UI change (the dashboard or any page) also has
 this standing line: "For a UI change, when a browser is available, run
-`node SHOT` (`shot.mjs`, beside `serve.mjs`) and name the screenshot path in the
-result, or save a partial result that says what was not seen." Replace `SHOT`
-with the absolute path, as for `PR_WATCH`. `shot.mjs` serves a copy of
+`node FACTORY shot` and name the screenshot path in the
+result, or save a partial result that says what was not seen." Replace `FACTORY`
+with the absolute path of `factory.mjs` (beside this skill). `factory.mjs shot` serves a copy of
 `factory.example.json` on a free port and runs headless Chrome at 1280 and 390
 pixels wide. In the macOS worker sandbox, Chrome, Edge and WebKit all fail
 (the sandbox denies the Mach service lookup). The worker says so. It never
@@ -928,7 +928,7 @@ output is the result file, plus issue comments when the brief allows them. See
 Save the brief as `<project>-<task>-<role>-brief.md`. Tell the worker to
 save `<project>-<task>-<role>-result.json` in the state directory. Before
 launch, verify that the brief contains the exact absolute result path, the
-exact absolute factory file path, and the `broker.mjs emit` command below. The
+exact absolute factory file path, and the `factory.mjs broker emit` command below. The
 brief must tell the worker to write the cumulative result atomically at
 milestones, on completion, and on any blocker. It must also tell the worker to
 emit an event right after each write. This applies to task, backlog, and
@@ -942,18 +942,18 @@ write, including the factory's own writes. A worker emits after the atomic
 write, so the factory never reads a result that is not there yet:
 
 ```sh
-node broker.mjs emit /abs/state/owner.repo-factory.json worker.result --task issue-42 \
+node factory.mjs broker emit /abs/state/owner.repo-factory.json worker.result --task issue-42 \
   --data '{"role":"implementation","outcome":"complete","head":"FULL SHA","result":"owner.repo-issue-42-implementation-result.json","feedback_id":null,"summary":"one line"}'
-node broker.mjs emit /abs/state/owner.repo-factory.json worker.blocked --task issue-42 \
+node factory.mjs broker emit /abs/state/owner.repo-factory.json worker.blocked --task issue-42 \
   --data '{"role":"implementation","reason":"needs a product decision"}'
-node broker.mjs emit /abs/state/owner.repo-factory.json pr.merged --task issue-42 \
+node factory.mjs broker emit /abs/state/owner.repo-factory.json pr.merged --task issue-42 \
   --data '{"role":"implementation","pr":"URL","merge_commit":"FULL SHA","head":"FULL SHA"}'
 ```
 
 The `pr.merged` command goes in the brief of every implementation worker on a
-task with a PR. Put the absolute path of `broker.mjs` (beside this skill) in the brief.
-An implementation brief also has the absolute path of `pr-watch.mjs` (beside
-this skill), written as `PR_WATCH` in the watcher rules. `worker.result`
+task with a PR. Put the absolute path of `factory.mjs` (beside this skill) in the brief.
+An implementation brief also has the absolute path of `factory.mjs` (beside
+this skill), written as `FACTORY` in the watcher rules. `worker.result`
 needs `data.role`, `data.outcome` (`working`, `waiting`, `complete`, or `blocked`), and
 `data.result`. `data.result` is the result file name in the state directory. `emit` refuses
 the event (exit 1, nothing appended) unless that file parses and its `task`, `role` and
@@ -997,13 +997,13 @@ without evidence.
 Tell every worker:
 
 - Report through the broker, not only the result file. After every atomic
-  result write, run `broker.mjs emit worker.result` (and `worker.blocked` on a
+  result write, run `factory.mjs broker emit worker.result` (and `worker.blocked` on a
   blocker). The factory waits for that event. A result file alone can stay
   unread until the next reconcile sweep. Include the same `feedback_id` as the
   result.
 - Before you write a cumulative result, report its intended outcome and
   evidence. Wait for the factory to save the planned disposition with
-  `factory.mjs`. Then write the result atomically. Wait for the factory to
+  `factory.mjs write`. Then write the result atomically. Wait for the factory to
   mirror and verify it before you do another action.
 - Before every commit or push that changes a head, and before every merge
   attempt or release, stop. Report the planned action and the current full
@@ -1032,12 +1032,12 @@ Tell every worker:
   limit, while `gh api rate_limit` still shows quota. Save a `waiting` result
   whose `summary` names the rate limit and the reset time. Emit
   `worker.result`. Until the reset, make no more than one REST check
-  (`gh api`) in 5 minutes. Then resume `node PR_WATCH`. `pr-watch.mjs`
+  (`gh api`) in 5 minutes. Then resume `node FACTORY pr-watch`. `factory.mjs pr-watch`
   classifies the error itself. It exits 3 with
   `{"event":"rate_limited","retry_at":...}`. Then save the `waiting` result
   with that `retry_at` and stop the watcher.
 - Implementation worker only, on a task with a PR: when your watcher
-  (`pr-watch.mjs --merge`) or your own merge reports the merge, save the final
+  (`factory.mjs pr-watch --merge`) or your own merge reports the merge, save the final
   result (`merged: true`, full `merge_commit` and `head`). Emit
   `worker.result`. Then emit `pr.merged` with the PR URL and the full merge
   commit SHA. Then stop every watcher that you started and become idle. Do not
@@ -1056,8 +1056,8 @@ or a branch, or fixes anything. It writes only to its result path and
 `$TMPDIR`. Its brief carries the hard line from "Brief the workers". If the
 worker finds that the fix is small, it says so in the result. It still does not
 make the fix: the fix is the job of the implementation worker. Record the
-worker with `mode: "one-shot"`, no worktree, and no `worktree.mjs`.
-`factory.mjs` refuses an investigation worker with `mode: "continuous"` or a
+worker with `mode: "one-shot"`, no worktree, and no `factory.mjs worktree`.
+`factory.mjs write` refuses an investigation worker with `mode: "continuous"` or a
 `worktree`, and refuses a worktree on a task in `investigation`.
 
 The worker saves its result with a `verdict` and becomes idle. It runs no
@@ -1079,8 +1079,8 @@ investigation result has `verdict: implement`. It is the only worker that
 edits, commits, or pushes. Use a new worktree for every task:
 
 ```sh
-WT=$(node /abs/path/to/worktree.mjs create fix-login)   # run in the main checkout
-NAME=$(node /abs/path/to/worker-name.mjs --role implementation --ref '#42' --summary 'Fix login redirect')
+WT=$(node /abs/path/to/factory.mjs worktree create fix-login)   # run in the main checkout
+NAME=$(node /abs/path/to/factory.mjs worker-name --role implementation --ref '#42' --summary 'Fix login redirect')
 rex window new -c "$(echo "$WT" | jq -r .path)" -- env FACTORY_TASK=fix-login FACTORY_ROLE=implementation FACTORY_FILE="$FILE" copilot --agent coding:caarlos0 --model claude-sonnet-5.5 --name "$NAME" --yolo --sandbox --add-dir "$HOME/.copilot" --add-dir "$HOME/Developer/worktrees" --add-dir "$STATE_DIR" -i 'Read /abs/brief.md and do it.'
 ```
 
@@ -1088,8 +1088,8 @@ rex window new -c "$(echo "$WT" | jq -r .path)" -- env FACTORY_TASK=fix-login FA
 with the worktree root from `worktreePathTemplate` when it differs. Add the
 deny flags from "Launch rules" before `-i`.
 
-`worktree.mjs` (next to this file) is a dependency-free helper. It prints JSON
-`{path, branch, created_by_run}`. Record the worktree with `factory.mjs
+`factory.mjs worktree` is a dependency-free helper. It prints JSON
+`{path, branch, created_by_run}`. Record the worktree with `factory.mjs write
 --worktree` from that JSON, never from a path that you computed. The path comes from
 the `worktreePathTemplate` setting in `$COPILOT_HOME/settings.json` (default
 `~/.copilot`), or `~/Developer/worktrees/{repo}/{branch}` when the setting is unset.
@@ -1098,9 +1098,9 @@ Run it in the project's main checkout. It branches from the current local
 `--base REF` picks another start point. Check that the main checkout is on the
 default branch before you launch. If a worktree for the branch exists, the helper
 reuses it and `created_by_run` is false. For a task that already has a PR, use
-`worktree.mjs create NAME --pr N` and record `created_by_run` from its output.
-`worktree.mjs create NAME -- CMD...` runs CMD in the worktree instead. Use it
-inside a Rex window that you opened yourself. `worker-name.mjs` (next to this file)
+`factory.mjs worktree create NAME --pr N` and record `created_by_run` from its output.
+`factory.mjs worktree create NAME -- CMD...` runs CMD in the worktree instead. Use it
+inside a Rex window that you opened yourself. `factory.mjs worker-name`
 is a dependency-free helper that prints the worker's `--name` (see "Launch
 rules"). Never format a name by hand. Keep `--sandbox`: `--yolo` skips tool
 permission prompts, not sandbox restrictions. Omit `--autopilot` unless the
@@ -1120,8 +1120,8 @@ and makes the small fix. Or it reports the problem, so the coordinator creates
 a new task.
 It writes `blocked` only for a user decision or an outside action.
 
-Watch the PR with the bundled `pr-watch.mjs` (absolute path in your brief).
-Start it with your shell tool in an attached async shell: `node PR_WATCH PR`.
+Watch the PR with `factory.mjs pr-watch` (the absolute path of `factory.mjs` is in your brief).
+Start it with your shell tool in an attached async shell: `node FACTORY pr-watch PR`.
 It makes one GraphQL call per tick and covers PR changes and required checks
 (fail-fast). It prints one JSON line on the first event and then exits. The
 event is one of: `merged`,
@@ -1182,7 +1182,7 @@ choice within the user's preferences and the resolved spend budget.
 The worker must never check out, switch, reset, or clean a shared
 implementation worktree. It reads the exact remote PR head, not uncommitted
 worker edits. For a task without a PR, it reads the recorded local `head`
-commit. It runs no `pr-watch.mjs` watcher. The implementation worker is the
+commit. It runs no `factory.mjs pr-watch` watcher. The implementation worker is the
 only watcher of a PR. Two watchers on one PR double the GraphQL use and
 trigger rate limits.
 The review worker reads the PR on each `worker.result` or head change that the
@@ -1199,7 +1199,7 @@ The factory runs no GitHub watcher.
 
 Before every launch, put an `AGENTS.md` in a private, task-specific
 instructions directory under the state directory. Name the directory
-`<project>-<task>-<role>-instructions`, so that `archive.mjs clean` can remove
+`<project>-<task>-<role>-instructions`, so that `factory.mjs archive clean` can remove
 it. The file points to the exact brief. It states both Rex rules above in its
 own text: never rename the session, and never create, close, or type into Rex
 windows, tabs, splits, or panes. Add the directory to
@@ -1242,12 +1242,12 @@ Every worker launch also sets `FACTORY_TASK` (the task ID; a rule worker has non
 `FACTORY_ROLE` (the worker role) and `FACTORY_FILE` (the absolute factory file) with
 `env` before `copilot`, for example
 `env FACTORY_TASK=fix-login FACTORY_ROLE=implementation FACTORY_FILE=/abs/owner.repo-factory.json copilot ...`.
-The plugin's attention hook (`hooks/attention.mjs`) uses them to know that the
+The plugin's attention hook (`factory.mjs hook attention`) uses them to know that the
 session belongs to the factory; a session with none of them and no match in the
 factory file or the owner lock is untouched. The hook runs for every session of the
 user, so it does nothing without them.
 
-The plugin's `preToolUse` hook (`hooks/guard.mjs`) runs for the session
+The plugin's `preToolUse` hook (`factory.mjs hook guard`) runs for the session
 recorded in the owner lock; no launcher variable is needed. `FACTORY_COORDINATOR=1`
 forces it on and `FACTORY_COORDINATOR=0` forces it off. The hook denies the subagent and workflow tools, edits outside the state
 directories, the session directory, and `$TMPDIR`, and these commands: `gh pr
@@ -1258,7 +1258,7 @@ so a launcher script hides what it runs: the script must enforce the same
 flags itself.
 
 Name every worker `<Verb> <ref>: <short summary>`. Do not write it by hand;
-run `worker-name.mjs --role ROLE --ref REF --summary TEXT` and pass its output
+run `factory.mjs worker-name --role ROLE --ref REF --summary TEXT` and pass its output
 as one quoted argument: `--name "$NAME"`. The Rex tab label is the same text.
 
 - Verb by role: `Investigate` (investigation), `Implement` (implementation),
@@ -1272,7 +1272,7 @@ as one quoted argument: `--name "$NAME"`. The Rex tab label is the same text.
   It never cuts the verb or the ref. It removes quotes and newlines.
 
 ```sh
-NAME=$(node /abs/path/to/worker-name.mjs --role review --ref '#57' --summary 'Add retry to pr-watch')
+NAME=$(node /abs/path/to/factory.mjs worker-name --role review --ref '#57' --summary 'Add retry to pr-watch')
 # Review #57: Add retry to pr-watch
 # Investigate #12: Login redirect loops on expired sessions
 # Implement favicon: Add a dashboard favicon   (task ID, no issue)
@@ -1299,18 +1299,18 @@ status. Record the IDs immediately, in the same turn.
 ### Recover after a restart
 
 A reboot or a closed Rex session leaves workers recorded as `running` with no
-window. Run `reconcile.mjs` at startup. Handle each `worker-missing`:
+window. Run `factory.mjs reconcile` at startup. Handle each `worker-missing`:
 
 1. If `rex-session-missing` is reported, the factory session is gone. Do not
    create, select, or rename a session. Report the blocker and stop. The user
    restores the session. Then sweep again.
 2. If the worker's result is `complete`, it is an `unprocessed-result`: process
    it as usual.
-3. Otherwise set the worker status to `unknown` with `factory.mjs`. Write the
+3. Otherwise set the worker status to `unknown` with `factory.mjs write`. Write the
    planned relaunch to `next_action` before any launch.
 4. Count the relaunch against `budget.max_parallel_workers` and `limits`. Leave
    the other workers `unknown`. Launch them when slots become free.
-5. Reuse the existing worktree. Never run `worktree.mjs create` for another; keep
+5. Reuse the existing worktree. Never run `factory.mjs worktree create` for another; keep
    `created_by_run` unchanged.
 6. Relaunch as in "Launch rules" with the same brief and one more line: "You were
    restarted: check git status and your result file, then continue." Investigation
@@ -1321,17 +1321,17 @@ window. Run `reconcile.mjs` at startup. Handle each `worker-missing`:
 
 ## Receive worker events
 
-Workers and `factory.mjs` append typed events to one
+Workers and `factory.mjs write` append typed events to one
 durable log (`<owner.repo>-factory-events.jsonl`, mode 0600, beside the factory
-file). `broker.mjs wait` wakes within milliseconds of an append. It prints
+file). `factory.mjs broker wait` wakes within milliseconds of an append. It prints
 exactly what happened. The factory file stays the source of truth for task
 state. Events are notifications and the worker-to-factory channel.
 
-Do not poll. Find the bundled `broker.mjs` beside this loaded skill. Run one
+Do not poll. Find `factory.mjs` beside this loaded skill. Run one
 attached async command:
 
 ```sh
-node broker.mjs wait /abs/state/owner.repo-factory.json --since CURSOR \
+node factory.mjs broker wait /abs/state/owner.repo-factory.json --since CURSOR \
   --exclude-source coordinator --exclude-source attention --exclude-source improve --due
 ```
 
@@ -1340,9 +1340,9 @@ the cursor. Each event has `id`, `at`, `type`, `task`, `source`, and `data`:
 
 | Type | Emitted by | `data` |
 | --- | --- | --- |
-| `task.moved` | `factory.mjs` on a state change (a new task is `from: null`) | `from`, `to`, `revision` |
-| `task.updated` | `factory.mjs` on any other task write | `revision` |
-| `feedback.pending` | `factory.mjs` on a dashboard move | `feedback_id` |
+| `task.moved` | `factory.mjs write` on a state change (a new task is `from: null`) | `from`, `to`, `revision` |
+| `task.updated` | `factory.mjs write` on any other task write | `revision` |
+| `feedback.pending` | `factory.mjs write` on a dashboard move | `feedback_id` |
 | `worker.result` | a worker after each result write | `role`, `outcome`, `head`, `result`, `feedback_id`, `summary` |
 | `worker.blocked` | a worker that cannot continue | `role`, `reason` |
 | `pr.merged` | the implementation worker after its final `merged: true` result | `role`, `pr`, `merge_commit`, `head` |
@@ -1355,13 +1355,13 @@ the cursor. Each event has `id`, `at`, `type`, `task`, `source`, and `data`:
 
 Rules:
 
-1. Start with `broker.mjs cursor FACTORY_FILE`. Then arm `wait --since CURSOR`.
+1. Start with `factory.mjs broker cursor FACTORY_FILE`. Then arm `wait --since CURSOR`.
    Then run the startup reconcile. Keep the cursor from each `wait` and pass it
    as the next `--since`. The log keeps each event appended between two waits.
    A wait with no `--since` starts at the end of the log. After a restart or a
    lost cursor, take a new `cursor` first, arm, then reconcile. Then no event
    falls between them.
-2. `--exclude-source coordinator` skips events from your own `factory.mjs`
+2. `--exclude-source coordinator` skips events from your own `factory.mjs write`
    writes (the default source), so they never wake you. Skipped events still
    advance the cursor. Dashboard events have source `dashboard` and always
    wake you, even when every worker is blocked. `--exclude-source attention`
@@ -1376,11 +1376,11 @@ Rules:
    it FIRST in a turn that has a long step (tests, merges), not last. Handle
    a user message the same way: re-arm before you reply. When a waiter exits,
    read its output at once and re-arm in the same turn. Before you end a turn,
-   run `broker.mjs armed FACTORY_FILE`. Exit 1 means arm a waiter now. The
+   run `factory.mjs broker armed FACTORY_FILE`. Exit 1 means arm a waiter now. The
    broker refuses a second `wait` for the same factory (exit 1) unless the first
    is stale, so there is never a duplicate. `wait` records its PID in
    `<owner.repo>-factory-waiter.pid` beside the factory file and removes it on
-   exit. `armed` and the `no-waiter` finding of `reconcile.mjs` read it. A
+   exit. `armed` and the `no-waiter` finding of `factory.mjs reconcile` read it. A
    process that died leaves a stale file. A PID that another command reuses
    also leaves a stale file. A waiter whose parent is gone (ppid 1, an orphan)
    leaves a stale file too. A stale file counts as no waiter.
@@ -1391,7 +1391,7 @@ Rules:
 4. Use the tool's completion notification to resume. Reconcile dashboard
    direction first, then handle each event in order. For a `worker.result`,
    read the result file named in `data.result`. Verify its feedback ID and
-   evidence, mirror it with `factory.mjs`, then write the state change.
+   evidence, mirror it with `factory.mjs write`, then write the state change.
    The event is a hint. The result file and Git are the evidence. For a
    `pr.merged`, follow "Merge" and "Release panes": verify, resolve, release,
    and re-arm at once.
@@ -1406,7 +1406,7 @@ Rules:
 6. `reconcile.due` wakes you every 5 minutes while the run is `active`, even
    when no worker event arrives (a crashed worker, a closed pane, a missed
    wake). Each waiter starts its own 5 minute window, so a wake does not cause
-   it again at once. On it, run `reconcile.mjs`, handle each finding, then
+   it again at once. On it, run `factory.mjs reconcile`, handle each finding, then
    re-arm. If there is nothing to do, only re-arm.
 7. `--timeout S` makes `wait` exit with `"events":[]` and `"timeout":true`.
    Use it only for a bounded check, never as a poll loop.
@@ -1414,12 +1414,12 @@ Rules:
    acknowledgement. Do not create a wake/write loop.
 9. A lane whose result is `waiting` for a rate limit is not stuck and not
    blocked. On the next wake, reconcile it. After its reset time passes,
-   re-arm the lane: tell the worker to resume `node PR_WATCH` (`rex send`
+   re-arm the lane: tell the worker to resume `node FACTORY pr-watch` (`rex send`
    reaches idle workers only). Do not start a timed loop to check the reset.
 
 Events do not prove that a worker is alive. If a worker crashed before it emitted,
 no worker event wakes you. `reconcile.due` (every 5 minutes) and rule `every`
-are the only timed backstops. Every turn also runs `reconcile.mjs`, which
+are the only timed backstops. Every turn also runs `factory.mjs reconcile`, which
 reads result files, branches, and panes. Do not start another timed loop. Stop
 the waiter when the factory session ends. If the factory is not running, comments
 remain pending until its next start.
@@ -1445,14 +1445,14 @@ and send the update to affected workers before further writes. Workers must
 check the current policy again, even when the head has not changed.
 
 Before a landing attempt, the factory records the exact head, the verified
-`may_merge` decision, and the planned attempt with `factory.mjs`. The worker uses
+`may_merge` decision, and the planned attempt with `factory.mjs write`. The worker uses
 the existing merge queue of the repository when it is available. Otherwise it uses
 the expected-head merge guard of Lever. For overlapping tasks, do not land until the
 combined code checks pass. The validated base SHA of the task and the head-specific
 evidence must also be current. Report the decision and attempt in the cumulative result:
 
 ```sh
-node factory.mjs "$FILE" --task issue-42 \
+node factory.mjs write "$FILE" --task issue-42 \
   --next-action "Attempt merge on FULL SHA" \
   --merge '{"authorized_by":"LOGIN","source":"lever","evidence":"GRANT AND GATE EVIDENCE","authorized_at":"ISO","requested_at":"ISO","head":"FULL SHA"}'
 ```
@@ -1471,12 +1471,12 @@ steps in order, in the same turn:
 
 1. Verify on GitHub: `gh pr view URL --json state,mergeCommit`. The state must
    be `MERGED`, and `mergeCommit.oid` must equal `data.merge_commit`. If not,
-   ignore the event, record the mismatch, and re-arm. `reconcile.mjs` stays
+   ignore the event, record the mismatch, and re-arm. `factory.mjs reconcile` stays
    the backstop.
-2. Mirror the final result of the worker (`merged: true`) with `factory.mjs`.
+2. Mirror the final result of the worker (`merged: true`) with `factory.mjs write`.
 3. Write `resolved` with outcome `merged` and `details.merge_commit`.
 4. Close the worker and review panes (see "Release panes").
-5. Plan and remove an eligible worktree with `worktree.mjs delete NAME`, under the
+5. Plan and remove an eligible worktree with `factory.mjs worktree delete NAME`, under the
    rules in "Release panes".
 6. Re-arm the waiter.
 
@@ -1496,7 +1496,7 @@ with outcome `merged` before the done-audit or pane release.
 For local merges, record `details.merge_commit` and resolve as `merged` before
 you release the worker or worktree. Before you close a pane or remove an eligible
 worktree, write the planned release. After the pane is closed or the worktree is
-removed, record that fact with `factory.mjs` before any other action. If a write
+removed, record that fact with `factory.mjs write` before any other action. If a write
 has an unknown outcome, reconcile it before any further attempt.
 
 For a task without an issue or PR, the implementation worker rebases its branch
@@ -1508,7 +1508,7 @@ the landing with `git merge-base --is-ancestor HEAD_SHA DEFAULT_BRANCH`. Store t
 landed head SHA in `details.merge_commit`, then resolve the task as `merged`.
 
 After every local `git merge --ff-only` landing, the coordinator runs
-`node --test` at the repository root and records the result with `factory.mjs`.
+`node --test` at the repository root and records the result with `factory.mjs write`.
 If the default branch is red, never run `git reset` on it: a reset drops other
 landed commits. Send the worker a follow-up, or create a fix or revert task.
 
@@ -1521,7 +1521,7 @@ every waiting worker. This replaces "one follow-up per move" for queued workers.
 Closing the worker panes of a task is part of the same step that records `resolved`.
 Do not end the turn after you write `resolved` until the release of each pane is
 written and the panes are closed, or the reason they stay is recorded. The
-`open-window` finding from `reconcile.mjs` flags any pane that remains.
+`open-window` finding from `factory.mjs reconcile` flags any pane that remains.
 
 - **Investigation:** Verify the saved result and make sure that the worker is
   idle, with no running tool or watcher. Then close its pane.
@@ -1551,7 +1551,7 @@ written and the panes are closed, or the reason they stay is recorded. The
   Report each stray as a worker rule violation.
 
 Remove a worktree only as a separate action: one that this run created, with
-complete work and nothing uncommitted. Use `worktree.mjs delete NAME` (never
+complete work and nothing uncommitted. Use `factory.mjs worktree delete NAME` (never
 `--force`). It never asks. It removes a clean worktree whose tip is in the
 default branch or in a remote branch. Otherwise it exits 2 with
 `removed: false` and a `reason`. Then leave the worktree alone. A squash-merged PR
@@ -1559,7 +1559,7 @@ branch is in neither. For a task with a merged PR, add `--merged-pr URL_OR_NUMBE
 It checks with `gh api` that the PR is merged. It also checks that the PR head is the
 worktree tip or an ancestor of it, and that the tree is still clean (never `--force`).
 Never delete a reused worktree or one with pending work. The `merged-worktree`
-finding from `reconcile.mjs` flags the worktree of a merged task that is ready for
+finding from `factory.mjs reconcile` flags the worktree of a merged task that is ready for
 this.
 
 ## Migrate old handoffs
@@ -1571,9 +1571,9 @@ skill and board keep working for projects that you do not migrate.
 1. Stop the old implementation and coordination agents (not their workers) and
    release their locks. The migration stops if a lock exists, unless you pass
    `--ignore-locks`.
-2. Run `node migrate.mjs --project owner/repo --dry-run`. Read the counts and
+2. Run `node factory.mjs migrate --project owner/repo --dry-run`. Read the counts and
    warnings.
-3. Run `node migrate.mjs --project owner/repo`. It refuses to overwrite an
+3. Run `node factory.mjs migrate --project owner/repo`. It refuses to overwrite an
    existing factory file. It reads the sources and checks that they did not change.
    Then it writes the file with `link`.
 4. Optionally add `--archive` to move the two sources to
@@ -1581,7 +1581,7 @@ skill and board keep working for projects that you do not migrate.
 5. Start the factory. It reconciles each migrated task with its real PR, pane,
    and worktree before it trusts any state.
 
-What `migrate.mjs` does:
+What `factory.mjs migrate` does:
 
 - Maps `done` to `resolved` (`completed`) and `blocked` to `blocked`. A task
   with a PR and an issue goes to `implementation`. Every other open task goes
@@ -1606,11 +1606,11 @@ Do not keep updating both versions of a project.
 ## Show the dashboard
 
 Use the ready-made [dashboard.html](dashboard.html). Never generate HTML per
-run. It reads the factory file directly. Find `serve.mjs` beside this loaded
+run. It reads the factory file directly. Find `factory.mjs` beside this loaded
 skill and run it from that directory:
 
 ```sh
-node serve.mjs
+node factory.mjs serve
 ```
 
 It binds to `127.0.0.1` on port 8766 and prints its URL. `--help` lists

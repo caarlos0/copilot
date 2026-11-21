@@ -1999,7 +1999,7 @@ test("the standing cost lines are one block in the skill and are mapped in impro
   const block = skill.match(/Standing cost lines:\n([\s\S]*?)\n```/);
   assert.ok(block, "SKILL.md has the standing cost lines block");
   const lines = block[1];
-  assert.match(lines, /1\. Never poll\..*no self-wake schedule shorter than 20\s+minutes.*`node PR_WATCH`.*blocking waiter/s);
+  assert.match(lines, /1\. Never poll\..*no self-wake schedule shorter than 20\s+minutes.*`node FACTORY pr-watch`.*blocking waiter/s);
   assert.match(lines, /2\. View a file before you edit it\..*edit, not create, for a file that\s+exists/s);
   assert.match(lines, /3\. This brief has the default for every decision.*nudges in one message/s);
   assert.match(lines, /4\. When the PR is handed to review.*`waiting` result.*fresh\s+worker.*short handoff/s);

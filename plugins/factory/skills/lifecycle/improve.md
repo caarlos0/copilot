@@ -15,7 +15,7 @@ signal.
 The brief gives you `WINDOW_START` (an ISO time) and absolute paths for:
 
 - the metrics file, `<project>-self-improve-metrics.json`. The factory
-  generated it with `session-metrics.mjs --active-since WINDOW_START`. Your
+  generated it with `factory.mjs session-metrics --active-since WINDOW_START`. Your
   sandbox can fail to read session logs, so do not run the tool;
 - the sessions registry, `<owner.repo>-factory-sessions.jsonl`, to find the role
   and task of a session;
@@ -62,7 +62,7 @@ If you use `session_store_sql`, obey these rules:
    | Spend | `usage.cost`, tokens, low `cache_read_tokens` | Make a brief narrower; set smaller worker caps; use fewer review models |
    | Speed | `wall_minutes` and `turns` per resolved task | Remove a step; start workers sooner |
    | Idle time | `idle.minutes`, `over_10_minutes`, `longest_minutes` | Use a shorter wait or no wait; use the waiter instead of manual checks |
-   | Polling | `commands.sleep`, `commands.status_reads` high; `gh_wait` and `watch` low | Use `pr-watch.mjs` (`gh_wait` counts it); use `gh pr checks --watch --fail-fast` for a one-off check |
+   | Polling | `commands.sleep`, `commands.status_reads` high; `gh_wait` and `watch` low | Use `factory.mjs pr-watch` (`gh_wait` counts it); use `gh pr checks --watch --fail-fast` for a one-off check |
    | Questions to the user | `tools.ask_user.calls`, `user_messages` in worker sessions | Give the worker a default answer, or decide in the brief |
    | Failures | `tools.<name>.failures` | Correct the tool profile or the brief; a tool that fails every call is a config bug |
    | User waits | `attention.requested` per `role`, and the median time to the `attention.resolved` for the same `session`, in the events log `<owner.repo>-factory-events.jsonl` beside the factory file | Give the worker a default answer, or allow the tool in its profile |
@@ -74,7 +74,7 @@ If you use `session_store_sql`, obey these rules:
 
    | Signal | Standing line |
    | --- | --- |
-   | `commands.sleep`, `commands.status_reads`, `tools.manage_schedule.calls` | Never poll: no sleep loops, no self-wake under 20 minutes; wait with `pr-watch.mjs` or the blocking waiter |
+   | `commands.sleep`, `commands.status_reads`, `tools.manage_schedule.calls` | Never poll: no sleep loops, no self-wake under 20 minutes; wait with `factory.mjs pr-watch` or the blocking waiter |
    | `tools.create.failures`, `tools.edit.failures` | View a file before editing it; edit, not create, for a file that exists |
    | `user_messages` per worker (steering) | The brief has the default for every decision; the factory batches its nudges into one message |
    | `idle.over_10_minutes`, high `idle.minutes` in an implementation session after the PR goes to review | Save a `waiting` result; the factory closes the pane and starts a fresh worker for follow-ups |
@@ -110,7 +110,7 @@ If you use `session_store_sql`, obey these rules:
   "format": "factory-improve/v1",
   "window": { "from": "2026-05-01T00:00:00Z", "to": "2026-05-08T00:00:00Z", "sessions": 6 },
   "previous": {
-    "change": "Use pr-watch.mjs in implementation briefs",
+    "change": "Use factory.mjs pr-watch in implementation briefs",
     "decision": "applied",
     "metric": "commands.status_reads per review session",
     "before": 14,
@@ -119,7 +119,7 @@ If you use `session_store_sql`, obey these rules:
   },
   "change": {
     "kind": "process",
-    "summary": "Tell implementation workers to wait with pr-watch.mjs instead of sleeping.",
+    "summary": "Tell implementation workers to wait with factory.mjs pr-watch instead of sleeping.",
     "apply": "Add one line to the implementation brief.",
     "evidence": [
       { "metric": "commands.sleep", "value": 21, "sessions": ["11111111-1111-4111-8111-111111111111"] }

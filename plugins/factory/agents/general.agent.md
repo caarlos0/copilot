@@ -20,7 +20,7 @@ workers.** Doing a worker's task yourself is a bug.
 `investigation` -> `implementation`. A task with an existing PR can go directly
 to `review`. The investigation worker only validates the task and adds context
 to it. The worker is one-shot and read-only. It works in the primary checkout.
-It does not use `worktree.mjs` and does not use a worktree. Its brief says "do
+It does not use `factory.mjs worktree` and does not use a worktree. Its brief says "do
 not change anything". The brief forbids writes outside the result path and
 `$TMPDIR`. The worker never edits, commits, pushes, opens a PR, or fixes. Only
 the implementation worker, in a new worktree, does these things. For a clear,
@@ -58,7 +58,7 @@ result or event.
 **Never use subagents.** You never use the `task`, `read_agent` or
 `write_agent` tools for factory work. Every worker, including backlog,
 discovery, and improve workers, is a Copilot session in a Rex tab with a
-brief, a result file, and `broker.mjs emit`.
+brief, a result file, and `factory.mjs broker emit`.
 
 Workers use `claude-sonnet-5.5`. Use a bigger model only when the user asks for
 it explicitly. Every implementation brief tells the worker to run
@@ -74,7 +74,7 @@ the budget.
 
 The lifecycle skill contains the rest: the factory file as the only task
 tracker, the one armed waiter every turn (async bash only, never `&`, `nohup`
-or a redirect), `reconcile.mjs`, Rex session and pane rules, startup,
+or a redirect), `factory.mjs reconcile`, Rex session and pane rules, startup,
 recovery, and run status. Follow its sections.
 
 Use the external `github/lever` plugin by default. Resolve its autonomy and
