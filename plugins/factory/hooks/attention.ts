@@ -10,9 +10,8 @@
 // It always exits 0, prints nothing, and makes no network call.
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
-import { factoryFile, hookSession, isCoordinator } from "../skills/lifecycle/gate.mjs";
+import { join } from "node:path";
+import { factoryFile, hookSession, isCoordinator } from "../skills/lifecycle/gate.ts";
 
 const MAX_TEXT = 2000;
 const MAX_OPTIONS = 20;
@@ -119,7 +118,7 @@ async function run() {
   if (who.role) data.role = who.role;
   if (who.pane) data.pane = who.pane;
   if (options.length) data.options = options;
-  const { emit, resolveFactory } = await import("../skills/lifecycle/broker.mjs");
+  const { emit, resolveFactory } = await import("../skills/lifecycle/broker.ts");
   await emit(await resolveFactory(who.file), { type: "attention.requested", source: "attention", data });
 }
 
@@ -127,9 +126,4 @@ export async function main(_argv: string[]) {
   try {
     await run();
   } catch {}
-}
-
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  await main(process.argv.slice(2));
-  process.exit(0);
 }

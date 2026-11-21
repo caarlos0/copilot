@@ -1,12 +1,5 @@
 // The one factory command. Each subcommand loads its module only when it runs, so a hook pays no
 // start cost for the CLIs it does not use. `bun run build` bundles this file to factory.mjs.
-import { realpathSync } from "node:fs";
-import { pathToFileURL } from "node:url";
-import { ConflictError } from "./conflict.ts";
-
-// Old bundles (serve.mjs) import these two from factory.mjs. update loads the writer on first use.
-export { ConflictError };
-export const update: typeof import("./tasks.ts").update = async (...args) => (await import("./tasks.ts")).update(...args);
 
 type Main = (argv: string[]) => unknown;
 type Command = () => Promise<{ main: Main }>;
@@ -51,10 +44,10 @@ Commands:
   pr-watch                  Watch a pull request
   hook guard|attention|stop Run a Copilot hook (the payload comes on stdin)
 
-Every command takes --help. Old usage still works: node factory.mjs FILE [OPTIONS] runs write.
+Every command takes --help.
 Exit: 2 for invalid usage.`;
 
-export async function main(argv: string[]) {
+async function main(argv: string[]) {
   const [name, ...rest] = argv;
   if (name === undefined || name === "-h" || name === "--help") {
     (name === undefined ? console.error : console.log)(usage);
@@ -75,11 +68,13 @@ export async function main(argv: string[]) {
     return;
   }
   const load = Object.hasOwn(commands, name) ? commands[name] : undefined;
-  // Old writer usage: the first argument is the file.
-  const run = load ?? commands.write;
-  const args = load ? rest : argv;
+  if (!load) {
+    console.error(`Unknown command "${name}".\n\n${usage}`);
+    process.exitCode = 2;
+    return;
+  }
   try {
-    await (await run()).main(args);
+    await (await load()).main(rest);
   } catch (error) {
     if (name !== "migrate") throw error;
     console.error((error as Error).message);
@@ -87,5 +82,4 @@ export async function main(argv: string[]) {
   }
 }
 
-// An old bundle (serve.mjs) imports update and ConflictError from this file and must not run it.
-if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) await main(process.argv.slice(2));
+await main(process.argv.slice(2));

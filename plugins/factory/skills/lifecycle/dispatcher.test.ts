@@ -60,24 +60,21 @@ test("no command exits 2 and --help exits 0, both with the command list", () => 
   assert.match(help.stdout, /Commands:/);
 });
 
-test("write and the old FILE usage create the same factory", async (t) => {
+test("write creates a factory", async (t) => {
   const dir = await directory(t);
+  const file = join(dir, "owner.repo-factory.json");
   const options = ["--project", "owner/repo", "--run-goal", "Run the factory for owner/repo"];
-  const named = join(dir, "owner.repo-factory.json");
-  const legacy = join(dir, "other.repo-factory.json");
-  assert.equal(run(["write", named, ...options]).status, 0);
-  assert.equal(run([legacy, ...options.slice(0, 1), "other/repo", ...options.slice(2)]).status, 0);
-  assert.equal(JSON.parse(await readFile(named, "utf8")).project, "owner/repo");
-  assert.equal(JSON.parse(await readFile(legacy, "utf8")).project, "other/repo");
+  assert.equal(run(["write", file, ...options]).status, 0);
+  assert.equal(JSON.parse(await readFile(file, "utf8")).project, "owner/repo");
 });
 
-test("an old bundle can import update and ConflictError without running the dispatcher", async (t) => {
+test("an unknown command exits 2 and is not a file to write", async (t) => {
   const dir = await directory(t);
-  const importer = join(dir, "importer.mjs");
-  await writeFile(importer, `import { ConflictError, update } from ${JSON.stringify(script)};\nconsole.log(typeof update, typeof ConflictError);\n`);
-  const { status, stdout, stderr } = spawnSync(process.execPath, [importer, "--help"], { encoding: "utf8" });
-  assert.equal(status, 0, stderr);
-  assert.equal(stdout, "function function\n");
+  const file = join(dir, "owner.repo-factory.json");
+  const { status, stderr } = run([file, "--project", "owner/repo"]);
+  assert.equal(status, 2);
+  assert.match(stderr, /Unknown command/);
+  assert.equal(await readFile(file, "utf8").catch(() => null), null);
 });
 
 test("armed counts a waiter that runs as factory.mjs broker wait", async (t) => {

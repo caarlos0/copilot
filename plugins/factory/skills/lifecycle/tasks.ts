@@ -3,15 +3,15 @@ import { open, readFile, realpath, rm, stat } from "node:fs/promises";
 import { basename, extname, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import writeFileAtomic from "write-file-atomic";
-import { archiveDirectory, findArchived, readArchive, removeArchived, saveArchive } from "./archive.mjs";
-import { emit, resolveFactory } from "./broker.mjs";
+import { archiveDirectory, findArchived, readArchive, removeArchived, saveArchive } from "./archive.ts";
+import { emit, resolveFactory } from "./broker.ts";
 import { ConflictError } from "./conflict.ts";
 import {
   checkTransition, defaultBudget, defaultLimits, format, isObject, keepFirst, maxRoleLimit, mergeRefusal,
   operatorOutcomes, outcomes, parseBlocker, resourceId, sharesWork, sortReferences, validate,
-} from "./factory-data.mjs";
-import { findSessions, recordSessions, registryFile, sessionID, sessionStateDirectory } from "./sessions.mjs";
-import { alive } from "./state-dir.mjs";
+} from "./factory-data.ts";
+import { findSessions, recordSessions, registryFile, sessionID, sessionStateDirectory } from "./sessions.ts";
+import { alive } from "./state-dir.ts";
 import type { Factory, Rule, Task, Worker } from "./factory-data.ts";
 import type { SessionEntry } from "./sessions.ts";
 
@@ -271,7 +271,6 @@ function checkExpected(
 async function announce(file: string, source: string, events: WriteEvent[]) {
   for (const event of events) {
     try {
-      // broker.mjs is read as plain JS, which types the `task = null` default as only null.
       await emit(file, { ...event, source } as Parameters<typeof emit>[1]);
     } catch (error) {
       console.error(`${file}: ${event.type} event was not emitted: ${(error as Error).message}`);
@@ -408,7 +407,6 @@ async function writeFactory(file: string, values: Values, operator: boolean, sou
   }
   if (values.task !== undefined) {
     if (inserting) {
-      // archive.mjs is read as plain JS, which loses the optional fields of its parameter type.
       const matches = findArchived(await readArchive(directory, current.project), (restoring
         ? { id: values.task }
         : { id: values.task, issue: normalizedURL(values.issue), pr: normalizedURL(values.pr) }) as Parameters<typeof findArchived>[1]);

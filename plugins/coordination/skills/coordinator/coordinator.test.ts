@@ -9,14 +9,11 @@ const run = (...args: string[]) => spawnSync(process.execPath, args, { encoding:
 const coordinator = join(import.meta.dirname, "coordinator.mjs");
 
 for (const command of ["handoff", "serve", "wait"]) {
-  test(`coordinator ${command} --help matches ${command}.mjs`, () => {
-    const direct = run(join(import.meta.dirname, `${command}.mjs`), "--help");
-    const dispatched = run(coordinator, command, "--help");
-    assert.equal(direct.status, 0, direct.stderr);
-    assert.equal(dispatched.status, 0, dispatched.stderr);
-    assert.notEqual(dispatched.stdout, "");
-    assert.equal(dispatched.stdout, direct.stdout);
-    assert.equal(dispatched.stderr, "");
+  test(`coordinator ${command} --help prints the usage`, () => {
+    const result = run(coordinator, command, "--help");
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, new RegExp(`Usage: node coordinator\\.mjs ${command}`));
+    assert.equal(result.stderr, "");
   });
 }
 

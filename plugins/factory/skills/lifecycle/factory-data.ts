@@ -235,11 +235,11 @@ export function resourceId(value: unknown) {
   }
 }
 
-const ownIds = (task: Task) => [task.issue, task.pr].map(resourceId).filter(Boolean) as string[];
-const namedIds = (task: Task) => new Set([...ownIds(task), ...(task.links ?? []).map(resourceId).filter(Boolean) as string[]]);
+const ownIds = (task: Pick<Task, "issue" | "pr">) => [task.issue, task.pr].map(resourceId).filter(Boolean) as string[];
+const namedIds = (task: Pick<Task, "issue" | "pr" | "links">) => new Set([...ownIds(task), ...(task.links ?? []).map(resourceId).filter(Boolean) as string[]]);
 
 // Two tasks are one piece of work when the issue or PR of one appears in the other's issue, pr or links.
-export function sharesWork(a: Task, b: Task) {
+export function sharesWork(a: Pick<Task, "issue" | "pr" | "links">, b: Pick<Task, "issue" | "pr" | "links">) {
   const named = [namedIds(a), namedIds(b)];
   return ownIds(a).some((id) => named[1].has(id)) || ownIds(b).some((id) => named[0].has(id));
 }

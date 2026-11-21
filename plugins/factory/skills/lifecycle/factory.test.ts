@@ -100,18 +100,18 @@ test("a worker write without a pane or window change keeps its session and summa
 });
 
 test("the shipped example is a valid factory", async () => {
-  const { validate } = await import("./factory-data.mjs");
+  const { validate } = await import("./factory-data.ts");
   validate(example);
 });
 
 test("rankTasks matches identifying fields only and ranks id, then title, then other fields", async () => {
-  const { rankTasks } = await import("./factory-data.mjs");
+  const { rankTasks } = await import("./factory-data.ts");
   const ids = (query: string, limit?: number) => rankTasks(example.tasks, query, limit).map((task) => task.id);
   const at = (id: string, updated: string | null, last: string | null) => ({
     id,
     ...(updated && { updated_at: updated }),
     history: last ? [{ at: "2020-01-01T00:00:00Z" }, { at: last }] : [],
-  });
+  }) as any;
   const recent = [
     at("b", "2026-01-02T00:00:00Z", "2026-01-09T00:00:00Z"),
     at("c", "2026-01-03T00:00:00Z", "2026-01-01T00:00:00Z"),
@@ -149,10 +149,10 @@ const withoutBudget = () => {
 };
 
 test("compareFactories sorts by state group, then by name ignoring case, then by file", async () => {
-  const { compareFactories } = await import("./factory-data.mjs");
+  const { compareFactories } = await import("./factory-data.ts");
   const item = (file: string, project: string, status: string, open: number, resolved = 0) => ({
     file, project, status, task_count: open + resolved, counts: { resolved },
-  });
+  }) as any;
   const items = [
     item("1.json", "zeta/done", "finished", 0, 3),
     item("2.json", "alpha/idle", "active", 0),
@@ -165,24 +165,25 @@ test("compareFactories sorts by state group, then by name ignoring case, then by
     item("9.json", "aaa/finished-open", "finished", 1),
     item("a.json", "delta/paused-empty", "paused", 0, 1),
   ];
-  const order = (list: { file: string }[]) => list.sort(compareFactories).map((entry) => entry.file);
+  const order = (list: any[]) => list.sort(compareFactories).map((entry) => entry.file);
   const expected = ["3.json", "8.json", "4.json", "6.json", "5.json", "7.json", "2.json", "a.json", "9.json", "1.json"];
   assert.deepEqual(order([...items]), expected);
   assert.deepEqual(order([...items].reverse()), expected);
 });
 
 test("factorySection groups factories by run state", async () => {
-  const { factorySection } = await import("./factory-data.mjs");
-  const counts = (resolved: number) => ({ resolved });
-  assert.equal(factorySection({ status: "active", task_count: 3, counts: counts(1) }), "active");
-  assert.equal(factorySection({ status: "paused", task_count: 3, counts: counts(1) }), "active");
-  assert.equal(factorySection({ status: "active", task_count: 3, counts: counts(3) }), "idle");
-  assert.equal(factorySection({ status: "active", task_count: 0, counts: counts(0) }), "idle");
-  assert.equal(factorySection({ status: "finished", task_count: 3, counts: counts(1) }), "finished");
+  const { factorySection } = await import("./factory-data.ts");
+  const section = (status: string, task_count: number, resolved: number) =>
+    factorySection({ status, task_count, counts: { resolved } } as any);
+  assert.equal(section("active", 3, 1), "active");
+  assert.equal(section("paused", 3, 1), "active");
+  assert.equal(section("active", 3, 3), "idle");
+  assert.equal(section("active", 0, 0), "idle");
+  assert.equal(section("finished", 3, 1), "finished");
 });
 
 test("fitProjectLabel shortens the owner first and cuts the repo from the start last", async () => {
-  const { fitProjectLabel } = await import("./factory-data.mjs");
+  const { fitProjectLabel } = await import("./factory-data.ts");
   const fit = (label: string, width: number) => fitProjectLabel(label, width, (text: string) => text.length);
   const label = "github/copilot-agent-runtime";
   assert.equal(fit(label, 28), label);
@@ -197,7 +198,7 @@ test("fitProjectLabel shortens the owner first and cuts the repo from the start 
 });
 
 test("budget validation accepts valid values and an absent budget, and rejects everything else", async (t) => {
-  const { validate } = await import("./factory-data.mjs");
+  const { validate } = await import("./factory-data.ts");
   validate(withoutBudget());
   for (const max_parallel_workers of [1, 10, 100]) validate({ ...example, budget: { max_parallel_workers } });
   for (const budget of [
@@ -249,7 +250,8 @@ test("--expected-budget rejects a stale budget and leaves the file untouched", a
 test("an operator write needs the seen budget and can set nothing else", async (t) => {
   const f = await fixture(t, example);
   const original = await readFile(f.file, "utf8");
-  const { update, ConflictError } = await import("./factory.mjs");
+  const { update } = await import("./tasks.ts");
+  const { ConflictError } = await import("./conflict.ts");
   const budget = '{"max_parallel_workers":2}';
   await assert.rejects(update(f.file, { budget }, { operator: true }), ConflictError);
   await assert.rejects(update(f.file, { budget, "expected-budget": "9" }, { operator: true }), ConflictError);
@@ -263,7 +265,7 @@ test("an operator write needs the seen budget and can set nothing else", async (
 });
 
 test("lever validation accepts an absent lever and ceilings, and rejects everything else", async (t) => {
-  const { validate } = await import("./factory-data.mjs");
+  const { validate } = await import("./factory-data.ts");
   validate(example);
   assert.equal("lever" in example, false, "Old files have no lever.");
   for (const lever of [{}, { spend: "high" }, { autonomy_cap: "L0" }, { spend: null, autonomy_cap: null },
@@ -321,7 +323,8 @@ test("--limits and --lever compare each changed key with the expected value", as
 test("an operator write needs the seen limits and lever and keeps the 1 to 100 cap", async (t) => {
   const f = await fixture(t, example);
   const original = await readFile(f.file, "utf8");
-  const { update, ConflictError } = await import("./factory.mjs");
+  const { update } = await import("./tasks.ts");
+  const { ConflictError } = await import("./conflict.ts");
   const limits = '{"implementation":2}';
   const lever = '{"autonomy_cap":"L1"}';
   await assert.rejects(update(f.file, { limits }, { operator: true }), ConflictError);
@@ -389,7 +392,7 @@ test("moves follow the flow and each move adds history", async (t) => {
   assert.deepEqual(task.history.map((item: any) => item.state),
     ["initial", "investigation", "implementation", "review", "implementation", "review"]);
   assert.equal(task.history[1].note, "go");
-  const { cyclesOf, entered } = await import("./factory-data.mjs");
+  const { cyclesOf, entered } = await import("./factory-data.ts");
   assert.equal(cyclesOf(task), 1);
   assert.equal(entered(task), task.history.at(-1).at);
 });
@@ -529,7 +532,7 @@ test("a blocker may carry a validated class and owner; old blockers stay valid",
   bad(/owner must be a GitHub login or operator/, { reason: "R", owner: "" });
   assert.equal(await readFile(f.file, "utf8"), before, "An invalid class or owner must not change the file.");
 
-  const { validate } = await import("./factory-data.mjs");
+  const { validate } = await import("./factory-data.ts");
   const data = structuredClone(example);
   validate(data);
   const task = data.tasks.find((item: any) => item.state === "blocked");
@@ -572,12 +575,12 @@ test("--expected-revision on a new task is a usage error, not a conflict", async
 
 test("dashboard directions must be acknowledged and old worker generations stay fenced", async (t) => {
   const f = await fixture(t, example);
-  const { update } = await import("./factory.mjs");
+  const { update } = await import("./tasks.ts");
   const task = async () => (await f.read()).tasks.find((item: any) => item.id === "issue-7");
   const data = await update(f.file, {
     task: "issue-7", state: "implementation", note: "Check the edge case again", "expected-revision": "0",
   }, { operator: true });
-  const first = data.tasks.find((item: any) => item.id === "issue-7");
+  const first = data.tasks.find((item: any) => item.id === "issue-7") as any;
   f.fails(/needs --expected-revision/, "--task", first.id, "--state", "review");
   f.fails(/feedback is pending/, "--task", first.id, "--expected-revision", "1",
     "--feedback-id", first.feedback.id, "--state", "review");
@@ -609,7 +612,7 @@ test("dashboard directions must be acknowledged and old worker generations stay 
 });
 
 test("operator moves do not broaden worker transitions or bypass prerequisites", async () => {
-  const { checkTransition, operatorStates } = await import("./factory-data.mjs");
+  const { checkTransition, operatorStates } = await import("./factory-data.ts");
   const review = example.tasks.find((item: any) => item.state === "review");
   assert.deepEqual(operatorStates(review), ["initial", "investigation", "implementation", "resolved"]);
   assert.throws(() => checkTransition(review, "initial"), /cannot move/);
@@ -624,7 +627,7 @@ test("operator moves do not broaden worker transitions or bypass prerequisites",
 });
 
 test("the Unblock popup preselects the blocked-from state and fills option text verbatim", async () => {
-  const { unblockState, unblockChoice, validate } = await import("./factory-data.mjs");
+  const { unblockState, unblockChoice, validate } = await import("./factory-data.ts");
   const blocked = example.tasks.find((item: any) => item.state === "blocked");
   assert.deepEqual(blocked.blocker.options.map((option: any) => option.label),
     ["Add the docs token to the CI secrets", "Skip the docs build in CI"]);
@@ -752,7 +755,7 @@ test("adding a task archives resolved tasks older than seven days by day", async
 
 test("saving an archived task twice keeps one copy", async (t) => {
   const f = await withArchived(t);
-  const { archiveDirectory, readArchive, saveArchive } = await import("./archive.mjs");
+  const { archiveDirectory, readArchive, saveArchive } = await import("./archive.ts");
   const directory = archiveDirectory(f.file);
   const [{ tasks }] = await readArchive(directory, "owner/repo");
   await saveArchive(directory, "owner/repo", tasks);
@@ -830,7 +833,7 @@ test("archive write failures never lose a task or half-apply a restore", async (
 
 test("pending dashboard resolution comments survive pruning until acknowledged", async (t) => {
   const f = await started(t);
-  const { update } = await import("./factory.mjs");
+  const { update } = await import("./tasks.ts");
   const old = "2020-01-01T00:00:00Z";
   const before = (await f.read()).tasks[0];
   await update(f.file, {
@@ -910,12 +913,12 @@ test("--ignored replaces the skipped list and accepts only GitHub links", async 
 });
 
 test("schedule helpers say what is due, only for an active factory", async () => {
-  const { nextRun, dueRules, nextDue } = await import("./factory-data.mjs");
-  const interval = (every: string) => nextRun({ enabled: true, every, last_run_at: "1970-01-01T00:00:00Z" });
+  const { nextRun, dueRules, nextDue } = await import("./factory-data.ts");
+  const interval = (every: string) => nextRun({ enabled: true, every, last_run_at: "1970-01-01T00:00:00Z" } as any);
   assert.deepEqual(["30m", "6h", "1d", "9999m"].map(interval), [1_800_000, 21_600_000, 86_400_000, 599_940_000]);
 
   const at = Date.parse("2026-05-01T12:00:00Z");
-  const rule = (id: string, extra: Record<string, unknown>) => ({ id, enabled: true, last_run_at: null, ...extra });
+  const rule = (id: string, extra: Record<string, unknown>) => ({ id, enabled: true, last_run_at: null, ...extra }) as any;
   const rules = [
     rule("never", { every: "1h" }),
     rule("ran", { every: "1h", last_run_at: "2026-05-01T11:30:00Z" }),
@@ -924,12 +927,12 @@ test("schedule helpers say what is due, only for an active factory", async () =>
     rule("manual", {}),
   ];
   assert.deepEqual(rules.map(nextRun), [0, at + 1_800_000, Date.parse("2026-05-01T11:10:00Z"), null, null]);
-  const data = (status: string) => ({ status, rules });
+  const data = (status: string, list = rules) => ({ status, rules: list }) as any;
   assert.deepEqual(dueRules(data("active"), at), ["never", "overdue"]);
   assert.equal(nextDue(data("active")), 0);
-  assert.deepEqual(dueRules({ status: "active", rules: rules.slice(1, 2) }, at), []);
-  assert.equal(nextDue({ status: "active", rules: rules.slice(1, 2) }), at + 1_800_000);
-  assert.equal(nextDue({ status: "active", rules: rules.slice(3) }), null);
+  assert.deepEqual(dueRules(data("active", rules.slice(1, 2)), at), []);
+  assert.equal(nextDue(data("active", rules.slice(1, 2))), at + 1_800_000);
+  assert.equal(nextDue(data("active", rules.slice(3))), null);
   for (const status of ["paused", "blocked", "finished"]) {
     assert.deepEqual(dueRules(data(status), at), [], status);
     assert.equal(nextDue(data(status)), null, status);

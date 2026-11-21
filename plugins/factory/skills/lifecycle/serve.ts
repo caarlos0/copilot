@@ -4,20 +4,21 @@ import { readFile, readdir, realpath, stat } from "node:fs/promises";
 import { type AddressInfo } from "node:net";
 import { homedir, networkInterfaces } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { gzipSync } from "node:zlib";
 import writeFileAtomic from "write-file-atomic";
-import { briefName as checkBriefName, countByState, isObject, validate } from "./factory-data.mjs";
+import { briefName as checkBriefName, countByState, isObject, validate } from "./factory-data.ts";
 import type { Factory, Worker } from "./factory-data.ts";
-import { resolveAttention, scanStamp, sendAnswer } from "./attention.mjs";
+import { resolveAttention, scanStamp, sendAnswer } from "./attention.ts";
 import type { AttentionItem } from "./attention.ts";
-import { ConflictError, update } from "./factory.mjs";
-import { decideProposal, scanProposals } from "./proposals.mjs";
+import { ConflictError } from "./conflict.ts";
+import { update } from "./tasks.ts";
+import { decideProposal, scanProposals } from "./proposals.ts";
 import type { Proposal } from "./proposals.ts";
-import { sessionStateDirectory } from "./sessions.mjs";
-import { factoryUsage } from "./usage.mjs";
-import { candidates, stateDirectories } from "./state-dir.mjs";
+import { sessionStateDirectory } from "./sessions.ts";
+import { factoryUsage } from "./usage.ts";
+import { candidates, stateDirectories } from "./state-dir.ts";
 
 const factoryFile = /-factory\.json$/i;
 const maxBody = 16384;
@@ -731,5 +732,3 @@ export function main(argv: string[]) {
     process.exitCode = 1;
   });
 }
-
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) await main(process.argv.slice(2));

@@ -55,7 +55,7 @@ test("maps, joins, renames, and attaches reviews from the legacy handoffs", asyn
   assert.equal(summary.reviewer_skipped, 1);
 
   const data = await f.read();
-  const { validate } = await import("./factory-data.mjs");
+  const { validate } = await import("./factory-data.ts");
   validate(data);
   assert.equal(data.id, "owner.repo-factory");
   assert.deepEqual(data.budget, { max_parallel_workers: 10 });

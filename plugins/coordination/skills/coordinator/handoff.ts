@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { basename, extname, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import writeFileAtomic from "write-file-atomic";
-import { validate } from "./board-data.mjs";
+import { validate } from "./board-data.ts";
 
 type Json = Record<string, any>;
 type Values = Record<string, string | undefined>;
@@ -221,5 +221,3 @@ Keep the coordinator's project/role owner lock while using this command.`);
     process.exitCode = 1;
   }
 }
-
-if (basename(process.argv[1] ?? "") === "handoff.mjs") await main(process.argv.slice(2));

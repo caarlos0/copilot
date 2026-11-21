@@ -24,7 +24,7 @@ const events = [
   ...bash(2, "a", "sleep 30 && gh pr checks 5 -R secret/repo"),
   ...bash(3, "b", "gh pr checks 5 -R secret/repo --watch --fail-fast", false),
   ...bash(3, "c", "gh wait 5"),
-  ...bash(3, "e", "node /skills/lifecycle/pr-watch.mjs 5 --merge"),
+  ...bash(3, "e", "node /skills/lifecycle/factory.mjs pr-watch 5 --merge"),
   ...bash(3, "f", "node /skills/lifecycle/factory.mjs pr-watch 5 --merge"),
   event(3, "tool.execution_start", { toolCallId: "d", toolName: "ask_user", arguments: { message: "SECRET-QUESTION" } }),
   event(3, "tool.execution_complete", { toolCallId: "d", success: true }),

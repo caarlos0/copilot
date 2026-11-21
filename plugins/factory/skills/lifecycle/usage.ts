@@ -1,7 +1,7 @@
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
-import { measureFile } from "./session-metrics.mjs";
-import { sessionID } from "./sessions.mjs";
+import { measureFile } from "./session-metrics.ts";
+import { sessionID } from "./sessions.ts";
 
 const maxLogBytes = 512 * 1024 * 1024;
 const refreshMs = 30_000;

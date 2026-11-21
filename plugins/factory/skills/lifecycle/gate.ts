@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { stateFile } from "./state-dir.mjs";
+import { stateFile } from "./state-dir.ts";
 
 // Decides whether the coordinator hooks apply to a session. The owner lock
 // (`<project>-factory.lock`) records the coordinator's Copilot session, and the

@@ -5,8 +5,7 @@
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
-import { pathToFileURL } from "node:url";
-import { isCoordinator } from "../skills/lifecycle/gate.mjs";
+import { isCoordinator } from "../skills/lifecycle/gate.ts";
 
 const DENIED_TOOLS = ["task", "read_agent", "write_agent", "run_dynamic_workflow"];
 const WRITE_TOOLS = ["edit", "create", "str_replace_editor", "apply_patch"];
@@ -37,7 +36,7 @@ const BASH_RULES: Rule[] = [
     name: "waiter-async-bash",
     reason:
       "Run `factory.mjs broker wait` as async bash and read its output. A waiter that runs with `&`, nohup, setsid, or disown, or with stdout sent to a file, has no reader. Its wake never reaches you.",
-    deny: (c) => /^(?:\S*\/)?(?:node|bun)\s+\S*(?:broker\.mjs|factory\.mjs\s+broker)\s+wait\b/.test(c) && (/\s&$/.test(c) || /(?:^|\s)(?:1|&)?>>?\s*(?!&)\S/.test(c)),
+    deny: (c) => /^(?:\S*\/)?(?:node|bun)\s+\S*factory\.mjs\s+broker\s+wait\b/.test(c) && (/\s&$/.test(c) || /(?:^|\s)(?:1|&)?>>?\s*(?!&)\S/.test(c)),
   },
   {
     name: "copilot-autopilot",
@@ -204,5 +203,3 @@ export function main(_argv: string[]) {
     }
   } catch {}
 }
-
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) main(process.argv.slice(2));

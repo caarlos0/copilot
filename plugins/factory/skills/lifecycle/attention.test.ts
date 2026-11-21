@@ -19,7 +19,7 @@ async function setup(t: TestContext) {
   t.after(() => delete process.env.FACTORY_SESSION_STATE);
   const file = join(directory, "owner.repo-factory.json");
   await writeFile(file, JSON.stringify({ tasks: [{ id: "fix-it", title: "Fix the thing" }] }));
-  const { scanAttention, openAttention, resolveAttention } = (await import("./attention.mjs")) as typeof import("./attention.ts");
+  const { scanAttention, openAttention, resolveAttention } = await import("./attention.ts");
 
   let n = 0;
   const log = (type: string, data: Record<string, unknown>, at = requestedAt, task: string | null = null) =>
@@ -84,7 +84,7 @@ test("task events, blank lines and broken lines between attention events change 
 
 test("scanStamp changes when the events log or a listed session log grows", async (t) => {
   const f = await setup(t);
-  const { scanStamp } = await import("./attention.mjs");
+  const { scanStamp } = await import("./attention.ts");
   assert.equal(await scanStamp(f.file, ["s1"]), "none,none");
   await f.request("s1");
   const first = await scanStamp(f.file, ["s1"]);
@@ -224,7 +224,7 @@ esac`);
 
 test("an answer is sent with the session that holds the pane", async (t) => {
   const f = await setup(t);
-  const { sendAnswer } = await import("./attention.mjs");
+  const { sendAnswer } = await import("./attention.ts");
   const log = join(f.directory, "args");
   await f.fakeRex(`case "$*" in
   "ls -q --short=false") printf 'session:one\\nsession:two\\n' ;;

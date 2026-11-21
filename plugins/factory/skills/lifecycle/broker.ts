@@ -4,12 +4,11 @@ import { fstatSync, readFileSync, statSync, unlinkSync, watch } from "node:fs";
 import type { FSWatcher } from "node:fs";
 import { link, open, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
-import { defaultBranch } from "./default-branch.mjs";
-import { dueRules, isObject, nextDue } from "./factory-data.mjs";
+import { defaultBranch } from "./default-branch.ts";
+import { dueRules, isObject, nextDue } from "./factory-data.ts";
 import type { Factory } from "./factory-data.ts";
-import { alive } from "./state-dir.mjs";
+import { alive } from "./state-dir.ts";
 
 type EventData = Record<string, any>;
 export type BrokerEvent = {
@@ -69,7 +68,7 @@ function isWaiter(pid: number) {
   try {
     const line = execFileSync("ps", ["-o", "ppid=,command=", "-p", String(pid)], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
     const [, ppid, command] = line.match(/^\s*(\d+)\s+(.*)$/s) ?? [];
-    return command !== undefined && /(?:broker\.mjs|factory\.mjs\s+broker)\s+wait\b/.test(command) && Number(ppid) > 1;
+    return command !== undefined && /factory\.mjs\s+broker\s+wait\b/.test(command) && Number(ppid) > 1;
   } catch {
     return true;
   }
@@ -564,5 +563,3 @@ export async function main(argv: string[]) {
     process.exitCode = error instanceof UsageError ? 2 : 1;
   }
 }
-
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) await main(process.argv.slice(2));

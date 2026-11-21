@@ -17,7 +17,7 @@ async function home(t: TestContext, ...dirs: string[]) {
 }
 
 const state = (directory: string, dir: string) => join(directory, ".local/state", dir);
-const stateDir = () => import("./state-dir.mjs");
+const stateDir = () => import("./state-dir.ts");
 
 test("stateDirectories lists the existing directories, new first, defaulting to the new one", async (t) => {
   const cases = [

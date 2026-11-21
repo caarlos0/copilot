@@ -284,7 +284,7 @@ test("moving back persists the comment, keeps worker context, and rejects a stal
 });
 
 test("the dashboard can resolve a task directly from every open state", async (t) => {
-  const { update } = await import("./factory.mjs");
+  const { update } = await import("./tasks.ts");
   for (const [state, outcome] of [
     ["initial", "completed"], ["investigation", "already-fixed"], ["implementation", "duplicate"],
     ["review", "invalid"], ["blocked", "cancelled"],
@@ -952,7 +952,7 @@ test("the flow draws plain lines with a port at each end", async (t) => {
 });
 
 test("both charts draw the same lines, and they are the allowed moves", async (t) => {
-  const { transitions } = await import("./factory-data.mjs");
+  const { transitions } = await import("./factory-data.ts");
   const ui = await dashboard(t);
   const drawn = (width: number) => {
     ui.run(`buildFlow(${width})`);
@@ -973,7 +973,7 @@ test("both charts draw the same lines, and they are the allowed moves", async (t
 });
 
 test("on a phone the flow is one column at the screen width, drawn at scale 1", async (t) => {
-  const { states, outcomes, blockerClasses } = await import("./factory-data.mjs");
+  const { states, outcomes, blockerClasses } = await import("./factory-data.ts");
   const ui = await dashboard(t, { phoneWidth: 390 });
   ui.run(`load(${JSON.stringify(example)}, ${JSON.stringify(factoryFile)})`);
   const flow = ui.get("flow");
@@ -1030,7 +1030,7 @@ test("on a phone the flow is one column at the screen width, drawn at scale 1", 
 });
 
 for (const width of [0, 390]) test(`hovering or focusing a state lights only its direct moves and the states they reach (${width ? "vertical" : "horizontal"} chart)`, async (t) => {
-  const { states, transitions } = await import("./factory-data.mjs");
+  const { states, transitions } = await import("./factory-data.ts");
   const ui = await dashboard(t);
   ui.run(`buildFlow(${width})`);
   const flow = ui.get("flow");
@@ -1341,7 +1341,7 @@ test("a resolved task shows how long ago it resolved", async (t) => {
 test("resolved sublists count each outcome and open only matching tasks", async (t) => {
   const ui = await dashboard(t, { reducedMotion: false });
   const data = structuredClone(example);
-  const { operatorOutcomes } = await import("./factory-data.mjs");
+  const { operatorOutcomes } = await import("./factory-data.ts");
   for (const [index, outcome] of [...operatorOutcomes, "duplicate"].entries()) {
     const task = structuredClone(example.tasks.find((task: Json) => task.state === "initial"));
     task.id = `resolution-${index}`;
@@ -1641,7 +1641,7 @@ test("Reload task refreshes the blocker reason and keeps the comment draft", asy
   await ui.get("task-list").querySelector(".move").fire("click");
   const form = ui.get("move-body").querySelector("form");
   form.querySelector("textarea").value = "My draft";
-  const { update } = await import("./factory.mjs");
+  const { update } = await import("./tasks.ts");
   await update(join(ui.directory, factoryFile), {
     task: "issue-5", blocker: JSON.stringify({ reason: "A new reason." }),
   });
@@ -1666,7 +1666,7 @@ test("Move opens a separate popup whose draft survives refresh and conflict", as
   comment.value = "This is now unblocked.\nUse the new docs setup.";
   comment.focus();
   const file = join(ui.directory, factoryFile);
-  const { update } = await import("./factory.mjs");
+  const { update } = await import("./tasks.ts");
   await update(file, { task: "issue-5", "next-action": "An agent changed the task while editing" });
   await ui.run("refresh()");
   assert.equal(ui.get("move-body").querySelector("textarea"), comment);
@@ -1825,7 +1825,7 @@ test("a rejected move does not fade the row", async (t) => {
   const form = ui.get("move-body").querySelector("form");
   form.querySelector("select").value = "initial";
   form.querySelector("textarea").value = "This is now unblocked.";
-  const { update } = await import("./factory.mjs");
+  const { update } = await import("./tasks.ts");
   await update(join(ui.directory, factoryFile), { task: "issue-5", "next-action": "Changed while editing" });
   await form.fire("submit");
   assert.match(form.querySelector(".save-error").textContent, /changed since it was read/);
@@ -1895,7 +1895,7 @@ test("the settings dialog keeps its draft across refresh, reports a conflict, an
   assert.equal(ui.document.activeElement, budget);
   budget.value = "6";
   cap.value = "L2";
-  const { update } = await import("./factory.mjs");
+  const { update } = await import("./tasks.ts");
   await update(file, { budget: '{"max_parallel_workers":8}', limits: '{"implementation":4}' });
   await ui.run("refresh()");
   assert.equal(ui.get("settings-body").querySelector("input"), budget);

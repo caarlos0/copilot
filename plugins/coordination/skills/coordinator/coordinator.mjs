@@ -488,6 +488,481 @@ var require_lib = __commonJS(function(exports, module) {
   }
 });
 
+// plugins/coordination/node_modules/valibot/dist/index.mjs
+function getGlobalConfig(config$1) {
+  if (!config$1 && !store$4)
+    return DEFAULT_CONFIG;
+  return {
+    lang: config$1?.lang ?? store$4?.lang,
+    message: config$1?.message,
+    abortEarly: config$1?.abortEarly ?? store$4?.abortEarly,
+    abortPipeEarly: config$1?.abortPipeEarly ?? store$4?.abortPipeEarly
+  };
+}
+function getGlobalMessage(lang) {
+  return store$3?.get(lang);
+}
+function getSchemaMessage(lang) {
+  return store$2?.get(lang);
+}
+function getSpecificMessage(reference, lang) {
+  return store$1?.get(reference)?.get(lang);
+}
+function _stringify(input) {
+  const type = typeof input;
+  if (type === "string")
+    return `"${input}"`;
+  if (type === "number" || type === "bigint" || type === "boolean")
+    return `${input}`;
+  if (type === "object" || type === "function")
+    return (input && Object.getPrototypeOf(input)?.constructor?.name) ?? "null";
+  return type;
+}
+function _addIssue(context, label, dataset, config$1, other) {
+  const input = other && "input" in other ? other.input : dataset.value;
+  const expected = other?.expected ?? context.expects ?? null;
+  const received = other?.received ?? /* @__PURE__ */ _stringify(input);
+  const issue = {
+    kind: context.kind,
+    type: context.type,
+    input,
+    expected,
+    received,
+    message: `Invalid ${label}: ${expected ? `Expected ${expected} but r` : "R"}eceived ${received}`,
+    requirement: context.requirement,
+    path: other?.path,
+    issues: other?.issues,
+    lang: config$1.lang,
+    abortEarly: config$1.abortEarly,
+    abortPipeEarly: config$1.abortPipeEarly
+  };
+  const isSchema = context.kind === "schema";
+  const message$1 = other?.message ?? context.message ?? /* @__PURE__ */ getSpecificMessage(context.reference, issue.lang) ?? (isSchema ? /* @__PURE__ */ getSchemaMessage(issue.lang) : null) ?? config$1.message ?? /* @__PURE__ */ getGlobalMessage(issue.lang);
+  if (message$1 !== undefined)
+    issue.message = typeof message$1 === "function" ? message$1(issue) : message$1;
+  if (isSchema)
+    dataset.typed = false;
+  if (dataset.issues)
+    dataset.issues.push(issue);
+  else
+    dataset.issues = [issue];
+}
+function _isValidObjectKey(object$1, key) {
+  return Object.prototype.hasOwnProperty.call(object$1, key) && key !== "__proto__" && key !== "prototype" && key !== "constructor";
+}
+function _joinExpects(values$1, separator) {
+  const list = [...new Set(values$1)];
+  if (list.length > 1)
+    return `(${list.join(` ${separator} `)})`;
+  return list[0] ?? "never";
+}
+function _standardSchema(schema) {
+  schema["~standard"] = {
+    version: 1,
+    vendor: "valibot",
+    validate: (value$1) => schema["~run"]({ value: value$1 }, /* @__PURE__ */ getGlobalConfig())
+  };
+  return schema;
+}
+function check(requirement, message$1) {
+  return {
+    kind: "validation",
+    type: "check",
+    reference: check,
+    async: false,
+    expects: null,
+    requirement,
+    message: message$1,
+    "~run"(dataset, config$1) {
+      if (dataset.typed && !this.requirement(dataset.value))
+        _addIssue(this, "input", dataset, config$1);
+      return dataset;
+    }
+  };
+}
+function rawCheck(action) {
+  return {
+    kind: "validation",
+    type: "raw_check",
+    reference: rawCheck,
+    async: false,
+    expects: null,
+    "~run"(dataset, config$1) {
+      action({
+        dataset,
+        config: config$1,
+        addIssue: (info) => _addIssue(this, info?.label ?? "input", dataset, config$1, info)
+      });
+      return dataset;
+    }
+  };
+}
+function regex(requirement, message$1) {
+  return {
+    kind: "validation",
+    type: "regex",
+    reference: regex,
+    async: false,
+    expects: `${requirement}`,
+    requirement,
+    message: message$1,
+    "~run"(dataset, config$1) {
+      if (dataset.typed && !this.requirement.test(dataset.value))
+        _addIssue(this, "format", dataset, config$1);
+      return dataset;
+    }
+  };
+}
+function transform(operation) {
+  return {
+    kind: "transformation",
+    type: "transform",
+    reference: transform,
+    async: false,
+    operation,
+    "~run"(dataset) {
+      dataset.value = this.operation(dataset.value);
+      return dataset;
+    }
+  };
+}
+function getFallback(schema, dataset, config$1) {
+  return typeof schema.fallback === "function" ? schema.fallback(dataset, config$1) : schema.fallback;
+}
+function getDefault(schema, dataset, config$1) {
+  return typeof schema.default === "function" ? schema.default(dataset, config$1) : schema.default;
+}
+function any() {
+  return _standardSchema({
+    kind: "schema",
+    type: "any",
+    reference: any,
+    expects: "any",
+    async: false,
+    "~run"(dataset) {
+      dataset.typed = true;
+      return dataset;
+    }
+  });
+}
+function array(item, message$1) {
+  return _standardSchema({
+    kind: "schema",
+    type: "array",
+    reference: array,
+    expects: "Array",
+    async: false,
+    item,
+    message: message$1,
+    "~run"(dataset, config$1) {
+      const input = dataset.value;
+      if (Array.isArray(input)) {
+        dataset.typed = true;
+        dataset.value = [];
+        for (let key = 0;key < input.length; key++) {
+          const value$1 = input[key];
+          const itemDataset = this.item["~run"]({ value: value$1 }, config$1);
+          if (itemDataset.issues) {
+            const pathItem = {
+              type: "array",
+              origin: "value",
+              input,
+              key,
+              value: value$1
+            };
+            for (const issue of itemDataset.issues) {
+              if (issue.path)
+                issue.path.unshift(pathItem);
+              else
+                issue.path = [pathItem];
+              dataset.issues?.push(issue);
+            }
+            if (!dataset.issues)
+              dataset.issues = itemDataset.issues;
+            if (config$1.abortEarly) {
+              dataset.typed = false;
+              break;
+            }
+          }
+          if (!itemDataset.typed)
+            dataset.typed = false;
+          dataset.value.push(itemDataset.value);
+        }
+      } else
+        _addIssue(this, "type", dataset, config$1);
+      return dataset;
+    }
+  });
+}
+function custom(check$1, message$1) {
+  return _standardSchema({
+    kind: "schema",
+    type: "custom",
+    reference: custom,
+    expects: "unknown",
+    async: false,
+    check: check$1,
+    message: message$1,
+    "~run"(dataset, config$1) {
+      if (this.check(dataset.value))
+        dataset.typed = true;
+      else
+        _addIssue(this, "type", dataset, config$1);
+      return dataset;
+    }
+  });
+}
+function looseObject(entries$1, message$1) {
+  return _standardSchema({
+    kind: "schema",
+    type: "loose_object",
+    reference: looseObject,
+    expects: "Object",
+    async: false,
+    entries: entries$1,
+    message: message$1,
+    "~run"(dataset, config$1) {
+      const input = dataset.value;
+      if (input && typeof input === "object") {
+        dataset.typed = true;
+        dataset.value = {};
+        for (const key in this.entries) {
+          const valueSchema = this.entries[key];
+          if (key in input || (valueSchema.type === "exact_optional" || valueSchema.type === "optional" || valueSchema.type === "nullish") && valueSchema.default !== undefined) {
+            const value$1 = key in input ? input[key] : /* @__PURE__ */ getDefault(valueSchema);
+            const valueDataset = valueSchema["~run"]({ value: value$1 }, config$1);
+            if (valueDataset.issues) {
+              const pathItem = {
+                type: "object",
+                origin: "value",
+                input,
+                key,
+                value: value$1
+              };
+              for (const issue of valueDataset.issues) {
+                if (issue.path)
+                  issue.path.unshift(pathItem);
+                else
+                  issue.path = [pathItem];
+                dataset.issues?.push(issue);
+              }
+              if (!dataset.issues)
+                dataset.issues = valueDataset.issues;
+              if (config$1.abortEarly) {
+                dataset.typed = false;
+                break;
+              }
+            }
+            if (!valueDataset.typed)
+              dataset.typed = false;
+            dataset.value[key] = valueDataset.value;
+          } else if (valueSchema.fallback !== undefined)
+            dataset.value[key] = /* @__PURE__ */ getFallback(valueSchema);
+          else if (valueSchema.type !== "exact_optional" && valueSchema.type !== "optional" && valueSchema.type !== "nullish") {
+            _addIssue(this, "key", dataset, config$1, {
+              input: undefined,
+              expected: `"${key}"`,
+              path: [{
+                type: "object",
+                origin: "key",
+                input,
+                key,
+                value: input[key]
+              }]
+            });
+            if (config$1.abortEarly)
+              break;
+          }
+        }
+        if (!dataset.issues || !config$1.abortEarly) {
+          for (const key in input)
+            if (/* @__PURE__ */ _isValidObjectKey(input, key) && !Object.prototype.hasOwnProperty.call(this.entries, key))
+              dataset.value[key] = input[key];
+        }
+      } else
+        _addIssue(this, "type", dataset, config$1);
+      return dataset;
+    }
+  });
+}
+function nullish(wrapped, default_) {
+  return _standardSchema({
+    kind: "schema",
+    type: "nullish",
+    reference: nullish,
+    expects: `(${wrapped.expects} | null | undefined)`,
+    async: false,
+    wrapped,
+    default: default_,
+    "~run"(dataset, config$1) {
+      if (dataset.value === null || dataset.value === undefined) {
+        if (this.default !== undefined)
+          dataset.value = /* @__PURE__ */ getDefault(this, dataset, config$1);
+        if (dataset.value === null || dataset.value === undefined) {
+          dataset.typed = true;
+          return dataset;
+        }
+      }
+      return this.wrapped["~run"](dataset, config$1);
+    }
+  });
+}
+function picklist(options, message$1) {
+  return _standardSchema({
+    kind: "schema",
+    type: "picklist",
+    reference: picklist,
+    expects: /* @__PURE__ */ _joinExpects(options.map(_stringify), "|"),
+    async: false,
+    options,
+    message: message$1,
+    "~run"(dataset, config$1) {
+      if (this.options.includes(dataset.value))
+        dataset.typed = true;
+      else
+        _addIssue(this, "type", dataset, config$1);
+      return dataset;
+    }
+  });
+}
+function string(message$1) {
+  return _standardSchema({
+    kind: "schema",
+    type: "string",
+    reference: string,
+    expects: "string",
+    async: false,
+    message: message$1,
+    "~run"(dataset, config$1) {
+      if (typeof dataset.value === "string")
+        dataset.typed = true;
+      else
+        _addIssue(this, "type", dataset, config$1);
+      return dataset;
+    }
+  });
+}
+function unknown() {
+  return _standardSchema({
+    kind: "schema",
+    type: "unknown",
+    reference: unknown,
+    expects: "unknown",
+    async: false,
+    "~run"(dataset) {
+      dataset.typed = true;
+      return dataset;
+    }
+  });
+}
+function pipe(...pipe$1) {
+  return _standardSchema({
+    ...pipe$1[0],
+    pipe: pipe$1,
+    "~run"(dataset, config$1) {
+      for (const item of pipe$1)
+        if (item.kind !== "metadata") {
+          if (dataset.issues && (item.kind === "schema" || item.kind === "transformation")) {
+            dataset.typed = false;
+            break;
+          }
+          if (!dataset.issues || !config$1.abortEarly && !config$1.abortPipeEarly)
+            dataset = item["~run"](dataset, config$1);
+        }
+      return dataset;
+    }
+  });
+}
+function safeParse(schema, input, config$1) {
+  const dataset = schema["~run"]({ value: input }, /* @__PURE__ */ getGlobalConfig(config$1));
+  return {
+    typed: dataset.typed,
+    success: !dataset.issues,
+    output: dataset.value,
+    issues: dataset.issues
+  };
+}
+var store$4, DEFAULT_CONFIG, store$3, store$2, store$1;
+var init_dist = __esm(() => {
+  DEFAULT_CONFIG = {
+    lang: undefined,
+    message: undefined,
+    abortEarly: undefined,
+    abortPipeEarly: undefined
+  };
+});
+
+// plugins/coordination/skills/coordinator/board-data.ts
+function parse(schema, value) {
+  const result = safeParse(schema, value, { abortEarly: true });
+  if (!result.success)
+    throw new Error(result.issues[0].message);
+  return result.output;
+}
+function githubURL(value, field = "link") {
+  const link = parse(text(field), value);
+  const url = new URL(link);
+  if (url.origin !== "https://github.com" || url.username || url.password || !/^\/[^/]+\/[^/]+\/(issues|pull)\/\d+$/.test(url.pathname)) {
+    throw new Error(`${field} must be an HTTPS GitHub issue or pull request URL.`);
+  }
+  return url;
+}
+function prURL(value) {
+  const url = githubURL(value, "pr");
+  if (url.pathname.split("/")[3] !== "pull") {
+    throw new Error("pr must be an HTTPS GitHub pull request URL.");
+  }
+  return url.href;
+}
+function handoffSchema(hasProject) {
+  const ids = new Set;
+  const task = pipe(object("Each task must be a JSON object."), fields({
+    id: text("task.id"),
+    goal: text("task.goal"),
+    next_action: text("task.next_action"),
+    repository: nullish(text("task.repository"))
+  }), check((task) => hasProject || task.repository != null, ({ input }) => `Task ${input.id} needs a repository or a handoff project.`), fields({ updated_at: timestamp("task.updated_at") }), check((task) => statuses.includes(task.status), ({ input }) => `Unknown status for task ${input.id}: ${input.status}`), check((task) => {
+    const seen = ids.has(task.id);
+    ids.add(task.id);
+    return !seen;
+  }, ({ input }) => `Duplicate task ID: ${input.id}`), fields({
+    worker: nullish(text("task.worker")),
+    blocker: nullish(text("task.blocker"))
+  }), check((task) => task.blocker == null || task.status === "blocked", ({ input }) => `Task ${input.id}: blocker is allowed only when status is blocked; clear it with --blocker null.`), fields({
+    brief: nullish(artifact("task.brief")),
+    result: nullish(artifact("task.result")),
+    pr: nullish(pipe(unknown(), via(prURL))),
+    links: nullish(array(pipe(unknown(), via((link) => githubURL(link, "task.links[]"))), "task.links must be an array."))
+  }));
+  return pipe(object("Handoff must be a JSON object."), fields({
+    id: text("id"),
+    project: nullish(text("project")),
+    role: nullish(text("role")),
+    goal: text("goal"),
+    updated_at: timestamp("updated_at"),
+    status: picklist(runStatuses, "Handoff needs a valid run status and a tasks array."),
+    tasks: array(task, "Handoff needs a valid run status and a tasks array.")
+  }));
+}
+function validate(data) {
+  parse(handoffSchema(data?.project != null), data);
+}
+var statuses, runStatuses, text = (field) => pipe(string(`${field} must be a non-empty string.`), check((value) => value.trim() !== "", `${field} must be a non-empty string.`)), timestamp = (field) => pipe(text(field), check((value) => /(Z|[+-]\d{2}:\d{2})$/.test(value) && Number.isFinite(Date.parse(value)), `${field} must be a timestamp with a timezone.`)), artifact = (field) => pipe(text(field), regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/, `${field} must be a filename in the state directory.`)), via = (check) => rawCheck(({ dataset, addIssue }) => {
+  try {
+    check(dataset.value);
+  } catch (error) {
+    addIssue({ message: error.message });
+  }
+}), object = (message) => custom((value) => !!value && typeof value === "object" && !Array.isArray(value), message), fields = (entries) => pipe(any(), transform((input) => ({
+  ...Object.fromEntries(Object.keys(entries).map((key) => [key, undefined])),
+  ...input
+})), looseObject(entries));
+var init_board_data = __esm(() => {
+  init_dist();
+  statuses = ["pending", "running", "verifying", "blocked", "done"];
+  runStatuses = ["active", "paused", "blocked", "finished"];
+});
+
 // plugins/coordination/skills/coordinator/handoff.ts
 var exports_handoff = {};
 __export(exports_handoff, {
@@ -496,7 +971,6 @@ __export(exports_handoff, {
 import { readFile } from "node:fs/promises";
 import { basename, extname, resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { validate } from "./board-data.mjs";
 function isObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -726,10 +1200,9 @@ Run with --help for usage.`);
   }
 }
 var import_write_file_atomic, errorCode = (error) => error.code, errorMessage = (error) => error.message;
-var init_handoff = __esm(async () => {
+var init_handoff = __esm(() => {
+  init_board_data();
   import_write_file_atomic = __toESM(require_lib(), 1);
-  if (basename(process.argv[1] ?? "") === "handoff.mjs")
-    await main(process.argv.slice(2));
 });
 
 // plugins/coordination/skills/coordinator/serve.ts
@@ -740,10 +1213,9 @@ __export(exports_serve, {
 import { createServer } from "node:http";
 import { readFile as readFile2, readdir, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename as basename2, dirname, join, resolve as resolve2 } from "node:path";
+import { dirname, join, resolve as resolve2 } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs as parseArgs2 } from "node:util";
-import { validate as validate2 } from "./board-data.mjs";
 async function serve(argv) {
   let options;
   try {
@@ -800,7 +1272,7 @@ No packages are required. Invalid arguments exit 2; startup failures exit 1.`);
       throw new HttpError(400, "Select a JSON handoff.");
     const data = JSON.parse(await readFile2(await localFile(file), "utf8"));
     try {
-      validate2(data);
+      validate(data);
     } catch (error) {
       throw new HttpError(400, `${file}: ${errorMessage2(error)}`);
     }
@@ -815,7 +1287,7 @@ No packages are required. Invalid arguments exit 2; startup failures exit 1.`);
         continue;
       try {
         const data = JSON.parse(await readFile2(await localFile(file), "utf8"));
-        validate2(data);
+        validate(data);
         boards.push({
           file,
           path: join(directory, file),
@@ -896,7 +1368,8 @@ function main2(argv) {
   });
 }
 var errorMessage2 = (error) => error.message, HttpError;
-var init_serve = __esm(async () => {
+var init_serve = __esm(() => {
+  init_board_data();
   HttpError = class HttpError extends Error {
     status;
     constructor(status, message) {
@@ -904,8 +1377,6 @@ var init_serve = __esm(async () => {
       this.status = status;
     }
   };
-  if (basename2(process.argv[1] ?? "") === "serve.mjs")
-    await main2(process.argv.slice(2));
 });
 
 // plugins/coordination/skills/coordinator/wait.ts
@@ -916,7 +1387,7 @@ __export(exports_wait, {
 import { createHash } from "node:crypto";
 import { watch } from "node:fs";
 import { readFile as readFile3 } from "node:fs/promises";
-import { basename as basename3, dirname as dirname2, resolve as resolve3 } from "node:path";
+import { basename as basename2, dirname as dirname2, resolve as resolve3 } from "node:path";
 import { parseArgs as parseArgs3 } from "node:util";
 async function readOptional2(file) {
   try {
@@ -938,7 +1409,7 @@ async function waitForResults(cursor, files) {
     const directory = dirname2(file);
     if (!directories.has(directory))
       directories.set(directory, new Set);
-    directories.get(directory).add(basename3(file));
+    directories.get(directory).add(basename2(file));
   }
   const watchers = [];
   let stopped = false;
@@ -1053,10 +1524,8 @@ function main3(argv) {
   });
 }
 var import_write_file_atomic2, errorMessage3 = (error) => error.message;
-var init_wait = __esm(async () => {
+var init_wait = __esm(() => {
   import_write_file_atomic2 = __toESM(require_lib(), 1);
-  if (basename3(process.argv[1] ?? "") === "wait.mjs")
-    await main3(process.argv.slice(2));
 });
 
 // plugins/coordination/skills/coordinator/coordinator.ts
@@ -1069,9 +1538,9 @@ Commands:
 
 Run a command with --help for its usage.`;
 var commands = {
-  handoff: () => init_handoff().then(() => exports_handoff),
-  serve: () => init_serve().then(() => exports_serve),
-  wait: () => init_wait().then(() => exports_wait)
+  handoff: () => Promise.resolve().then(() => (init_handoff(), exports_handoff)),
+  serve: () => Promise.resolve().then(() => (init_serve(), exports_serve)),
+  wait: () => Promise.resolve().then(() => (init_wait(), exports_wait))
 };
 var [command, ...args] = process.argv.slice(2);
 if (command === "-h" || command === "--help") {

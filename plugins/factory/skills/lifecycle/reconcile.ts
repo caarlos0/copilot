@@ -1,33 +1,19 @@
 import { execFile, execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { parseArgs, promisify } from "node:util";
-import { lastEvent, resolveAttention, sameId } from "./attention.mjs";
-import { resolveFactory, waiterPid } from "./broker.mjs";
-import { intervalMs, keepFirst, mergeRefusal, resourceId, sharesWork } from "./factory-data.mjs";
-import { defaultBranch } from "./default-branch.mjs";
-import { hooksInactive } from "./gate.mjs";
-import { scanProposals } from "./proposals.mjs";
-import { readJSON } from "./state-dir.mjs";
+import { lastEvent, resolveAttention, sameId } from "./attention.ts";
+import { resolveFactory, waiterPid } from "./broker.ts";
+import { intervalMs, keepFirst, mergeRefusal, resourceId, sharesWork, type Factory, type Task, type Worker } from "./factory-data.ts";
+import { defaultBranch } from "./default-branch.ts";
+import { hooksInactive } from "./gate.ts";
+import { scanProposals } from "./proposals.ts";
+import { readJSON } from "./state-dir.ts";
 
 const usage = "Usage: node factory.mjs reconcile FACTORY_FILE [--default-branch NAME] [--blocked-after 24h] [--attention-after 30m]";
 
-type Worker = { status?: string; session?: string; window?: string; pane?: string; brief?: string; result?: string; launched_at?: string };
-type Task = {
-  id: string;
-  state: string;
-  updated_at: string;
-  issue?: string;
-  pr?: string;
-  worktree?: { path?: string; created_by_run?: boolean };
-  workers?: Record<string, Worker | null>;
-  blocker?: { since: string; reason: string; class?: string; owner?: string };
-  resolution?: { outcome?: string };
-};
-type Rule = { id: string; last_run_at?: string; worker?: Worker };
-type Factory = { status?: string; rex_session?: string; tasks: Task[]; rules?: Rule[] };
 type Finding = Record<string, unknown>;
 type Live = { sessionGone: boolean; windows: string[] };
 
@@ -156,7 +142,8 @@ async function reconcile(file: string, branchOverride?: string, blockedAfter = i
   const missing: Finding[] = [];
   const checkMissing = (worker: Worker | null | undefined, finding: Finding) => {
     if (worker?.status !== "running" || !rex()) return;
-    if (!worker.window || !openWindows().some((id) => sameId(id, worker.window))) {
+    const window = worker.window;
+    if (!window || !openWindows().some((id) => sameId(id, window))) {
       missing.push({
         ...finding,
         window: worker.window ?? null,
@@ -276,7 +263,8 @@ async function reconcile(file: string, branchOverride?: string, blockedAfter = i
       checkMissing(worker, { kind: "worker-missing", rule: rule.id, role: "rule", worktree: null });
       continue;
     }
-    const window = worker?.window ? openWindows().find((id) => sameId(id, worker.window)) : undefined;
+    const windowId = worker?.window;
+    const window = windowId ? openWindows().find((id) => sameId(id, windowId)) : undefined;
     if (window || worker?.status === "running") {
       findings.push({ kind: "rule-worker-done", rule: rule.id, window: window ?? null, result: worker?.result });
     }
@@ -311,7 +299,7 @@ async function reconcile(file: string, branchOverride?: string, blockedAfter = i
     const newest = (proposal: (typeof decided)[number]) => ![...proposed, ...decided].some(({ result, at }) =>
       result === proposal.result && Date.parse(at) > Date.parse(proposal.at));
     for (const proposal of decided.filter(newest)) {
-      const result = await readJSON(join(directory, proposal.result));
+      const result = await readJSON(join(directory, proposal.result as string));
       if (!result?.change || result.decision) continue;
       findings.push({
         kind: "improve-decided-unapplied",
@@ -361,5 +349,3 @@ export async function main(argv: string[]) {
     process.exitCode = 1;
   }
 }
-
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) await main(process.argv.slice(2));

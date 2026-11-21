@@ -8,9 +8,9 @@ import { test, type TestContext } from "node:test";
 const script = join(import.meta.dirname, "factory.mjs");
 const window = "window:01a1ea3c-952d-7bdf-a621-95363a2bc34f";
 
-// The waiter check reads the PID's command line, so the PID must belong to a "broker.mjs wait" process.
+// The waiter check reads the PID's command line, so the PID must belong to a "factory.mjs broker wait" process.
 function fakeWaiter(t: TestContext) {
-  const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)", "broker.mjs", "wait"], { stdio: "ignore" });
+  const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)", "factory.mjs", "broker", "wait"], { stdio: "ignore" });
   t.after(() => child.kill());
   return child.pid;
 }

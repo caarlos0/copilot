@@ -123,7 +123,7 @@ async function board(t: TestContext, data: any = structuredClone(example), optio
   let intercept: Intercept | null = null;
   const location = new URL(options.search ?? "?file=example-handoff.json", server.url);
   const context = vm.createContext({
-    ...await import("./board-data.mjs"),
+    ...await import("./board-data.ts"),
     document: {
       createElement: (tag: string) => new Element(tag),
       getElementById: (id: string) => nodes[id],

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
 const script = join(import.meta.dirname, "factory.mjs");
-const load = () => import("./shot.mjs");
+const load = () => import("./shot.ts");
 
 test("parseShotArgs applies defaults", async () => {
   const { parseShotArgs } = await load();

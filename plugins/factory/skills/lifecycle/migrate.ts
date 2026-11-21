@@ -1,11 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
-import { realpathSync } from "node:fs";
 import { access, link, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
-import { countByState, defaultBudget, defaultLimits, format, githubResourceURL, githubURL, prURL, validate } from "./factory-data.mjs";
-import { stateFile } from "./state-dir.mjs";
+import { countByState, defaultBudget, defaultLimits, format, githubResourceURL, githubURL, prURL, validate, type State } from "./factory-data.ts";
+import { stateFile } from "./state-dir.ts";
 
 const sources = ["implementer", "coordinator"];
 
@@ -42,7 +40,7 @@ type Worker = {
 type Migrated = {
   id: string;
   title: string;
-  state: string;
+  state: State;
   updated_at: string;
   next_action: string;
   issue: string | null;
@@ -125,7 +123,7 @@ function mapTask(role: string, file: string, old: LegacyTask, project: string): 
   const issue = issueURLOf(old, details, links, project);
   if (issue && !links.includes(issue)) links.push(issue);
 
-  let state = "initial";
+  let state: State = "initial";
   if (old.status === "done") state = "resolved";
   else if (old.status === "blocked") state = "blocked";
   else if (pr && issue) state = "implementation";
@@ -418,11 +416,4 @@ It refuses to overwrite an existing factory.json, and stops when a legacy owner 
     }
   }
   console.log(JSON.stringify(summary, null, 2));
-}
-
-if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
-  await main(process.argv.slice(2)).catch((error) => {
-    console.error(error.message);
-    process.exitCode = 1;
-  });
 }

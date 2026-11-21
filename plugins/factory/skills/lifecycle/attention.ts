@@ -3,8 +3,8 @@ import { type FileHandle, open, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { emit, eventsFile, resolveFactory } from "./broker.mjs";
-import { readJSON } from "./state-dir.mjs";
+import { emit, eventsFile, resolveFactory } from "./broker.ts";
+import { readJSON } from "./state-dir.ts";
 
 type LogEvent = { type?: string; timestamp: string; data?: { toolName?: string; toolCallId?: string } };
 type AttentionEvent = {

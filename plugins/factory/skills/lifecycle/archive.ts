@@ -1,18 +1,9 @@
 import { mkdir, readdir, readFile, rm, stat } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import writeFileAtomic from "write-file-atomic";
-import { archiveFormat, githubResourceURL, validateArchive } from "./factory-data.mjs";
+import { archiveFormat, githubResourceURL, validateArchive, type Task } from "./factory-data.ts";
 
-type Task = {
-  id: string;
-  state: string;
-  updated_at: string;
-  issue?: string | null;
-  pr?: string | null;
-  feedback?: { id: string; acknowledged_id?: string } | null;
-};
 type Day = { format: string; project: string; day: string; tasks: Task[] };
 type Rule = { id: string; worker?: { status?: string } | null };
 type Artifact = { category: "worker" | "task" | "rule"; age: number; task?: string; rule?: string };
@@ -206,5 +197,3 @@ export async function main(argv: string[]) {
     process.exitCode = errorMessage(error) === usage ? 2 : 1;
   }
 }
-
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) await main(process.argv.slice(2));

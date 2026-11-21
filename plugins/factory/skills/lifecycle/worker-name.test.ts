@@ -4,10 +4,9 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 const script = join(import.meta.dirname, "factory.mjs");
-const workerName = join(import.meta.dirname, "worker-name.mjs");
 
 async function load() {
-  return (await import(workerName)).workerName;
+  return (await import("./worker-name.ts")).workerName;
 }
 
 test("maps each role to its verb", async () => {

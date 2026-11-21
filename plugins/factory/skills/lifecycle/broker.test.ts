@@ -9,7 +9,6 @@ import { test, type TestContext } from "node:test";
 type BrokerEvent = { id: string; type: string; task: string | null; source: string; data: any };
 type WaitOutput = { events: BrokerEvent[]; cursor: string; timeout?: boolean };
 
-const script = join(import.meta.dirname, "broker.mjs");
 const factoryScript = join(import.meta.dirname, "factory.mjs");
 const result = { task: "t1", data: JSON.stringify({ role: "implementation", outcome: "complete" }) };
 
@@ -340,7 +339,7 @@ test("factory.mjs writes emit task.moved, task.updated, and dashboard feedback e
   factory("--task", "issue-1", "--state", "investigation", "--note", "Worker started");
   factory("--task", "issue-1", "--head", "a".repeat(40));
 
-  const { update } = await import("./factory.mjs");
+  const { update } = await import("./tasks.ts");
   await update(f.factory, {
     task: "issue-1", state: "initial", note: "Look again", "expected-revision": "3",
   }, { operator: true });
@@ -416,7 +415,7 @@ test("attention events never wake a waiter that skips their source, and other re
   assert.deepEqual((await woken()).events.map(({ type, task }) => [type, task]),
     [["attention.requested", null], ["attention.resolved", null], ["worker.result", "t1"]]);
 
-  // reconcile.mjs and the sweep around the log must not trip over a task-less event.
+  // reconcile and the sweep around the log must not trip over a task-less event.
   await writeFile(f.factory, JSON.stringify({ status: "finished", tasks: [] }));
   const swept = spawnSync(process.execPath, [factoryScript, "reconcile", f.factory], { encoding: "utf8" });
   assert.equal(swept.status, 0, swept.stderr);
@@ -553,7 +552,7 @@ test("a recycled PID in the waiter file counts as no waiter, and a waiter-lookin
   await done();
 
   // The old bare-PID format is armed only when the command line is a broker waiter.
-  const lookalike = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)", script, "wait", f.factory], { stdio: "ignore" });
+  const lookalike = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)", factoryScript, "broker", "wait", f.factory], { stdio: "ignore" });
   t.after(() => lookalike.kill());
   await writeFile(pidFile, `${lookalike.pid}\n`);
   assert.deepEqual(JSON.parse(f.run("armed", f.factory).stdout), { armed: true, pid: lookalike.pid });
@@ -564,7 +563,7 @@ test("a waiter whose parent is gone (ppid 1) counts as no waiter", async (t) => 
   const bin = join(f.directory, "bin");
   await mkdir(bin);
   // A fake ps reports the parent PID from $FAKE_PPID, so the test needs no real ps or orphan.
-  await writeFile(join(bin, "ps"), `#!/bin/sh\necho "  $FAKE_PPID node broker.mjs wait /f.json"\n`, { mode: 0o755 });
+  await writeFile(join(bin, "ps"), `#!/bin/sh\necho "  $FAKE_PPID node factory.mjs broker wait /f.json"\n`, { mode: 0o755 });
   const armed = (ppid: number) => spawnSync(process.execPath, [factoryScript, "broker", "armed", f.factory], {
     encoding: "utf8",
     env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, FAKE_PPID: String(ppid) },
@@ -597,11 +596,11 @@ test("wait refuses to start when stdout goes to a file or /dev/null", async (t) 
 test("--due returns reconcile.due after the injected interval while the run is active", async (t) => {
   const f = await fixture(t);
   await writeFile(f.factory, JSON.stringify({ status: "active", rules: [] }));
-  const { waitForEvents } = await import(script);
+  const { waitForEvents } = await import("./broker.ts");
   const started = Date.now();
   const out = await waitForEvents(f.factory, { due: true, reconcile: 150, timeout: 10 });
   assert.ok(Date.now() - started >= 140, "the tick must wait for its window");
-  assert.deepEqual(out.events.map(({ id, type, task, source, data }: BrokerEvent) => [id, type, task, source, data]),
+  assert.deepEqual(out.events.map(({ id, type, task, source, data }) => [id, type, task, source, data]),
     [[null, "reconcile.due", null, "broker", { every: "5m" }]]);
   assert.equal(await stat(f.log).catch(() => null), null, "the tick is never stored");
 
@@ -614,7 +613,7 @@ test("--due returns reconcile.due after the injected interval while the run is a
 test("reconcile.due does not fire while paused or without --due, and resumes when active", async (t) => {
   const f = await fixture(t);
   await writeAtomic(f.factory, JSON.stringify({ status: "paused", rules: [] }));
-  const { waitForEvents } = await import(script);
+  const { waitForEvents } = await import("./broker.ts");
   let out = await waitForEvents(f.factory, { due: true, reconcile: 50, timeout: 0.4 });
   assert.equal(out.timeout, true);
   assert.deepEqual(out.events, []);
@@ -628,7 +627,7 @@ test("reconcile.due does not fire while paused or without --due, and resumes whe
   await new Promise((resolve) => setTimeout(resolve, 250));
   await writeAtomic(f.factory, JSON.stringify({ status: "active", rules: [] }));
   out = await pending;
-  assert.deepEqual(out.events.map(({ type }: BrokerEvent) => type), ["reconcile.due"]);
+  assert.deepEqual(out.events.map(({ type }) => type), ["reconcile.due"]);
 });
 
 test("improve events need no task, validate their data, and a waiter that skips improve still wakes for the decision", async (t) => {

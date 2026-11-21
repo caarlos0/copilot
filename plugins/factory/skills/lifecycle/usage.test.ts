@@ -33,7 +33,7 @@ const task = (workers: Record<string, { session?: unknown } | null>, state = "im
 ]) => ({ id: "issue-1", state, workers, history });
 
 test("sums models, credits, tokens and active time per worker and per task", async (t) => {
-  const { taskUsage } = (await import("./usage.mjs")) as typeof import("./usage.ts");
+  const { taskUsage } = await import("./usage.ts");
   const directory = await sessions(t, {
     [ids.a]: [event(0, "session.start"), record("m1", 1_500_000_000, 100, 10), record("m2", 2_250_000_000, 200, 20), event(5, "assistant.turn_end")],
     [ids.b]: [event(0, "session.start"), record("m2", 500_000_000, 50, 5), event(2, "assistant.turn_end")],
@@ -56,7 +56,7 @@ test("sums models, credits, tokens and active time per worker and per task", asy
 });
 
 test("falls back to tokens when a log has no credits, and the total follows", async (t) => {
-  const { taskUsage } = (await import("./usage.mjs")) as typeof import("./usage.ts");
+  const { taskUsage } = await import("./usage.ts");
   const directory = await sessions(t, {
     [ids.a]: [event(0, "session.start"), record("m1", 1_000_000_000, 10, 1)],
     [ids.b]: [event(0, "session.start"), record("m1", null, 20, 2)],
@@ -70,7 +70,7 @@ test("falls back to tokens when a log has no credits, and the total follows", as
 });
 
 test("a missing, unnamed, empty or foreign session is n/a, never an error", async (t) => {
-  const { taskUsage } = (await import("./usage.mjs")) as typeof import("./usage.ts");
+  const { taskUsage } = await import("./usage.ts");
   const directory = await sessions(t, { [ids.c]: [""] });
   const usage = await taskUsage(task({
     investigation: { session: ids.gone },
@@ -87,7 +87,7 @@ test("a missing, unnamed, empty or foreign session is n/a, never an error", asyn
 });
 
 test("a log that did not change is not read again", async (t) => {
-  const { sessionUsage } = await import("./usage.mjs");
+  const { sessionUsage } = await import("./usage.ts");
   const directory = await sessions(t, { [ids.a]: [event(0, "session.start"), record("m1", 1_000_000_000, 1, 1)] });
   const file = join(directory, ids.a, "events.jsonl");
   const before = await sessionUsage(ids.a, directory);
@@ -103,7 +103,7 @@ const worker = (n: number) => ({ session: uuid(n) });
 const history = [{ state: "initial", at: "2026-05-01T10:00:00Z" }, { state: "implementation", at: "2026-05-01T10:30:00Z" }];
 
 test("factoryUsage keeps task order and matches taskUsage for shared and missing sessions", async (t) => {
-  const { factoryUsage, taskUsage } = (await import("./usage.mjs")) as typeof import("./usage.ts");
+  const { factoryUsage, taskUsage } = await import("./usage.ts");
   const logs: Record<string, string[]> = {};
   for (let n = 1; n <= 9; n++) logs[uuid(n)] = [event(0, "session.start"), record("m", n * 1_000_000_000, n, 1), event(n, "assistant.turn_end")];
   const directory = await sessions(t, logs);
@@ -122,7 +122,7 @@ test("factoryUsage keeps task order and matches taskUsage for shared and missing
 });
 
 test("the usage cache is capped and a large run still returns every result", async (t) => {
-  const { cacheSize, factoryUsage } = (await import("./usage.mjs")) as typeof import("./usage.ts");
+  const { cacheSize, factoryUsage } = await import("./usage.ts");
   const count = 1100;
   const directory = await sessions(t, {});
   for (let n = 1; n <= count; n++) {

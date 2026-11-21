@@ -2,9 +2,8 @@ import { createReadStream } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
-import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
-import { readSessions, sessionID } from "./sessions.mjs";
+import { readSessions, sessionID } from "./sessions.ts";
 import type { SessionEntry } from "./sessions.ts";
 
 type LogEvent = {
@@ -43,7 +42,7 @@ const minutes = (ms: number) => Math.round(ms / 600) / 100;
 
 const commandPatterns = {
   sleep: /\bsleep\s+\d/,
-  gh_wait: /\bgh\s+wait\b|\bpr-watch\.mjs\b|\bfactory\.mjs\s+pr-watch\b/,
+  gh_wait: /\bgh\s+wait\b|\bfactory\.mjs\s+pr-watch\b/,
   watch: /--watch\b|\bgh\s+run\s+watch\b/,
 };
 const statusRead = /\bgh\s+(?:pr\s+(?:view|checks)|run\s+(?:view|list))\b/;
@@ -251,5 +250,3 @@ Exit: 0 success, 1 I/O or invalid registry, 2 usage.`);
     process.exitCode = 1;
   }
 }
-
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) await main(process.argv.slice(2));

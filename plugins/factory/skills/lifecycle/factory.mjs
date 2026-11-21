@@ -19,7 +19,7 @@ var __toESM = (mod, isNodeMode, target) => {
       return cached;
   }
   target = mod != null ? __create(__getProtoOf(mod)) : {};
-  const to = isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target;
+  const to = isNodeMode || !mod || !mod.__esModule || !__hasOwnProp.call(mod, "default") ? __defProp(target, "default", { value: mod, enumerable: true }) : target;
   if (mod && typeof mod === "object" || typeof mod === "function") {
     for (let key of __getOwnPropNames(mod))
       if (!__hasOwnProp.call(to, key))
@@ -46,15 +46,18 @@ var __export = (target, all) => {
       set: __exportSetter.bind(all, name)
     });
 };
-var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
+var __esm = (fn, res, err) => () => {
+  if (fn)
+    try {
+      res = fn(fn = 0);
+    } catch (e) {
+      err = [e];
+    }
+  if (err)
+    throw err[0];
+  return res;
+};
 var __require = /* @__PURE__ */ createRequire(import.meta.url);
-
-// plugins/factory/skills/lifecycle/conflict.ts
-var ConflictError;
-var init_conflict = __esm(() => {
-  ConflictError = class ConflictError extends Error {
-  };
-});
 
 // plugins/factory/node_modules/signal-exit/dist/cjs/signals.js
 var require_signals = __commonJS(function(exports) {
@@ -79,7 +82,7 @@ var require_cjs = __commonJS(function(exports) {
   Object.defineProperty(exports, "signals", { enumerable: true, get: function() {
     return signals_js_1.signals;
   } });
-  var processOk = (process3) => !!process3 && typeof process3 === "object" && typeof process3.removeListener === "function" && typeof process3.emit === "function" && typeof process3.reallyExit === "function" && typeof process3.listeners === "function" && typeof process3.kill === "function" && typeof process3.pid === "number" && typeof process3.on === "function";
+  var processOk = (process2) => !!process2 && typeof process2 === "object" && typeof process2.removeListener === "function" && typeof process2.emit === "function" && typeof process2.reallyExit === "function" && typeof process2.listeners === "function" && typeof process2.kill === "function" && typeof process2.pid === "number" && typeof process2.on === "function";
   var kExitEmitter = Symbol.for("signal-exit emitter");
   var global = globalThis;
   var ObjectDefineProperty = Object.defineProperty.bind(Object);
@@ -1250,7 +1253,7 @@ function isWaiter(pid) {
   try {
     const line = execFileSync2("ps", ["-o", "ppid=,command=", "-p", String(pid)], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
     const [, ppid, command] = line.match(/^\s*(\d+)\s+(.*)$/s) ?? [];
-    return command !== undefined && /(?:broker\.mjs|factory\.mjs\s+broker)\s+wait\b/.test(command) && Number(ppid) > 1;
+    return command !== undefined && /factory\.mjs\s+broker\s+wait\b/.test(command) && Number(ppid) > 1;
   } catch {
     return true;
   }
@@ -1264,15 +1267,15 @@ function stdoutUnread() {
   }
 }
 async function waiterPid(factory) {
-  let text2;
+  let text;
   try {
-    text2 = await readFile3(waiterFile(factory), "utf8");
+    text = await readFile3(waiterFile(factory), "utf8");
   } catch (error) {
     if (error.code === "ENOENT")
       return null;
     throw error;
   }
-  const pid = Number.parseInt(text2, 10);
+  const pid = Number.parseInt(text, 10);
   return Number.isInteger(pid) && pid > 0 && isWaiter(pid) ? pid : null;
 }
 async function claimWaiter(factory) {
@@ -1330,11 +1333,11 @@ function validateEvent({ type, task, source, data }) {
     validateImprove(type, data);
 }
 function validateImprove(type, data) {
-  const text2 = (key) => {
+  const text = (key) => {
     if (typeof data[key] !== "string" || data[key] === "")
       throw new UsageError(`${type} data "${key}" must be a non-empty string.`);
   };
-  text2("proposal_id");
+  text("proposal_id");
   if (type === "improve.decided") {
     if (!decisions.includes(data.decision))
       throw new UsageError(`${type} decision must be one of: ${decisions.join(", ")}.`);
@@ -1343,7 +1346,7 @@ function validateImprove(type, data) {
     return;
   }
   for (const key of ["rule", "title", "result"])
-    text2(key);
+    text(key);
   if (typeof data.evidence !== "string")
     throw new UsageError(`${type} data "evidence" must be a string.`);
   if (data.evidence.length > maxAttentionText)
@@ -1357,20 +1360,20 @@ function validateImprove(type, data) {
     throw new UsageError(`${type} recommended must be one of: ${answers.join(", ")}.`);
 }
 function validateAttention(type, data) {
-  const text2 = (key) => {
+  const text = (key) => {
     if (typeof data[key] !== "string")
       throw new UsageError(`${type} data "${key}" must be a string.`);
   };
-  text2("session");
+  text("session");
   if (data.session === "")
     throw new UsageError(`${type} data "session" must not be empty.`);
   for (const key of ["role", "pane"]) {
     if (data[key] !== undefined)
-      text2(key);
+      text(key);
   }
   if (type === "attention.resolved")
     return;
-  text2("text");
+  text("text");
   if (data.text.length > maxAttentionText)
     throw new UsageError(`${type} data "text" must have at most ${maxAttentionText} characters.`);
   if (!attentionKinds.includes(data.kind))
@@ -1472,10 +1475,10 @@ async function readEvents(file, offset) {
       throw new Error(`Cursor ${offset} is past the end of the log (${length} bytes).`);
     const buffer = Buffer.alloc(length - offset);
     const { bytesRead } = await handle.read(buffer, 0, buffer.length, offset);
-    const text2 = buffer.subarray(0, bytesRead);
-    const end = text2.lastIndexOf(10) + 1;
+    const text = buffer.subarray(0, bytesRead);
+    const end = text.lastIndexOf(10) + 1;
     const events = [];
-    for (const line of text2.subarray(0, end).toString("utf8").split(`
+    for (const line of text.subarray(0, end).toString("utf8").split(`
 `)) {
       if (!line)
         continue;
@@ -1794,6 +1797,13 @@ armed   Read-only. Prints {"armed":true,"pid":N} and exits 0 when a waiter for t
 The command prints progress and errors to stderr. Exit: 0 success, 1 operational failure, 2 invalid usage.`;
 });
 
+// plugins/factory/skills/lifecycle/conflict.ts
+var ConflictError;
+var init_conflict = __esm(() => {
+  ConflictError = class ConflictError extends Error {
+  };
+});
+
 // plugins/factory/skills/lifecycle/sessions.ts
 import { appendFile, readFile as readFile4, readdir as readdir2, realpath as realpath2, stat as stat3 } from "node:fs/promises";
 import { homedir as homedir2 } from "node:os";
@@ -1811,15 +1821,15 @@ function entry(line, file, number) {
   return item;
 }
 async function readSessions(file) {
-  let text2;
+  let text;
   try {
-    text2 = await readFile4(file, "utf8");
+    text = await readFile4(file, "utf8");
   } catch (error) {
     if (error.code === "ENOENT")
       return [];
     throw error;
   }
-  return text2.split(`
+  return text.split(`
 `).flatMap((line, index) => line ? [entry(line, file, index + 1)] : []);
 }
 async function recordSessions(file, entries) {
@@ -1905,12 +1915,12 @@ function normalizedURL(value) {
   }
 }
 function archivedMessage(id, matches) {
-  const lines = matches.map(({ task, day: day2 }) => {
+  const lines = matches.map(({ task, day }) => {
     const outcome = task.resolution ? `${task.resolution.outcome}, ` : "";
     const revision = task.revision ?? 0;
     const fence = task.feedback ? ` --feedback-id ${task.feedback.id}` : "";
     const action = task.resolution?.outcome === "merged" ? "The task is merged. Do not reopen it. Skip it, or file a new issue and a new task." : `Restore with: --task ${task.id} --restore --state initial --note WHY --expected-revision ${revision}${fence}`;
-    return `- ${task.id} "${task.title}" (${outcome}archived ${day2}, revision ${revision}). ${action}`;
+    return `- ${task.id} "${task.title}" (${outcome}archived ${day}, revision ${revision}). ${action}`;
   });
   return `Task ${id} matches archived work. Ask the user to restore it or skip it. Do not add a duplicate task.
 ${lines.join(`
@@ -1952,7 +1962,7 @@ function newTask(values, now) {
 function checkNotLinked(tasks, values) {
   for (const option of ["issue", "pr"]) {
     const id = resourceId(values[option]);
-    const owner = id && tasks.find((task) => task.state !== "resolved" && task.links.some((link2) => resourceId(link2) === id));
+    const owner = id && tasks.find((task) => task.state !== "resolved" && task.links.some((link) => resourceId(link) === id));
     if (owner) {
       throw new Error(`Task ${values.task}: ${values[option]} is already linked from open task ${owner.id} "${owner.title}". Work on ${owner.id}. Do not add a duplicate task. If two tasks hold the same work, merge them with --merge-task KEEP --from OTHER.`);
     }
@@ -2269,7 +2279,7 @@ async function writeFactory(file, values, operator, source) {
       }
     }
     const at = values["task-updated-at"] ?? now;
-    const before = restoring ? archived.task : addingTask ? newTask(values, at) : tasks.find((task2) => task2.id === values.task);
+    const before = restoring ? archived.task : addingTask ? newTask(values, at) : tasks.find((task) => task.id === values.task);
     const revision = before.revision ?? 0;
     if (values["expected-revision"] !== undefined) {
       if (!/^\d+$/.test(values["expected-revision"]) || !Number.isSafeInteger(Number(values["expected-revision"]))) {
@@ -2724,10 +2734,10 @@ async function tailEvents(file, since) {
     throw error;
   }
   try {
-    const { size: size2 } = await handle.stat();
+    const { size } = await handle.stat();
     for (let bytes = tailBytes;; bytes *= 4) {
-      const start = Math.max(0, size2 - bytes);
-      const buffer = Buffer.alloc(size2 - start);
+      const start = Math.max(0, size - bytes);
+      const buffer = Buffer.alloc(size - start);
       const { bytesRead } = await handle.read(buffer, 0, buffer.length, start);
       const lines = buffer.subarray(0, bytesRead).toString("utf8").split(`
 `);
@@ -2739,7 +2749,7 @@ async function tailEvents(file, since) {
           events.push(JSON.parse(line));
         } catch {}
       }
-      const oldest = events.map(({ timestamp: timestamp2 }) => Date.parse(timestamp2)).find(Number.isFinite);
+      const oldest = events.map(({ timestamp }) => Date.parse(timestamp)).find(Number.isFinite);
       if (start === 0 || bytes >= maxTailBytes || oldest !== undefined && oldest < since - lookBackMs)
         return events;
     }
@@ -2759,14 +2769,14 @@ async function answerTimes(session, since) {
     return [];
   const events = await tailEvents(join5(sessionState(), session, "events.jsonl"), since);
   const askUser = new Set(events.filter(({ type, data }) => type === "tool.execution_start" && data?.toolName === "ask_user").map(({ data }) => data?.toolCallId));
-  return events.filter(({ type, data }) => type === "permission.completed" || type === "tool.execution_complete" && askUser.has(data?.toolCallId)).map(({ timestamp: timestamp2 }) => Date.parse(timestamp2)).filter(Number.isFinite);
+  return events.filter(({ type, data }) => type === "permission.completed" || type === "tool.execution_complete" && askUser.has(data?.toolCallId)).map(({ timestamp }) => Date.parse(timestamp)).filter(Number.isFinite);
 }
 async function scanStamp(file, sessions = []) {
   const paths = [eventsFile(file), ...sessions.filter((session) => /^[\w-]+$/.test(session)).map((session) => join5(sessionState(), session, "events.jsonl"))];
   return (await Promise.all(paths.map(async (path) => {
     try {
-      const { size: size2, mtimeMs } = await stat5(path);
-      return `${size2}:${mtimeMs}`;
+      const { size, mtimeMs } = await stat5(path);
+      return `${size}:${mtimeMs}`;
     } catch (error) {
       if (errorCode2(error) === "ENOENT")
         return "none";
@@ -2784,16 +2794,16 @@ async function liveBlocks() {
   }
 }
 async function scanAttention(file, { now = Date.now(), panes } = {}) {
-  let text2;
+  let text;
   try {
-    text2 = await readFile6(eventsFile(file), "utf8");
+    text = await readFile6(eventsFile(file), "utf8");
   } catch (error) {
     if (errorCode2(error) === "ENOENT")
       return { open: [], resolved: [] };
     throw error;
   }
   const requests = new Map;
-  for (const line of text2.split(`
+  for (const line of text.split(`
 `)) {
     if (!line.includes('"attention.'))
       continue;
@@ -2822,19 +2832,19 @@ async function scanAttention(file, { now = Date.now(), panes } = {}) {
   for (const { at, data } of requests.values()) {
     firstAsked.set(data.session, Math.min(firstAsked.get(data.session) ?? Infinity, Date.parse(at)));
   }
-  const answers2 = new Map;
+  const answers = new Map;
   let live = panes ? panes.map((id) => ({ id, session: null })) : panes;
-  const open4 = [];
+  const open = [];
   const resolved = [];
   for (const event of requests.values()) {
     const { session, kind, text: message, role = null, pane = null, options = [] } = event.data;
     const task = event.task ?? event.data.task ?? null;
     const item = { id: event.id, at: event.at, session, task, role, kind, text: message, options, pane, title: titles.get(task) ?? null };
     const at = Date.parse(event.at);
-    if (!answers2.has(session))
-      answers2.set(session, await answerTimes(session, firstAsked.get(session)));
+    if (!answers.has(session))
+      answers.set(session, await answerTimes(session, firstAsked.get(session)));
     let reason = null;
-    if (answers2.get(session).some((time) => time > at))
+    if (answers.get(session).some((time) => time > at))
       reason = "answered";
     else if (now - at > expireMs)
       reason = "expired";
@@ -2850,9 +2860,9 @@ async function scanAttention(file, { now = Date.now(), panes } = {}) {
     if (reason)
       resolved.push({ item, reason });
     else
-      open4.push(item);
+      open.push(item);
   }
-  return { open: open4, resolved };
+  return { open, resolved };
 }
 async function resolveAttention(file, { source, ...options }) {
   const scan = await scanAttention(file, options);
@@ -2964,17 +2974,17 @@ var init_gate = __esm(() => {
 // plugins/factory/skills/lifecycle/proposals.ts
 import { readFile as readFile7 } from "node:fs/promises";
 async function scanProposals(file) {
-  let text2;
+  let text;
   try {
-    text2 = await readFile7(eventsFile(file), "utf8");
+    text = await readFile7(eventsFile(file), "utf8");
   } catch (error) {
     if (error.code === "ENOENT")
       return { open: [], decided: [] };
     throw error;
   }
   const proposals = new Map;
-  const decisions2 = new Map;
-  for (const line of text2.split(`
+  const decisions = new Map;
+  for (const line of text.split(`
 `)) {
     if (!line.includes('"improve.'))
       continue;
@@ -2989,29 +2999,29 @@ async function scanProposals(file) {
       continue;
     if (event.type === "improve.proposed")
       proposals.set(id, event);
-    else if (event.type === "improve.decided" && !decisions2.has(id))
-      decisions2.set(id, event);
+    else if (event.type === "improve.decided" && !decisions.has(id))
+      decisions.set(id, event);
   }
-  const open4 = [];
+  const open = [];
   const decided = [];
   for (const [id, event] of proposals) {
     const { rule, change, title, evidence, recommended, result } = event.data;
     const proposal = { id, rule, kind: change, title, evidence, recommended, result, at: event.at };
-    const decision = decisions2.get(id);
+    const decision = decisions.get(id);
     if (decision)
       decided.push({ ...proposal, decision: decision.data.decision, decided_at: decision.at });
     else
-      open4.push(proposal);
+      open.push(proposal);
   }
   const byTime = (a, b) => Date.parse(a.at) - Date.parse(b.at);
-  return { open: open4.sort(byTime), decided };
+  return { open: open.sort(byTime), decided };
 }
 async function decideProposal(file, id, decision, note) {
-  const { open: open4, decided } = await scanProposals(file);
+  const { open, decided } = await scanProposals(file);
   const done = decided.find((proposal) => proposal.id === id);
   if (done)
     return { recorded: false, decision: done.decision };
-  if (!open4.some((proposal) => proposal.id === id))
+  if (!open.some((proposal) => proposal.id === id))
     return null;
   const data = { proposal_id: id, decision, ...note ? { note } : {} };
   await emit(await resolveFactory(file), { type: "improve.decided", source: "dashboard", data });
@@ -3056,13 +3066,13 @@ async function closedIssues(pr) {
   }
 }
 async function duplicateTasks(file, tasks) {
-  const candidates2 = tasks.filter((task) => !mergeRefusal(task));
-  const pairs = candidates2.flatMap((a, i) => candidates2.slice(i + 1).filter((b) => sharesWork(a, b)).map((b) => [a, b]));
-  const open4 = candidates2.filter((task) => task.state !== "resolved" && task.pr && !pairs.some((pair) => pair.includes(task)));
-  const closed = await Promise.all(open4.map((task) => closedIssues(task.pr)));
-  open4.forEach((task, i) => {
+  const candidates = tasks.filter((task) => !mergeRefusal(task));
+  const pairs = candidates.flatMap((a, i) => candidates.slice(i + 1).filter((b) => sharesWork(a, b)).map((b) => [a, b]));
+  const open = candidates.filter((task) => task.state !== "resolved" && task.pr && !pairs.some((pair) => pair.includes(task)));
+  const closed = await Promise.all(open.map((task) => closedIssues(task.pr)));
+  open.forEach((task, i) => {
     for (const url of closed[i].filter(resourceId)) {
-      for (const other of candidates2.filter((item) => item !== task && sharesWork({ issue: url, links: [] }, item))) {
+      for (const other of candidates.filter((item) => item !== task && sharesWork({ issue: url, links: [] }, item))) {
         pairs.push([task, other]);
       }
     }
@@ -3104,9 +3114,9 @@ async function reconcile(file, branchOverride, blockedAfter = intervalMs("24h"),
   const directory = dirname5(file);
   const findings = [];
   const errors = [];
-  const open4 = factory.tasks.filter((task) => task.state !== "resolved");
-  if ((factory.status === "active" || open4.length > 0) && await waiterPid(await resolveFactory(file)) === null) {
-    findings.push({ kind: "no-waiter", status: factory.status ?? null, open: open4.length });
+  const open = factory.tasks.filter((task) => task.state !== "resolved");
+  if ((factory.status === "active" || open.length > 0) && await waiterPid(await resolveFactory(file)) === null) {
+    findings.push({ kind: "no-waiter", status: factory.status ?? null, open: open.length });
   }
   const inactive = hooksInactive(file);
   if (inactive)
@@ -3130,7 +3140,8 @@ async function reconcile(file, branchOverride, blockedAfter = intervalMs("24h"),
   const checkMissing = (worker, finding) => {
     if (worker?.status !== "running" || !rex())
       return;
-    if (!worker.window || !openWindows().some((id) => sameId(id, worker.window))) {
+    const window = worker.window;
+    if (!window || !openWindows().some((id) => sameId(id, window))) {
       missing.push({
         ...finding,
         window: worker.window ?? null,
@@ -3140,7 +3151,7 @@ async function reconcile(file, branchOverride, blockedAfter = intervalMs("24h"),
       });
     }
   };
-  for (const task of open4) {
+  for (const task of open) {
     for (const [role, worker] of Object.entries(task.workers ?? {})) {
       const result = worker?.result ? await readJSON(join7(directory, worker.result)) : null;
       if (result?.outcome === "complete" && Date.parse(result.updated_at) > Date.parse(task.updated_at)) {
@@ -3236,15 +3247,16 @@ async function reconcile(file, branchOverride, blockedAfter = intervalMs("24h"),
   }
   for (const rule of factory.rules ?? []) {
     const worker = rule.worker;
-    const file2 = worker?.result ? join7(directory, worker.result) : null;
-    const result = file2 ? await readJSON(file2) : null;
-    const at = result && (Date.parse(result.updated_at) || (await stat6(file2)).mtimeMs);
+    const file = worker?.result ? join7(directory, worker.result) : null;
+    const result = file ? await readJSON(file) : null;
+    const at = result && (Date.parse(result.updated_at) || (await stat6(file)).mtimeMs);
     const finished = result?.outcome === "complete" && (!rule.last_run_at || at > Date.parse(rule.last_run_at));
     if (!finished) {
       checkMissing(worker, { kind: "worker-missing", rule: rule.id, role: "rule", worktree: null });
       continue;
     }
-    const window = worker?.window ? openWindows().find((id) => sameId(id, worker.window)) : undefined;
+    const windowId = worker?.window;
+    const window = windowId ? openWindows().find((id) => sameId(id, windowId)) : undefined;
     if (window || worker?.status === "running") {
       findings.push({ kind: "rule-worker-done", rule: rule.id, window: window ?? null, result: worker?.result });
     }
@@ -3353,14 +3365,14 @@ __export(exports_session_metrics, {
 });
 import { createReadStream } from "node:fs";
 import { homedir as homedir4 } from "node:os";
-import { join as join8, resolve as resolve6 } from "node:path";
+import { join as join8, resolve as resolve5 } from "node:path";
 import { createInterface } from "node:readline";
 import { parseArgs as parseArgs5 } from "node:util";
 async function measure(lines, from = null) {
   const tools = {};
   const calls = new Map;
   const commands = { sleep: 0, gh_wait: 0, watch: 0, status_reads: 0 };
-  const usage4 = { cost: 0, nano_aiu: 0, input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, model_seconds: 0 };
+  const usage = { cost: 0, nano_aiu: 0, input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, model_seconds: 0 };
   const models = new Set;
   const idle = { ms: 0, over_10_minutes: 0, longest: 0 };
   let userMessages = 0;
@@ -3428,12 +3440,12 @@ async function measure(lines, from = null) {
         tools[calls.get(data.toolCallId)].failures += 1;
     } else if (event.type === "session.usage_record" && data.usage) {
       const item = data.usage;
-      usage4.cost += item.cost ?? 0;
-      usage4.nano_aiu += item.copilotUsage?.totalNanoAiu ?? 0;
-      usage4.input_tokens += item.inputTokens ?? 0;
-      usage4.output_tokens += item.outputTokens ?? 0;
-      usage4.cache_read_tokens += item.cacheReadTokens ?? 0;
-      usage4.model_seconds += (item.duration ?? 0) / 1000;
+      usage.cost += item.cost ?? 0;
+      usage.nano_aiu += item.copilotUsage?.totalNanoAiu ?? 0;
+      usage.input_tokens += item.inputTokens ?? 0;
+      usage.output_tokens += item.outputTokens ?? 0;
+      usage.cache_read_tokens += item.cacheReadTokens ?? 0;
+      usage.model_seconds += (item.duration ?? 0) / 1000;
       if (item.model)
         models.add(item.model);
     }
@@ -3449,7 +3461,7 @@ async function measure(lines, from = null) {
     idle: { minutes: minutes(idle.ms), over_10_minutes: idle.over_10_minutes, longest_minutes: minutes(idle.longest) },
     tools,
     commands,
-    usage: { ...usage4, model_seconds: Math.round(usage4.model_seconds), models: [...models].sort() },
+    usage: { ...usage, model_seconds: Math.round(usage.model_seconds), models: [...models].sort() },
     ...from === null ? {} : { started_before_window: began !== null && began < from }
   };
 }
@@ -3489,16 +3501,16 @@ async function report(entries, directory, activeSince = null) {
   const from = activeSince === null ? null : Date.parse(activeSince);
   const sessions = [];
   const missing = [];
-  for (const entry2 of entries) {
+  for (const entry of entries) {
     try {
-      const metrics = await measureFile(join8(directory, entry2.id, "events.jsonl"), from);
+      const metrics = await measureFile(join8(directory, entry.id, "events.jsonl"), from);
       if (from !== null && metrics.events === 0)
         continue;
-      sessions.push({ id: entry2.id, role: entry2.role, task: entry2.task, rule: entry2.rule, ...metrics });
+      sessions.push({ id: entry.id, role: entry.role, task: entry.task, rule: entry.rule, ...metrics });
     } catch (error) {
       if (error.code !== "ENOENT")
         throw error;
-      missing.push(entry2.id);
+      missing.push(entry.id);
     }
   }
   const window = from === null ? {} : {
@@ -3563,8 +3575,8 @@ Run with --help for usage.`);
     return;
   }
   try {
-    const entries = values.registry === undefined ? positionals.map((id) => ({ id })) : (await readSessions(resolve6(values.registry))).filter((entry2) => values.since === undefined || entry2.role === "factory" || Date.parse(entry2.at) >= Date.parse(values.since));
-    console.log(JSON.stringify(await report(entries, resolve6(values.directory), values["active-since"] ?? null), null, 2));
+    const entries = values.registry === undefined ? positionals.map((id) => ({ id })) : (await readSessions(resolve5(values.registry))).filter((entry) => values.since === undefined || entry.role === "factory" || Date.parse(entry.at) >= Date.parse(values.since));
+    console.log(JSON.stringify(await report(entries, resolve5(values.directory), values["active-since"] ?? null), null, 2));
   } catch (error) {
     console.error(error.message);
     process.exitCode = 1;
@@ -3576,7 +3588,7 @@ var init_session_metrics = __esm(() => {
   idleOver = 10 * 60000;
   commandPatterns = {
     sleep: /\bsleep\s+\d/,
-    gh_wait: /\bgh\s+wait\b|\bpr-watch\.mjs\b|\bfactory\.mjs\s+pr-watch\b/,
+    gh_wait: /\bgh\s+wait\b|\bfactory\.mjs\s+pr-watch\b/,
     watch: /--watch\b|\bgh\s+run\s+watch\b/
   };
   statusRead = /\bgh\s+(?:pr\s+(?:view|checks)|run\s+(?:view|list))\b/;
@@ -3585,31 +3597,31 @@ var init_session_metrics = __esm(() => {
 // plugins/factory/skills/lifecycle/usage.ts
 import { stat as stat7 } from "node:fs/promises";
 import { join as join9 } from "node:path";
-function remember(file, entry2) {
+function remember(file, entry) {
   cache.delete(file);
-  cache.set(file, entry2);
+  cache.set(file, entry);
   if (cache.size > maxCached)
     cache.delete(cache.keys().next().value);
 }
 async function readLog(file) {
   try {
-    const { mtimeMs, size: size2 } = await stat7(file);
-    if (size2 > maxLogBytes)
+    const { mtimeMs, size } = await stat7(file);
+    if (size > maxLogBytes)
       return null;
-    const stamp = `${mtimeMs}-${size2}`;
+    const stamp = `${mtimeMs}-${size}`;
     const hit = cache.get(file);
     if (hit && (hit.stamp === stamp || Date.now() - hit.at < refreshMs))
       return hit.usage;
     if (!reading.has(file)) {
       reading.set(file, measureFile(file).then((metrics) => {
-        const { usage: usage4 } = metrics;
-        const credits = usage4.nano_aiu > 0 ? Math.round(usage4.nano_aiu / 1e7) / 100 : null;
+        const { usage } = metrics;
+        const credits = usage.nano_aiu > 0 ? Math.round(usage.nano_aiu / 1e7) / 100 : null;
         const value = metrics.events === 0 ? null : {
-          models: usage4.models,
+          models: usage.models,
           credits,
           usd: usdOf(credits),
-          input_tokens: usage4.input_tokens,
-          output_tokens: usage4.output_tokens,
+          input_tokens: usage.input_tokens,
+          output_tokens: usage.output_tokens,
           active_minutes: metrics.wall_minutes
         };
         remember(file, { stamp, at: Date.now(), usage: value });
@@ -3626,24 +3638,24 @@ function total(items) {
   if (!found.length)
     return null;
   const credited = found.every((item) => item.credits !== null);
-  const credits = credited ? Math.round(found.reduce((sum2, item) => sum2 + item.credits, 0) * 100) / 100 : null;
+  const credits = credited ? Math.round(found.reduce((sum, item) => sum + item.credits, 0) * 100) / 100 : null;
   return {
     models: [...new Set(found.flatMap((item) => item.models))].sort(),
     credits,
     usd: usdOf(credits),
-    input_tokens: found.reduce((sum2, item) => sum2 + item.input_tokens, 0),
-    output_tokens: found.reduce((sum2, item) => sum2 + item.output_tokens, 0),
-    active_minutes: Math.round(found.reduce((sum2, item) => sum2 + item.active_minutes, 0) * 100) / 100
+    input_tokens: found.reduce((sum, item) => sum + item.input_tokens, 0),
+    output_tokens: found.reduce((sum, item) => sum + item.output_tokens, 0),
+    active_minutes: Math.round(found.reduce((sum, item) => sum + item.active_minutes, 0) * 100) / 100
   };
 }
-async function taskUsage(task, directory, read2 = sessionUsage) {
+async function taskUsage(task, directory, read = sessionUsage) {
   const workers = {};
   const seen = new Map;
   for (const [role, worker] of Object.entries(task.workers)) {
     if (!worker)
       continue;
     const id = sessionID(worker.session);
-    workers[role] = id === null ? null : await read2(id, directory);
+    workers[role] = id === null ? null : await read(id, directory);
     if (id !== null)
       seen.set(id, workers[role]);
   }
@@ -3657,13 +3669,13 @@ async function taskUsage(task, directory, read2 = sessionUsage) {
 async function mapLimit(items, limit, fn) {
   const results = new Array(items.length);
   let next = 0;
-  const run2 = async () => {
+  const run = async () => {
     while (next < items.length) {
       const index = next++;
       results[index] = await fn(items[index]);
     }
   };
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, run2));
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, run));
   return results;
 }
 async function factoryUsage(data, directory) {
@@ -3678,11 +3690,11 @@ async function factoryUsage(data, directory) {
   const list = [...ids];
   const results = await mapLimit(list, readers, (id) => sessionUsage(id, directory));
   const measured = new Map(list.map((id, index) => [id, results[index]]));
-  const read2 = (id) => measured.get(id);
-  const usage4 = {};
+  const read = (id) => measured.get(id);
+  const usage = {};
   for (const task of data.tasks)
-    usage4[task.id] = await taskUsage(task, directory, read2);
-  return usage4;
+    usage[task.id] = await taskUsage(task, directory, read);
+  return usage;
 }
 var maxLogBytes, refreshMs = 30000, readers = 4, maxCached = 1024, usdPerCredit = 0.01, usdOf = (credits) => credits === null ? null : Math.round(credits * usdPerCredit * 1e4) / 1e4, cache, reading, sessionUsage = (session, directory) => {
   const id = sessionID(session);
@@ -3705,12 +3717,12 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 import { readFile as readFile9, readdir as readdir3, realpath as realpath4, stat as stat8 } from "node:fs/promises";
 import { homedir as homedir5, networkInterfaces } from "node:os";
-import { dirname as dirname6, join as join10, resolve as resolve7 } from "node:path";
+import { dirname as dirname6, join as join10, resolve as resolve6 } from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 import { parseArgs as parseArgs6 } from "node:util";
 import { gzipSync } from "node:zlib";
 function lanAddresses() {
-  return Object.values(networkInterfaces()).flat().filter((entry2) => entry2 && entry2.family === "IPv4" && !entry2.internal).map((entry2) => entry2.address);
+  return Object.values(networkInterfaces()).flat().filter((entry) => entry && entry.family === "IPv4" && !entry.internal).map((entry) => entry.address);
 }
 async function persistedToken(path) {
   try {
@@ -3779,7 +3791,7 @@ To stop the server, press Ctrl+C. The server needs no packages.
 An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
     return;
   }
-  const checked = options.directory ? [resolve7(options.directory)] : candidates(homedir5());
+  const checked = options.directory ? [resolve6(options.directory)] : candidates(homedir5());
   let directories = [];
   async function resolveDirectories() {
     const found = [];
@@ -3801,7 +3813,7 @@ An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
     if (!value || value.includes("\x00"))
       throw new HttpError(400, "A filename is required.");
     for (const { configured, directory } of directories) {
-      const candidate = resolve7(configured, folder, value);
+      const candidate = resolve6(configured, folder, value);
       if (dirname6(candidate) !== join10(directory, folder) && dirname6(candidate) !== join10(configured, folder)) {
         throw new HttpError(403, "File must be directly inside the configured state directory.");
       }
@@ -3826,8 +3838,8 @@ An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
       throw new HttpError(400, "Choose a <owner.repo>-factory.json file.");
     }
     const target = await localFile(file);
-    const { mtimeNs, size: size2, ino } = await stat8(target, { bigint: true });
-    return { file, target, tag: `"${[mtimeNs, size2, ino].map((value) => value.toString(36)).join("-")}"` };
+    const { mtimeNs, size, ino } = await stat8(target, { bigint: true });
+    return { file, target, tag: `"${[mtimeNs, size, ino].map((value) => value.toString(36)).join("-")}"` };
   }
   async function readFactory({ file, target, tag }) {
     const cached = parsed.get(target);
@@ -3852,10 +3864,10 @@ An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
         if (last && Date.now() - last.at < scanTtlMs && last.stamp === await scanStamp(target, last.sessions)) {
           return last.open;
         }
-        const { open: open4 } = await resolveAttention(target, { source: "attention" });
-        const sessions = [...new Set(open4.map((item) => item.session))];
-        scanned.set(target, { at: Date.now(), sessions, stamp: await scanStamp(target, sessions), open: open4 });
-        return open4;
+        const { open } = await resolveAttention(target, { source: "attention" });
+        const sessions = [...new Set(open.map((item) => item.session))];
+        scanned.set(target, { at: Date.now(), sessions, stamp: await scanStamp(target, sessions), open });
+        return open;
       })().finally(() => scans.delete(target)));
     }
     return scans.get(target);
@@ -3900,16 +3912,16 @@ An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
     }
     return briefs;
   }
-  async function factoryView(entry2) {
-    const attention = (await pendingAttention(entry2.target)).map(({ id, session, kind, text: text2, options: options2, role, pane, rex_session, task, at }) => ({ id, session, kind, text: text2, options: options2, role, pane, rex_session: rex_session ?? null, task, at })).sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
-    const proposals = await openProposals(entry2.target);
-    const data = await readFactory(entry2);
-    const usage4 = await factoryUsage(data, sessionStateDirectory());
-    const briefs = await taskBriefs(entry2.file, data);
-    const digest2 = createHash("sha1").update(JSON.stringify([attention, proposals, usage4, briefs])).digest("base64url");
+  async function factoryView(entry) {
+    const attention = (await pendingAttention(entry.target)).map(({ id, session, kind, text, options, role, pane, rex_session, task, at }) => ({ id, session, kind, text, options, role, pane, rex_session: rex_session ?? null, task, at })).sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+    const proposals = await openProposals(entry.target);
+    const data = await readFactory(entry);
+    const usage = await factoryUsage(data, sessionStateDirectory());
+    const briefs = await taskBriefs(entry.file, data);
+    const digest = createHash("sha1").update(JSON.stringify([attention, proposals, usage, briefs])).digest("base64url");
     return {
-      tag: `${entry2.tag.slice(0, -1)}-${digest2}"`,
-      body: async () => ({ ...await readFactory(entry2), attention, proposals, usage: usage4, briefs })
+      tag: `${entry.tag.slice(0, -1)}-${digest}"`,
+      body: async () => ({ ...await readFactory(entry), attention, proposals, usage, briefs })
     };
   }
   async function loadFactory(file) {
@@ -3922,10 +3934,10 @@ An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
     if (cached?.mtimeMs === mtimeMs)
       return cached.names;
     const names = [];
-    for (const entry2 of await readdir3(directory, { withFileTypes: true })) {
-      if (!entry2.isFile() && !entry2.isSymbolicLink() || !factoryFile2.test(entry2.name) || entry2.name.startsWith("."))
+    for (const entry of await readdir3(directory, { withFileTypes: true })) {
+      if (!entry.isFile() && !entry.isSymbolicLink() || !factoryFile2.test(entry.name) || entry.name.startsWith("."))
         continue;
-      names.push(entry2.name);
+      names.push(entry.name);
     }
     listings.set(directory, { mtimeMs, names });
     return names;
@@ -3947,19 +3959,19 @@ An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
         return { file, error };
       }
     }));
-    const tag = createHash("sha1").update(JSON.stringify(entries.map((entry2) => [entry2.file, "tag" in entry2 ? entry2.tag : errorMessage2(entry2.error)]))).digest("base64url");
+    const tag = createHash("sha1").update(JSON.stringify(entries.map((entry) => [entry.file, "tag" in entry ? entry.tag : errorMessage2(entry.error)]))).digest("base64url");
     return { entries, tag: `"${tag}"` };
   }
   async function listFactories(entries) {
     const factories = [];
     const errors = [];
-    for (const entry2 of entries) {
+    for (const entry of entries) {
       try {
-        if ("error" in entry2)
-          throw entry2.error;
-        const data = await readFactory(entry2);
+        if ("error" in entry)
+          throw entry.error;
+        const data = await readFactory(entry);
         factories.push({
-          file: entry2.file,
+          file: entry.file,
           id: data.id,
           project: data.project,
           goal: data.goal,
@@ -3969,7 +3981,7 @@ An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
           counts: countByState(data.tasks)
         });
       } catch (error) {
-        errors.push({ file: entry2.file, error: errorMessage2(error) });
+        errors.push({ file: entry.file, error: errorMessage2(error) });
       }
     }
     factories.sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at) || a.file.localeCompare(b.file));
@@ -3994,13 +4006,13 @@ An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
     headers = { ...headers, Vary: "Accept-Encoding" };
     if (!acceptsGzip(request))
       return send(response, 200, await body(), type, headers);
-    let entry2 = compressed.get(key);
-    if (entry2?.tag !== tag) {
+    let entry = compressed.get(key);
+    if (entry?.tag !== tag) {
       const data = await body();
-      entry2 = { tag, gzip: gzipSync(typeof data === "object" && !Buffer.isBuffer(data) ? JSON.stringify(data) : data, { level: 1 }) };
-      compressed.set(key, entry2);
+      entry = { tag, gzip: gzipSync(typeof data === "object" && !Buffer.isBuffer(data) ? JSON.stringify(data) : data, { level: 1 }) };
+      compressed.set(key, entry);
     }
-    send(response, 200, entry2.gzip, type, { ...headers, "Content-Encoding": "gzip" });
+    send(response, 200, entry.gzip, type, { ...headers, "Content-Encoding": "gzip" });
   }
   async function sendAsset(request, response, name, type) {
     const body = await readFile9(join10(assets, name));
@@ -4026,10 +4038,10 @@ An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
       throw new HttpError(413, "State change is too large (maximum 16 KiB).");
     }
     const chunks = [];
-    let size2 = 0;
+    let size = 0;
     for await (const chunk of request) {
-      size2 += chunk.length;
-      if (size2 > maxBody)
+      size += chunk.length;
+      if (size > maxBody)
         throw new HttpError(413, "State change is too large (maximum 16 KiB).");
       chunks.push(chunk);
     }
@@ -4093,9 +4105,9 @@ An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
       throw new HttpError(400, "The request needs proposal_id and decision (accepted or declined). The note is optional.");
     }
     const { target } = await factoryTag(file);
-    const run2 = deciding.then(() => decideProposal(target, body.proposal_id, body.decision, body.note));
-    deciding = run2.catch(() => {});
-    const result = await run2;
+    const run = deciding.then(() => decideProposal(target, body.proposal_id, body.decision, body.note));
+    deciding = run.catch(() => {});
+    const result = await run;
     if (!result)
       throw new HttpError(404, "The proposal does not exist.");
     return result;
@@ -4124,11 +4136,11 @@ An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
   }
   const requireToken = !isLoopback(options.host);
   const token = requireToken ? options.token ?? await persistedToken(join10(directories[0].directory, "dashboard-token")) : undefined;
-  function allowedHosts(port2) {
+  function allowedHosts(port) {
     const hosts = new Set;
     const add = (addr) => {
-      hosts.add(`${bracket(addr)}:${port2}`);
-      if (port2 === 80)
+      hosts.add(`${bracket(addr)}:${port}`);
+      if (port === 80)
         hosts.add(bracket(addr));
     };
     if (isWildcard(options.host)) {
@@ -4225,11 +4237,11 @@ p{margin:0;color:#f87171}
   }
   const server = createServer(async (request, response) => {
     try {
-      const port2 = server.address().port;
-      if (!allowedHosts(port2).has(request.headers.host)) {
+      const port = server.address().port;
+      if (!allowedHosts(port).has(request.headers.host)) {
         throw new HttpError(403, "Use the printed URL.");
       }
-      const url = new URL(request.url, `http://127.0.0.1:${port2}`);
+      const url = new URL(request.url, `http://127.0.0.1:${port}`);
       if (requireToken && request.method === "POST" && url.pathname === "/login")
         return await login(request, response);
       try {
@@ -4260,9 +4272,9 @@ p{margin:0;color:#f87171}
         const { entries, tag } = await listingTags();
         await sendTagged(request, response, "listing", tag, () => listFactories(entries));
       } else if (url.pathname === "/api/factory") {
-        const entry2 = await factoryTag(url.searchParams.get("file"));
-        const view = await factoryView(entry2);
-        await sendTagged(request, response, `factory:${entry2.target}`, view.tag, view.body);
+        const entry = await factoryTag(url.searchParams.get("file"));
+        const view = await factoryView(entry);
+        await sendTagged(request, response, `factory:${entry.target}`, view.tag, view.body);
       } else if (url.pathname === "/api/artifact") {
         const file = url.searchParams.get("file");
         const data = await loadFactory(file);
@@ -4311,6 +4323,7 @@ var import_write_file_atomic3, factoryFile2, maxBody = 16384, tokenPattern, erro
 var init_serve = __esm(() => {
   init_factory_data();
   init_attention();
+  init_conflict();
   init_tasks();
   init_proposals();
   init_sessions();
@@ -4336,7 +4349,7 @@ __export(exports_worktree, {
 import { execFileSync as execFileSync4, spawn } from "node:child_process";
 import { existsSync as existsSync2, readFileSync as readFileSync3, realpathSync } from "node:fs";
 import { constants, homedir as homedir6 } from "node:os";
-import { basename as basename6, join as join11, resolve as resolve8 } from "node:path";
+import { basename as basename6, join as join11, resolve as resolve7 } from "node:path";
 import { parseArgs as parseArgs7 } from "node:util";
 function run2(cmd, args, cwd) {
   try {
@@ -4354,16 +4367,16 @@ function listWorktrees(cwd) {
   for (const block of git4(cwd, "worktree", "list", "--porcelain").split(`
 
 `)) {
-    const entry2 = { path: "", branch: null };
+    const entry = { path: "", branch: null };
     for (const line of block.split(`
 `)) {
       if (line.startsWith("worktree "))
-        entry2.path = line.slice(9);
+        entry.path = line.slice(9);
       else if (line.startsWith("branch refs/heads/"))
-        entry2.branch = line.slice(18);
+        entry.branch = line.slice(18);
     }
-    if (entry2.path)
-      entries.push(entry2);
+    if (entry.path)
+      entries.push(entry);
   }
   return entries;
 }
@@ -4393,7 +4406,7 @@ function context(cwd) {
 function templatePath({ repoPath, template }, name) {
   const fields = { repoPath, repo: basename6(repoPath), branch: name, branchSlug: name.replaceAll("/", "-") };
   const expanded = template.replace(/\{(repoPath|repo|branch|branchSlug)\}/g, (_, key) => fields[key]).replace(/^~(?=\/|$)/, homedir6());
-  return resolve8(repoPath, expanded);
+  return resolve7(repoPath, expanded);
 }
 function validName(cwd, name) {
   if (!name || name.startsWith("-") || !gitOk(cwd, "check-ref-format", "--branch", name) || /^@\{/.test(name)) {
@@ -4602,7 +4615,7 @@ Exit codes: 1 usage, 2 refused, 3 not found, 4 git or gh failed.`, DEFAULT_TEMPL
   try {
     return realpathSync(path);
   } catch {
-    return resolve8(path);
+    return resolve7(path);
   }
 };
 var init_worktree = __esm(() => {
@@ -4642,8 +4655,8 @@ function workerName({ role, ref, summary }) {
   const room = MAX - Array.from(`${head}: `).length;
   if (!chars.length || room < 1)
     return head;
-  const text2 = chars.length <= room ? chars.join("") : `${chars.slice(0, room - 1).join("").trimEnd()}…`;
-  return `${head}: ${text2}`;
+  const text = chars.length <= room ? chars.join("") : `${chars.slice(0, room - 1).join("").trimEnd()}…`;
+  return `${head}: ${text}`;
 }
 function main8(argv) {
   try {
@@ -4666,7 +4679,7 @@ var usage5 = `Usage:
 Prints the --name of a worker Copilot session: "<Verb> <ref>: <summary>".
 ROLE is investigation, implementation, review, backlog (Find work) or improve.
 REF is "#N", "owner/repo#N", a bare number (read as "#N"), a task ID, or a
-rule ID. The name has at most 100 characters; a long summary ends with "…".`, MAX = 100, VERBS, clean2 = (text2) => String(text2 ?? "").replace(/["'`\u2018\u2019\u201c\u201d]/g, "").replace(/\s+/g, " ").trim();
+rule ID. The name has at most 100 characters; a long summary ends with "…".`, MAX = 100, VERBS, clean2 = (text) => String(text ?? "").replace(/["'`\u2018\u2019\u201c\u201d]/g, "").replace(/\s+/g, " ").trim();
 var init_worker_name = __esm(() => {
   VERBS = {
     investigation: "Investigate",
@@ -4686,7 +4699,7 @@ __export(exports_shot, {
 import { spawn as spawn2, spawnSync as spawnSync2 } from "node:child_process";
 import { copyFileSync, existsSync as existsSync3, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname as dirname7, join as join12, resolve as resolve9 } from "node:path";
+import { dirname as dirname7, join as join12, resolve as resolve8 } from "node:path";
 import { fileURLToPath as fileURLToPath3 } from "node:url";
 import { parseArgs as parseArgs9 } from "node:util";
 function parseShotArgs(argv, env = process.env) {
@@ -4746,12 +4759,12 @@ Run with --help for usage.`);
     process.exitCode = 1;
     return;
   }
-  const out = resolve9(options.out);
+  const out = resolve8(options.out);
   mkdirSync(out, { recursive: true });
   const work = mkdtempSync(join12(out, "shot-"));
   const state = join12(work, "state");
   mkdirSync(state);
-  copyFileSync(resolve9(options.data), join12(state, "shot-factory.json"));
+  copyFileSync(resolve8(options.data), join12(state, "shot-factory.json"));
   const server = startServer(state);
   let failed = false;
   try {
@@ -4759,7 +4772,7 @@ Run with --help for usage.`);
     for (const width of options.widths) {
       const png = join12(out, `dashboard-${width}.png`);
       rmSync(png, { force: true });
-      const run3 = spawnSync2(browser, [
+      const run = spawnSync2(browser, [
         "--headless=new",
         "--no-sandbox",
         "--disable-gpu",
@@ -4773,7 +4786,7 @@ Run with --help for usage.`);
       if (!existsSync3(png)) {
         failed = true;
         console.error(`No screenshot at width ${width}. Browser output:
-${(run3.stderr || "").trim().split(`
+${(run.stderr || "").trim().split(`
 `).slice(-5).join(`
 `)}`);
         break;
@@ -4819,7 +4832,7 @@ __export(exports_migrate, {
 });
 import { createHash as createHash2, randomUUID as randomUUID3 } from "node:crypto";
 import { access, link as link2, mkdir as mkdir2, readFile as readFile10, rename, rm as rm4, writeFile as writeFile2 } from "node:fs/promises";
-import { basename as basename7, dirname as dirname8, join as join13, resolve as resolve10 } from "node:path";
+import { basename as basename7, dirname as dirname8, join as join13, resolve as resolve9 } from "node:path";
 import { parseArgs as parseArgs10 } from "node:util";
 async function exists2(path) {
   try {
@@ -4938,7 +4951,7 @@ function reviewerPatch(reviewers) {
 }
 function build(project, key, loaded, reviewers) {
   const tasks = [];
-  const report2 = {
+  const report = {
     merged: [],
     renamed: [],
     reviewer_attached: 0,
@@ -4967,7 +4980,7 @@ function build(project, key, loaded, reviewers) {
             drop.details.legacy,
             ...drop.details.legacy_merged ?? []
           ];
-          report2.merged.push({ kept: keep.id, merged: drop.id });
+          report.merged.push({ kept: keep.id, merged: drop.id });
         }
         tasks[twins[0].index] = keep;
         for (const { index } of twins.slice(1).reverse())
@@ -4978,7 +4991,7 @@ function build(project, key, loaded, reviewers) {
         let id = `${role}-${task.id}`;
         for (let count = 2;tasks.some((other) => other.id === id); count += 1)
           id = `${role}-${task.id}-${count}`;
-        report2.renamed.push({ from: task.id, to: id, role });
+        report.renamed.push({ from: task.id, to: id, role });
         task = { ...task, id };
       }
       tasks.push(task);
@@ -5009,9 +5022,9 @@ function build(project, key, loaded, reviewers) {
       status: match.old.status,
       task_id: match.old.id
     };
-    report2.reviewer_attached += 1;
+    report.reviewer_attached += 1;
   }
-  report2.reviewer_skipped = [...byPR.keys()].filter((pr) => !matched.has(pr)).length;
+  report.reviewer_skipped = [...byPR.keys()].filter((pr) => !matched.has(pr)).length;
   const statuses = loaded.flatMap(({ source }) => typeof source.data.status === "string" ? [source.data.status] : []);
   const status = statuses.includes("active") ? "active" : statuses.includes("blocked") ? "blocked" : "paused";
   const data = {
@@ -5028,7 +5041,7 @@ function build(project, key, loaded, reviewers) {
     tasks
   };
   validate(data);
-  return { data, report: report2 };
+  return { data, report };
 }
 async function main10(argv) {
   let options;
@@ -5083,7 +5096,7 @@ Run with --help for usage.`);
   const project = options.project;
   const key = project.replace("/", ".");
   const explicit = options.directory;
-  const locate = explicit ? (name) => join13(resolve10(explicit), name) : stateFile;
+  const locate = explicit ? (name) => join13(resolve9(explicit), name) : stateFile;
   const target = locate(`${key}-factory.json`);
   const directory = dirname8(target);
   const warnings = [];
@@ -5110,14 +5123,14 @@ Run with --help for usage.`);
   if (await exists2(target) && !options["dry-run"]) {
     throw new Error(`${target} already exists. Move it away or reconcile it by hand; this command never overwrites.`);
   }
-  const { data, report: report2 } = build(project, key, loaded, reviewers);
+  const { data, report } = build(project, key, loaded, reviewers);
   const summary = {
     file: target,
     dry_run: Boolean(options["dry-run"]),
     sources: loaded.map(({ role, source }) => ({ role, file: source.file, tasks: source.data.tasks.length })),
     tasks: data.tasks.length,
     by_state: countByState(data.tasks),
-    ...report2,
+    ...report,
     warnings
   };
   if (!options["dry-run"]) {
@@ -5231,23 +5244,23 @@ async function gh(args) {
     return (await run3("gh", args, { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 })).stdout;
   } catch (error) {
     const failure = error;
-    const text3 = [failure.stderr, failure.stdout].filter(Boolean).join(`
+    const text = [failure.stderr, failure.stdout].filter(Boolean).join(`
 `).trim() || failure.message;
-    if (RATE_LIMIT.test(text3))
-      throw new RateLimited(text3.split(`
-`)[0], retryAt(text3));
+    if (RATE_LIMIT.test(text))
+      throw new RateLimited(text.split(`
+`)[0], retryAt(text));
     if (failure.code === "ENOENT")
       throw new Error("gh is not installed or is not on PATH");
-    throw new ((TRANSIENT.test(text3)) ? Transient : Error)(text3);
+    throw new ((TRANSIENT.test(text)) ? Transient : Error)(text);
   }
 }
-function retryAt(text3) {
-  const after = /retry-after:?\s*(\d+)/i.exec(text3);
-  const reset = /x-ratelimit-reset:?\s*(\d+)/i.exec(text3);
+function retryAt(text) {
+  const after = /retry-after:?\s*(\d+)/i.exec(text);
+  const reset = /x-ratelimit-reset:?\s*(\d+)/i.exec(text);
   const seconds = after ? Number(after[1]) : reset ? Number(reset[1]) - Date.now() / 1000 : RETRY_AFTER;
   return new Date(Date.now() + Math.max(seconds, 1) * 1000).toISOString();
 }
-async function resolve11({ pr, repo }) {
+async function resolve10({ pr, repo }) {
   const args = ["pr", "view", ...pr ? [pr] : [], ...repo ? ["--repo", repo] : [], "--json", "number,url"];
   const { number, url } = JSON.parse(await gh(args));
   const { hostname, pathname } = new URL(url);
@@ -5270,7 +5283,7 @@ function checkState(node) {
 }
 function summarizeChecks(contexts) {
   const required = contexts.filter((node) => node.isRequired).map((node) => ({ name: node.name ?? node.context, state: checkState(node) }));
-  const names = (state2) => required.filter((check) => check.state === state2).map((check) => check.name);
+  const names = (state) => required.filter((check) => check.state === state).map((check) => check.name);
   const failed = names("failed");
   const cancelled = names("cancelled");
   let state = "passed";
@@ -5402,7 +5415,7 @@ function report2(target, snapshot, extra) {
 `);
 }
 function sleep(ms) {
-  return new Promise((resolve12) => setTimeout(resolve12, ms));
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 class Listener {
@@ -5438,9 +5451,9 @@ class Listener {
     if (ready() || !this.alive)
       return;
     let timer;
-    await new Promise((resolve12) => {
-      this.#wake = resolve12;
-      timer = setTimeout(resolve12, ms);
+    await new Promise((resolve) => {
+      this.#wake = resolve;
+      timer = setTimeout(resolve, ms);
     });
     clearTimeout(timer);
     this.#wake = null;
@@ -5464,7 +5477,7 @@ async function watch2(opts) {
     for (;; ) {
       let fetched = null;
       try {
-        target ??= await resolve11(opts);
+        target ??= await resolve10(opts);
         if (listener === undefined) {
           listener = target.host === "github.com" ? new Listener(target.url) : null;
           await listener?.until(() => listener.attached, Math.min(deadline - Date.now(), SAFETY_CHECK));
@@ -5606,7 +5619,7 @@ __export(exports_guard, {
 });
 import { existsSync as existsSync4, readFileSync as readFileSync4, realpathSync as realpathSync2 } from "node:fs";
 import { homedir as homedir7, tmpdir as tmpdir2 } from "node:os";
-import { dirname as dirname9, join as join14, resolve as resolve12, sep } from "node:path";
+import { dirname as dirname9, join as join14, resolve as resolve11, sep } from "node:path";
 function split(line) {
   const segs = [];
   const subs = [];
@@ -5706,7 +5719,7 @@ function writeRoots() {
     join14(process.env.COPILOT_HOME || join14(home, ".copilot"), "session-state"),
     process.env.TMPDIR || tmpdir2()
   ];
-  return roots.flatMap((r) => [resolve12(r), real3(resolve12(r))]);
+  return roots.flatMap((r) => [resolve11(r), real3(resolve11(r))]);
 }
 function targets(tool, args, cwd) {
   const paths = typeof args.path === "string" ? [args.path] : [];
@@ -5714,7 +5727,7 @@ function targets(tool, args, cwd) {
     for (const m of JSON.stringify(args).matchAll(/\*\*\* (?:Add|Update|Delete) File: ([^\\"]+)/g))
       paths.push(m[1]);
   }
-  return paths.map((p) => resolve12(cwd, p.replace(/^~(?=$|\/)/, homedir7())));
+  return paths.map((p) => resolve11(cwd, p.replace(/^~(?=$|\/)/, homedir7())));
 }
 function decide({ toolName = "", toolArgs, cwd = process.cwd() }) {
   if (DENIED_TOOLS.includes(toolName)) {
@@ -5778,7 +5791,7 @@ var init_guard = __esm(() => {
     {
       name: "waiter-async-bash",
       reason: "Run `factory.mjs broker wait` as async bash and read its output. A waiter that runs with `&`, nohup, setsid, or disown, or with stdout sent to a file, has no reader. Its wake never reaches you.",
-      deny: (c) => /^(?:\S*\/)?(?:node|bun)\s+\S*(?:broker\.mjs|factory\.mjs\s+broker)\s+wait\b/.test(c) && (/\s&$/.test(c) || /(?:^|\s)(?:1|&)?>>?\s*(?!&)\S/.test(c))
+      deny: (c) => /^(?:\S*\/)?(?:node|bun)\s+\S*factory\.mjs\s+broker\s+wait\b/.test(c) && (/\s&$/.test(c) || /(?:^|\s)(?:1|&)?>>?\s*(?!&)\S/.test(c))
     },
     {
       name: "copilot-autopilot",
@@ -5882,16 +5895,16 @@ async function run4() {
   }
   if (!PROMPTS.has(input.notification_type))
     return;
-  const { kind, text: text3, options } = describe(input, takeNote(who.session, now));
-  const data = { session: who.session, kind, text: clip(text3, MAX_TEXT) };
+  const { kind, text, options } = describe(input, takeNote(who.session, now));
+  const data = { session: who.session, kind, text: clip(text, MAX_TEXT) };
   if (who.role)
     data.role = who.role;
   if (who.pane)
     data.pane = who.pane;
   if (options.length)
     data.options = options;
-  const { emit: emit2, resolveFactory: resolveFactory2 } = await Promise.resolve().then(() => (init_broker(), exports_broker));
-  await emit2(await resolveFactory2(who.file), { type: "attention.requested", source: "attention", data });
+  await Promise.resolve().then(() => init_broker());
+  await emit(await resolveFactory(who.file), { type: "attention.requested", source: "attention", data });
 }
 async function main13(_argv) {
   try {
@@ -5911,7 +5924,7 @@ __export(exports_stop_hook, {
 });
 import { spawnSync as spawnSync3 } from "node:child_process";
 import { readFileSync as readFileSync6, statSync as statSync3 } from "node:fs";
-import { basename as basename8, dirname as dirname10, join as join16 } from "node:path";
+import { dirname as dirname10, join as join16 } from "node:path";
 import { fileURLToPath as fileURLToPath4 } from "node:url";
 function block(reason) {
   process.stdout.write(`${JSON.stringify({ decision: "block", reason: reason.slice(0, maxReason) })}
@@ -5949,19 +5962,14 @@ async function main14(_argv) {
     await run5();
   } catch {}
 }
-var here2, lifecycle, maxReason = 4000;
+var lifecycle, maxReason = 4000;
 var init_stop_hook = __esm(() => {
   init_broker();
   init_gate();
-  here2 = dirname10(fileURLToPath4(import.meta.url));
-  lifecycle = basename8(here2) === "hooks" ? join16(here2, "..", "skills", "lifecycle") : here2;
+  lifecycle = dirname10(fileURLToPath4(import.meta.url));
 });
 
 // plugins/factory/skills/lifecycle/factory.ts
-init_conflict();
-import { realpathSync as realpathSync3 } from "node:fs";
-import { pathToFileURL as pathToFileURL4 } from "node:url";
-var update2 = async (...args) => (await Promise.resolve().then(() => (init_tasks(), exports_tasks))).update(...args);
 var commands2 = {
   write: () => Promise.resolve().then(() => (init_tasks(), exports_tasks)),
   broker: () => Promise.resolve().then(() => (init_broker(), exports_broker)),
@@ -6000,7 +6008,7 @@ Commands:
   pr-watch                  Watch a pull request
   hook guard|attention|stop Run a Copilot hook (the payload comes on stdin)
 
-Every command takes --help. Old usage still works: node factory.mjs FILE [OPTIONS] runs write.
+Every command takes --help.
 Exit: 2 for invalid usage.`;
 async function main15(argv) {
   const [name, ...rest] = argv;
@@ -6010,23 +6018,28 @@ async function main15(argv) {
     return;
   }
   if (name === "hook") {
-    const [hook, ...args2] = rest;
-    const load2 = hooks[hook ?? ""];
-    if (!load2) {
+    const [hook, ...args] = rest;
+    const load = hooks[hook ?? ""];
+    if (!load) {
       console.error(`Unknown hook "${hook ?? ""}". Use guard, attention or stop.`);
       process.exitCode = 2;
       return;
     }
-    await (await load2()).main(args2);
+    await (await load()).main(args);
     if (hook === "attention")
       process.exit(0);
     return;
   }
   const load = Object.hasOwn(commands2, name) ? commands2[name] : undefined;
-  const run6 = load ?? commands2.write;
-  const args = load ? rest : argv;
+  if (!load) {
+    console.error(`Unknown command "${name}".
+
+${usage7}`);
+    process.exitCode = 2;
+    return;
+  }
   try {
-    await (await run6()).main(args);
+    await (await load()).main(rest);
   } catch (error) {
     if (name !== "migrate")
       throw error;
@@ -6034,10 +6047,4 @@ async function main15(argv) {
     process.exitCode = 1;
   }
 }
-if (process.argv[1] && import.meta.url === pathToFileURL4(realpathSync3(process.argv[1])).href)
-  await main15(process.argv.slice(2));
-export {
-  ConflictError,
-  main15 as main,
-  update2 as update
-};
+await main15(process.argv.slice(2));

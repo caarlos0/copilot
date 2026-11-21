@@ -5,8 +5,6 @@
 // classification is the same either way. Dependency-free; talks to GitHub only
 // through `gh`.
 import { type ChildProcess, execFile, spawn } from "node:child_process";
-import { realpathSync } from "node:fs";
-import { pathToFileURL } from "node:url";
 import { parseArgs, promisify } from "node:util";
 
 const run = promisify(execFile);
@@ -452,5 +450,3 @@ export async function main(argv: string[]) {
     }
   }
 }
-
-if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) await main(process.argv.slice(2));

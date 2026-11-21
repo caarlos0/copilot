@@ -118,5 +118,3 @@ export async function main(argv: string[]) {
   }
   if (failed) process.exitCode = 1;
 }
-
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main(process.argv.slice(2));

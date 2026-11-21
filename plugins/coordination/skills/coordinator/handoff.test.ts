@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { test } from "node:test";
 import type { TestContext } from "node:test";
+import { validate } from "./board-data.ts";
 
 const script = join(import.meta.dirname, "coordinator.mjs");
 const example = JSON.parse(readFileSync(join(import.meta.dirname, "handoff.example.json"), "utf8"));
@@ -55,7 +56,6 @@ test("creates private handoffs from flags and validates the root project and rol
   assert.deepEqual(data.tasks, []);
   assert.ok(Date.parse(data.updated_at) >= started, data.updated_at);
   assert.ok(Date.parse(data.updated_at) <= Date.now(), data.updated_at);
-  const { validate } = await import("./board-data.mjs");
   validate(data);
   assert.equal((await stat(f.file)).mode & 0o777, 0o600);
   assert.deepEqual(await readdir(f.directory), ["project-coordinator.json"]);
@@ -94,7 +94,6 @@ test("adds and updates tasks without repeating the handoff project or losing tas
   assert.ok(Date.parse(data.tasks[1].updated_at) >= started, data.tasks[1].updated_at);
   assert.ok(Date.parse(data.tasks[1].updated_at) <= Date.now(), data.tasks[1].updated_at);
   assert.ok(Date.parse(data.updated_at) >= started, data.updated_at);
-  const { validate } = await import("./board-data.mjs");
   validate(data);
 });
 

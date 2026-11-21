@@ -143,5 +143,3 @@ export function main(argv: string[]) {
     process.exitCode = 1;
   });
 }
-
-if (basename(process.argv[1] ?? "") === "wait.mjs") await main(process.argv.slice(2));

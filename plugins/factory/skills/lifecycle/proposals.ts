@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { emit, eventsFile, resolveFactory } from "./broker.mjs";
+import { emit, eventsFile, resolveFactory } from "./broker.ts";
 
 type ProposalEvent = {
   type: string;

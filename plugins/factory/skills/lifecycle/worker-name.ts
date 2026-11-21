@@ -1,4 +1,3 @@
-import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 
 const usage = `Usage:
@@ -52,5 +51,3 @@ export function main(argv: string[]) {
     process.exit(1);
   }
 }
-
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main(process.argv.slice(2));

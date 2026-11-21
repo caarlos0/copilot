@@ -2,11 +2,10 @@ import { createServer, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { readFile, readdir, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { validate } from "./board-data.mjs";
-import type { Task } from "./board-data.ts";
+import { validate, type Task } from "./board-data.ts";
 
 type Json = Record<string, any>;
 type Options = { help?: boolean; directory: string; port: string };
@@ -175,5 +174,3 @@ export function main(argv: string[]) {
     process.exitCode = 1;
   });
 }
-
-if (basename(process.argv[1] ?? "") === "serve.mjs") await main(process.argv.slice(2));

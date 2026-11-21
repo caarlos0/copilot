@@ -2,9 +2,8 @@ import { execFileSync, spawn } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { constants, homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
-import { defaultBranch } from "./default-branch.mjs";
+import { defaultBranch } from "./default-branch.ts";
 
 const usage = `Usage:
   node factory.mjs worktree create NAME [--pr N] [--base REF] [-- CMD...]
@@ -302,5 +301,3 @@ export function main(argv: string[]) {
     process.stdout.write(`${JSON.stringify(outcome.result)}\n`);
   }
 }
-
-if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) main(process.argv.slice(2));
