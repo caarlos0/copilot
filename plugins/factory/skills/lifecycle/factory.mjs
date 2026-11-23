@@ -1267,6 +1267,13 @@ async function recordStop(file, stop) {
   await emit(factory, { type: "stop.recorded", task, source: "stops", data });
   return { recorded: true };
 }
+async function scanStops(file, factory) {
+  const stops = await readStops(await resolveFactory(file));
+  return [...stops.values()].map(({ at, task, data }) => {
+    const cause = factory.tasks.find((candidate) => candidate.details?.stop_id === data.stop_id);
+    return { ...data, task, at, cause_task: cause?.id ?? null, cause_state: cause?.state ?? null };
+  });
+}
 var stopId = (cause, task, role, key) => `${cause}:${task ?? "-"}:${role ?? "-"}:${key}`;
 var init_stops = __esm(() => {
   init_broker();
@@ -3971,6 +3978,12 @@ An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
     }
     return proposalScans.get(target).open;
   }
+  const stopWindowMs = 30 * 24 * 60 * 60 * 1000;
+  const stopLimit = 50;
+  async function recentStops(target, data) {
+    const since = Date.now() - stopWindowMs;
+    return (await scanStops(target, data)).filter((stop) => Date.parse(stop.at) >= since).sort((a, b) => Date.parse(b.at) - Date.parse(a.at)).slice(0, stopLimit);
+  }
   const taskBriefName = (task) => `briefs/${task.id}.md`;
   const briefNames = (file, task, role, worker) => [
     ...worker.brief ? [worker.brief] : [],
@@ -4007,12 +4020,13 @@ An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
     const attention = (await pendingAttention(entry.target)).map(({ id, session, kind, text, options, role, pane, rex_session, task, at }) => ({ id, session, kind, text, options, role, pane, rex_session: rex_session ?? null, task, at })).sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
     const proposals = await openProposals(entry.target);
     const data = await readFactory(entry);
+    const stops = await recentStops(entry.target, data);
     const usage = await factoryUsage(data, sessionStateDirectory());
     const briefs = await taskBriefs(entry.file, data);
-    const digest = createHash("sha1").update(JSON.stringify([attention, proposals, usage, briefs])).digest("base64url");
+    const digest = createHash("sha1").update(JSON.stringify([attention, proposals, stops, usage, briefs])).digest("base64url");
     return {
       tag: `${entry.tag.slice(0, -1)}-${digest}"`,
-      body: async () => ({ ...await readFactory(entry), attention, proposals, usage, briefs })
+      body: async () => ({ ...await readFactory(entry), attention, proposals, stops, usage, briefs })
     };
   }
   async function loadFactory(file) {
@@ -4418,6 +4432,7 @@ var init_serve = __esm(() => {
   init_tasks();
   init_proposals();
   init_sessions();
+  init_stops();
   init_usage();
   init_state_dir();
   import_write_file_atomic3 = __toESM(require_lib(), 1);

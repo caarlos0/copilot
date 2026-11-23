@@ -210,6 +210,14 @@
         border-color: color-mix(in srgb, var(--attention) 45%, var(--border)); }
       #attention-badge[hidden] { display: none; }
       #attention-badge[aria-pressed="true"] { background: color-mix(in srgb, var(--attention) 14%, var(--bg)); }
+      #stops-badge { display: inline-flex; align-items: center; gap: 6px; color: var(--blocked);
+        border-color: color-mix(in srgb, var(--blocked) 45%, var(--border)); }
+      #stops-badge[hidden] { display: none; }
+      #stops-badge[aria-pressed="true"] { background: color-mix(in srgb, var(--blocked) 14%, var(--bg)); }
+      #stops-note, #stops-empty { margin: 16px 24px 0; }
+      #stops-table { width: calc(100% - 48px); margin: 16px 24px 0; border-collapse: collapse; font-size: 12px; }
+      #stops-table th, #stops-table td { padding: 6px 8px 6px 0; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+      #stops-table td.stop-detail { overflow-wrap: anywhere; }
       body:has(dialog[open]) { overflow: hidden; }
       .detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
         position: sticky; top: 0; z-index: 1; padding: 16px 24px; background: var(--bg-muted);
@@ -363,7 +371,7 @@
         #project-bar { display: flex; flex: 1 1 0; align-items: center; gap: 8px; min-width: 0; }
         .refresh { display: contents; }
         #open-palette, #refresh { order: 1; justify-content: center; width: 44px; padding: 0; }
-        #attention-badge { order: 1; justify-content: center; min-width: 44px; padding: 0 8px; }
+        #attention-badge, #stops-badge { order: 1; justify-content: center; min-width: 44px; padding: 0 8px; }
         #open-palette .label, #refresh .label { display: none; }
         .layout { padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
         main { min-width: 0; padding-top: 16px; }
@@ -423,6 +431,10 @@
             <path d="M8 2a4 4 0 0 0-4 4c0 3-1.5 4-1.5 5h11C13.5 10 12 9 12 6a4 4 0 0 0-4-4ZM6.5 13.5a1.5 1.5 0 0 0 3 0"/>
           </svg>
           <span id="attention-count"></span>
+        </button>
+        <button id="stops-badge" type="button" aria-pressed="false" aria-controls="detail" hidden>
+          <span>Stops</span>
+          <span id="stops-count"></span>
         </button>
         <button id="open-palette" type="button" aria-haspopup="dialog" aria-label="Open a task (Cmd+K)" title="Open a task (Cmd+K)">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"
@@ -523,6 +535,16 @@
         <p id="attention-note" class="muted">Select an option to send it to the pane. Answer other prompts in their own pane.</p>
         <ul id="attention-list"></ul>
         <p id="attention-empty" class="muted" hidden>No item waits for you.</p>
+      </div>
+      <div id="stops-view" hidden>
+        <p id="stops-note" class="muted">Each open stop needs a cause task. The factory creates it.</p>
+        <table id="stops-table">
+          <thead>
+            <tr><th>Age</th><th>Cause</th><th>Class</th><th>Task</th><th>Role</th><th>Detail</th><th>Cause task</th></tr>
+          </thead>
+          <tbody id="stops-list"></tbody>
+        </table>
+        <p id="stops-empty" class="muted" hidden>No stop is open.</p>
       </div>
     </aside>
     </div>
@@ -804,6 +826,10 @@
       const isFinder = (rule) => rule.kind !== "improve";
       const chooseProducers = () => setHash(producersOpen() ? "" : "#producers");
       const chooseAttention = () => setHash(attentionOpen() ? "" : "#attention");
+      const stopsOpen = () => location.hash === "#stops";
+      const chooseStops = () => setHash(stopsOpen() ? "" : "#stops");
+      // A stop is open while it has no cause task, or its cause task is not resolved.
+      const openStops = () => (snapshot?.stops ?? []).filter((stop) => stop.cause_state !== "resolved");
 
       function activateOnKey(node, action) {
         node.addEventListener("click", action);
@@ -968,6 +994,7 @@
         const enabled = snapshot.rules.filter((rule) => rule.enabled && isFinder(rule));
         drawSource(enabled);
         drawAttention();
+        drawStops();
         renderDetail(chosen);
       }
 
@@ -982,6 +1009,18 @@
         badge.title = label;
         document.getElementById("attention-count").textContent = String(count);
         document.title = `${count ? `(${count}) ` : ""}${snapshot ? `${snapshot.project} - ` : ""}Factory`;
+      }
+
+      // The header link counts the open stops.
+      function drawStops() {
+        const count = openStops().length;
+        const link = document.getElementById("stops-badge");
+        link.hidden = count === 0;
+        link.setAttribute("aria-pressed", String(stopsOpen()));
+        const label = `${count} ${count === 1 ? "stop is" : "stops are"} open`;
+        link.setAttribute("aria-label", label);
+        link.title = label;
+        document.getElementById("stops-count").textContent = String(count);
       }
 
       function drawSource(enabled) {
@@ -1953,9 +1992,11 @@
         const list = document.getElementById("task-list");
         const finder = !state && producersOpen();
         const waiting = !state && attentionOpen();
-        document.getElementById("task-view").hidden = finder || waiting;
+        const stopped = !state && stopsOpen();
+        document.getElementById("task-view").hidden = finder || waiting || stopped;
         document.getElementById("producers-view").hidden = !finder;
         document.getElementById("attention-view").hidden = !waiting;
+        document.getElementById("stops-view").hidden = !stopped;
         if (!state) {
           moveDialog.close();
           panel.dataset.state = "";
@@ -1967,6 +2008,9 @@
             showPanel();
           } else if (waiting) {
             renderAttention();
+            showPanel();
+          } else if (stopped) {
+            renderStops();
             showPanel();
           } else {
             panel.hidden = true;
@@ -2201,6 +2245,41 @@
         document.getElementById("attention-empty").hidden = items.length > 0;
       }
 
+      // The stops table is read only. Every cell is text. The cause task cell opens that task.
+      function renderStops() {
+        const stops = openStops();
+        document.getElementById("detail-title").textContent = "Stops";
+        document.getElementById("detail-title").append(element("span", String(stops.length), "counter"));
+        setCloseLabel("Close stops");
+        const body = document.getElementById("stops-list");
+        const signature = JSON.stringify(stops);
+        if (body.dataset.signature !== signature) {
+          body.replaceChildren(...stops.map((stop) => {
+            const row = element("tr");
+            const age = element("td");
+            age.append(elapsedLabel(stop.at));
+            const cause = element("td");
+            cause.append(element("span", stop.cause, "chip"));
+            const link = element("td");
+            if (stop.cause_task) {
+              const open = element("button", stop.cause_task, "link-button");
+              open.type = "button";
+              open.addEventListener("click", () => openTask(stop.cause_task));
+              link.append(open);
+            } else {
+              link.textContent = "None";
+            }
+            row.append(age, cause, element("td", stop.class), element("td", stop.task ?? "None"),
+              element("td", stop.role ?? "None"), element("td", stop.detail, "stop-detail"), link);
+            return row;
+          }));
+          body.dataset.signature = signature;
+        }
+        refreshElapsedLabels(body);
+        document.getElementById("stops-table").hidden = stops.length === 0;
+        document.getElementById("stops-empty").hidden = stops.length > 0;
+      }
+
       function ruleRow(rule) {
         const node = element("li", null, "task-row");
         node.dataset.ruleId = rule.id;
@@ -2382,6 +2461,7 @@
           ...data,
           attention: data.attention ?? snapshot?.attention ?? [],
           proposals: data.proposals ?? snapshot?.proposals ?? [],
+          stops: data.stops ?? snapshot?.stops ?? [],
           usage: data.usage ?? snapshot?.usage ?? {},
           briefs: data.briefs ?? snapshot?.briefs,
         };
@@ -2444,6 +2524,7 @@
                   document.getElementById("error").hidden = true;
                   refreshElapsedLabels(document.getElementById("task-list"));
                   refreshElapsedLabels(document.getElementById("attention-list"));
+                  refreshElapsedLabels(document.getElementById("stops-list"));
                   drawSource(snapshot.rules.filter((rule) => rule.enabled && isFinder(rule)));
                   if (producersOpen()) renderProducers();
                 } else {
@@ -2500,6 +2581,7 @@
       });
       document.getElementById("open-settings").addEventListener("click", openSettings);
       document.getElementById("attention-badge").addEventListener("click", chooseAttention);
+      document.getElementById("stops-badge").addEventListener("click", chooseStops);
       document.getElementById("bar-settings").addEventListener("click", openSettings);
       projectToggle.addEventListener("click", () => setProjectMenu(projectMenu.hidden));
       document.addEventListener("click", (event) => {

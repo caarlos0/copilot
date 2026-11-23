@@ -17,6 +17,7 @@ import { update } from "./tasks.ts";
 import { decideProposal, scanProposals } from "./proposals.ts";
 import type { Proposal } from "./proposals.ts";
 import { sessionStateDirectory } from "./sessions.ts";
+import { scanStops } from "./stops.ts";
 import { factoryUsage } from "./usage.ts";
 import { candidates, stateDirectories } from "./state-dir.ts";
 
@@ -225,6 +226,17 @@ An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
     return proposalScans.get(target)!.open;
   }
 
+  // Stops of the last 30 days, newest first, at most 50.
+  const stopWindowMs = 30 * 24 * 60 * 60 * 1000;
+  const stopLimit = 50;
+  async function recentStops(target: string, data: Factory) {
+    const since = Date.now() - stopWindowMs;
+    return (await scanStops(target, data))
+      .filter((stop) => Date.parse(stop.at) >= since)
+      .sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
+      .slice(0, stopLimit);
+  }
+
   // The coordinator records only `result` in a worker record, so the brief of a worker is the first
   // name whose file exists: a recorded `brief`, the convention <project>-<task>-<role>-brief.md, or
   // the brief of the task itself, `briefs/<task>.md` (also key `task`, so a task without worker
@@ -269,7 +281,7 @@ An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
   // Pending attention items, oldest first. They live in the events log and the session logs, so the
   // tag covers them too: a change there refreshes the browser even when the factory file is the same.
   // The scan also records the items it finds closed (answered, pane gone, expired), so they
-  // clear without waiting for a reconcile run. Open improve proposals ride along as `proposals`, and per task usage from the session logs as `usage`, and the existing worker briefs as `briefs`.
+  // clear without waiting for a reconcile run. Open improve proposals ride along as `proposals`, recorded stops as `stops`, and per task usage from the session logs as `usage`, and the existing worker briefs as `briefs`.
   async function factoryView(entry: Entry) {
     const attention = (await pendingAttention(entry.target))
       .map(({ id, session, kind, text, options, role, pane, rex_session, task, at }) =>
@@ -277,12 +289,13 @@ An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
       .sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
     const proposals = await openProposals(entry.target);
     const data = await readFactory(entry);
+    const stops = await recentStops(entry.target, data);
     const usage = await factoryUsage(data, sessionStateDirectory());
     const briefs = await taskBriefs(entry.file, data);
-    const digest = createHash("sha1").update(JSON.stringify([attention, proposals, usage, briefs])).digest("base64url");
+    const digest = createHash("sha1").update(JSON.stringify([attention, proposals, stops, usage, briefs])).digest("base64url");
     return {
       tag: `${entry.tag.slice(0, -1)}-${digest}"`,
-      body: async () => ({ ...(await readFactory(entry)), attention, proposals, usage, briefs }),
+      body: async () => ({ ...(await readFactory(entry)), attention, proposals, stops, usage, briefs }),
     };
   }
 

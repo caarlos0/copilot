@@ -265,7 +265,7 @@ test("moving back persists the comment, keeps worker context, and rejects a stal
   assert.equal(task.feedback.acknowledged_id, null);
   assert.deepEqual(JSON.parse(await readFile(join(directory, factoryFile), "utf8")), data);
   const { usage, briefs, ...served } = await (await get(url, `/api/factory?file=${factoryFile}`)).json();
-  assert.deepEqual(served, { ...data, attention: [], proposals: [] });
+  assert.deepEqual(served, { ...data, attention: [], proposals: [], stops: [] });
   assert.deepEqual(briefs, { "issue-9": { implementation: "owner.repo-issue-9-implementation-brief.md" } });
   assert.deepEqual(Object.keys(usage).sort(), data.tasks.map((item: Json) => item.id).sort());
   const stale = await move(url, unblocked);
@@ -2683,6 +2683,75 @@ test("the badge, the page title and the waiting list show pending attention as d
   assert.equal(ui.get("attention-empty").hidden, false);
   await badge.fire("click");
   assert.equal(ui.get("detail").hidden, true, "A second click closes the list.");
+});
+
+test("the stops link counts the open stops, and the panel shows them as text", async (t) => {
+  assert.match(html, /<button id="stops-badge"[^>]* hidden>/);
+  const ui = await dashboard(t, { now: Date.parse("2026-05-01T12:10:00Z") });
+  const link = ui.get("stops-badge");
+  assert.equal(link.hidden, true, "The link is hidden at zero.");
+
+  const stop = (n: number, extra: Json = {}) => ({
+    stop_id: `worker-quiet:issue-5:implementation:${n}`, cause: "worker-quiet", class: "worker-fixable", task: "issue-5",
+    role: "implementation", detail: `Quiet for ${n} minutes`, count: 1, at: `2026-05-01T12:0${n}:00Z`, cause_task: null, cause_state: null, ...extra,
+  });
+  const show = (stops: Json[]) => ui.run(`load({ ...snapshot, stops: ${JSON.stringify(stops)} }, lastSource)`);
+  show([
+    stop(1, { detail: "<img src=x onerror=alert(1)>", cause_task: "issue-9", cause_state: "implementation" }),
+    stop(2, { task: null, role: null }),
+    stop(3, { cause_task: "issue-3", cause_state: "resolved" }),
+  ]);
+  assert.equal(link.hidden, false);
+  assert.equal(ui.get("stops-count").textContent, "2", "A stop with a resolved cause task is not open.");
+
+  await link.fire("click");
+  assert.equal(ui.get("detail").hidden, false);
+  assert.equal(ui.get("stops-view").hidden, false);
+  assert.equal(ui.get("task-view").hidden, true);
+  const [first, second] = ui.get("stops-list").children;
+  assert.equal(ui.get("stops-list").children.length, 2);
+  assert.match(first.textContent, /9m.*worker-quiet.*worker-fixable.*issue-5.*implementation.*<img src=x onerror=alert\(1\)>.*issue-9/);
+  assert.equal(first.querySelector("img"), null, "A detail with markup is text.");
+  assert.match(second.textContent, /8m.*worker-quiet.*worker-fixable.*None.*None.*Quiet for 2 minutes.*None/);
+  assert.equal(second.querySelector("button"), null, "A stop without a cause task has no link.");
+
+  await first.querySelector("button").fire("click");
+  assert.equal(ui.run("location.hash"), "#implementation", "A click on the cause task opens that task.");
+
+  show([]);
+  assert.equal(link.hidden, true);
+  await link.fire("click");
+  assert.equal(ui.get("stops-empty").hidden, false);
+});
+
+test("the factory payload lists the stops of the last 30 days, newest first, at most 50, and its tag follows the log", async (t) => {
+  const { url, directory } = await server(t);
+  const path = `/api/factory?file=${factoryFile}`;
+  const day = 24 * 60 * 60 * 1000;
+  const line = (n: number, age: number) => JSON.stringify({
+    id: `s${n}`, at: new Date(Date.now() - age).toISOString(), type: "stop.recorded", task: "issue-5", source: "stops",
+    data: { stop_id: `worker-quiet:issue-5:implementation:${n}`, cause: "worker-quiet", role: "implementation", class: "worker-fixable", detail: `Quiet ${n}`, count: 1 },
+  });
+  const log = (...lines: string[]) => appendFile(join(directory, "owner.repo-factory-events.jsonl"), `${lines.join("\n")}\n`);
+  const read = (tag?: string) => get(url, path, tag ? { headers: { "If-None-Match": tag } } : undefined);
+
+  const first = await read();
+  assert.deepEqual((await first.json()).stops, []);
+  const empty = first.headers.get("etag")!;
+
+  await log(line(1, 2 * day), line(2, 31 * day), line(3, day));
+  const changed = await read(empty);
+  assert.equal(changed.status, 200, "A new stop changes the tag while the factory file stays the same.");
+  const { stops } = await changed.json();
+  assert.deepEqual(stops.map((item: Json) => item.detail), ["Quiet 3", "Quiet 1"]);
+  assert.deepEqual(stops[0], {
+    stop_id: "worker-quiet:issue-5:implementation:3", cause: "worker-quiet", role: "implementation", class: "worker-fixable",
+    detail: "Quiet 3", count: 1, task: "issue-5", at: stops[0].at, cause_task: null, cause_state: null,
+  });
+  assert.equal((await read(changed.headers.get("etag")!)).status, 304);
+
+  await log(...Array.from({ length: 60 }, (_, n) => line(100 + n, n * 1000)));
+  assert.equal((await (await read()).json()).stops.length, 50);
 });
 
 test("an improve proposal shows in the payload, and deciding it records improve.decided once", async (t) => {
