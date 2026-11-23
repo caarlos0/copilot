@@ -296,7 +296,7 @@ export async function emit(factory: string, { type, task = null, source, data = 
 }
 
 // Reads complete lines after the byte offset; a trailing partial line stays unread.
-async function readEvents(file: string, offset: number) {
+export async function readEvents(file: string, offset: number) {
   let handle;
   try {
     handle = await open(file, "r");
@@ -609,6 +609,7 @@ async function recordRefusal(factory: string, { type, task, data }: NewEvent, ki
       class: "worker-fixable",
       detail: `The emit of ${type} was refused: ${kind}.`,
       count: 1,
+      ...(kind === "not-rebased" && typeof data?.head === "string" && { head: data.head }),
     });
   } catch {
     // Recording is best effort.

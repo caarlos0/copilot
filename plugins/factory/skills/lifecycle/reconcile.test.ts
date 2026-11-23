@@ -388,6 +388,41 @@ esac
   assert.equal(resolved.length, 2, "recorded once, not on every sweep");
 });
 
+test("records each stop once, reports it until a cause task holds its stop_id, and keeps other findings", async (t) => {
+  const f = await fixture(t, fakeRex);
+  const prompt = (id: string) => ({
+    id, at: new Date().toISOString(), type: "attention.requested", task: null, source: "attention",
+    data: { session: "s-work", kind: "permission", text: "Run ls.", role: "implementation" },
+  });
+  const eventsPath = join(f.directory, "owner.repo-factory-events.jsonl");
+  await writeFile(eventsPath, [prompt("p1"), prompt("p2")].map((line) => `${JSON.stringify(line)}\n`).join(""));
+  const stopped = (blocker: object) => task("stuck", "blocked", { blocker: { from: "implementation", reason: "Needs a decision.", since: "2026-05-01T10:00:00Z", ...blocker } });
+  const work = task("busy", "implementation", { workers: { implementation: { status: "closed", session: "s-work" } } });
+  const stops = (result: { findings: any[] }) => result.findings.filter(({ kind }) => kind === "stop");
+  const recorded = async () => (await readFile(eventsPath, "utf8")).trim().split("\n").map((line) => JSON.parse(line)).filter(({ type }) => type === "stop.recorded");
+
+  let result = await f.run([work, stopped({ class: "user-decision" })]);
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(stops(result).map(({ command, ...rest }) => rest), [
+    { kind: "stop", stop_id: "blocked:stuck:-:2026-05-01T10:00:00Z", cause: "blocked", class: "user-decision", task: "stuck", role: null,
+      detail: "The task is blocked. Reason: Needs a decision." },
+    { kind: "stop", stop_id: stops(result)[1].stop_id, cause: "repeated-permission", class: "worker-fixable", task: "busy", role: "implementation",
+      detail: "The worker asked for the same permission approval 2 times in one session." },
+  ]);
+  assert.ok(result.findings.some(({ kind }) => kind === "stale-blocked"));
+  const [first] = stops(result);
+  const causeId = /--task (cause-[0-9a-f]{8})/.exec(first.command)![1];
+  assert.equal(first.command, `node ${join(import.meta.dirname, "factory.mjs")} write ${f.file} --task ${causeId} --title 'Cause: blocked in stuck' --issue null --next-action 'Find the root cause. Then propose a prevention, not only a retry.' --details '{"stop_id":"${first.stop_id}","cause_of":"stuck"}'`);
+
+  await f.run([work, stopped({ class: "user-decision" })]);
+  assert.equal((await recorded()).length, 2, "each stop is recorded once");
+  assert.ok((await recorded()).every(({ source }) => source === "stops"));
+
+  const cause = task(causeId, "initial", { details: { stop_id: first.stop_id, cause_of: "stuck" } });
+  result = await f.run([work, stopped({ class: "user-decision" }), cause]);
+  assert.deepEqual(stops(result).map(({ cause }) => cause), ["repeated-permission"]);
+});
+
 test("reports a running worker that ended its turn over 10 minutes ago and saved no new result", async (t) => {
   const f = await fixture(t, fakeRex);
   const state = join(f.directory, "session-state");

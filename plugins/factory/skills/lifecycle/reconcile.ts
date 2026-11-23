@@ -5,12 +5,13 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs, promisify } from "node:util";
 import { lastEvent, resolveAttention, sameId } from "./attention.ts";
-import { resolveFactory, waiterPid } from "./broker.ts";
+import { eventsFile, readEvents, resolveFactory, waiterPid } from "./broker.ts";
 import { intervalMs, keepFirst, mergeRefusal, resourceId, sharesWork, type Factory, type Task, type Worker } from "./factory-data.ts";
 import { defaultBranch } from "./default-branch.ts";
 import { hooksInactive } from "./gate.ts";
 import { scanProposals } from "./proposals.ts";
 import { readJSON } from "./state-dir.ts";
+import { causeTaskId, detectStops, recordStop, scanStops, type QuietWorker } from "./stops.ts";
 
 const usage = "Usage: node factory.mjs reconcile FACTORY_FILE [--default-branch NAME] [--blocked-after 24h] [--attention-after 30m]";
 
@@ -114,6 +115,7 @@ async function reconcile(file: string, branchOverride?: string, blockedAfter = i
   const findings: Finding[] = [];
   const errors: string[] = [];
   const open = factory.tasks.filter((task) => task.state !== "resolved");
+  const quiet: QuietWorker[] = [];
 
   // Only a finished run with no open task may sit without a waiter.
   if ((factory.status === "active" || open.length > 0) && await waiterPid(await resolveFactory(file)) === null) {
@@ -173,7 +175,10 @@ async function reconcile(file: string, branchOverride?: string, blockedAfter = i
       const resultFile = worker?.result ? join(directory, worker.result) : null;
       const resultTime = resultFile ? await stat(resultFile).then(({ mtimeMs }) => mtimeMs, () => null) : null;
       const idle = await quietMinutes(worker, resultTime);
-      if (idle !== null) findings.push({ kind: "worker-quiet", task: task.id, role, idle_minutes: idle });
+      if (idle !== null) {
+        findings.push({ kind: "worker-quiet", task: task.id, role, idle_minutes: idle });
+        quiet.push({ task: task.id, role, minutes: idle });
+      }
     }
 
     const blocked = task.state === "blocked" ? task.blocker : null;
@@ -314,6 +319,28 @@ async function reconcile(file: string, branchOverride?: string, blockedAfter = i
     }
   } catch (error) {
     errors.push(`improve: ${(error as Error).message.split("\n")[0]}`);
+  }
+
+  // Record each new stop once. A stop stays a finding until a cause task holds its stop_id.
+  try {
+    const log = await resolveFactory(file);
+    for (const stop of detectStops(factory, (await readEvents(eventsFile(log), 0)).events, quiet)) await recordStop(log, stop);
+    for (const stop of (await scanStops(log, factory)).filter(({ cause_task }) => cause_task === null)) {
+      const details = JSON.stringify({ stop_id: stop.stop_id, cause_of: stop.task });
+      const title = `Cause: ${stop.cause} in ${stop.task ?? "no task"}`;
+      findings.push({
+        kind: "stop",
+        stop_id: stop.stop_id,
+        cause: stop.cause,
+        class: stop.class,
+        task: stop.task,
+        role: stop.role,
+        detail: stop.detail,
+        command: `node ${factoryScript} write ${file} --task ${causeTaskId(stop.stop_id)} --title '${title}' --issue null --next-action 'Find the root cause. Then propose a prevention, not only a retry.' --details '${details}'`,
+      });
+    }
+  } catch (error) {
+    errors.push(`stops: ${(error as Error).message.split("\n")[0]}`);
   }
 
   if (missing.length > 0 && rex()?.sessionGone) {

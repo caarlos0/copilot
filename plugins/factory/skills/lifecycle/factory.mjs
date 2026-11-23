@@ -1232,6 +1232,7 @@ var exists = (path) => {
 var init_state_dir = () => {};
 
 // plugins/factory/skills/lifecycle/stops.ts
+import { createHash } from "node:crypto";
 import { readFile as readFile3 } from "node:fs/promises";
 async function readStops(file) {
   let text;
@@ -1274,9 +1275,104 @@ async function scanStops(file, factory) {
     return { ...data, task, at, cause_task: cause?.id ?? null, cause_state: cause?.state ?? null };
   });
 }
-var stopId = (cause, task, role, key) => `${cause}:${task ?? "-"}:${role ?? "-"}:${key}`;
+function detectStops(factory, events, quiet = []) {
+  const found = new Map;
+  const add = (stop) => found.has(stop.stop_id) || found.set(stop.stop_id, stop);
+  const tasks = new Map(factory.tasks.map((task) => [task.id, task]));
+  for (const task of factory.tasks) {
+    if (task.state !== "blocked" || !task.blocker)
+      continue;
+    add({
+      stop_id: stopId("blocked", task.id, null, task.blocker.since),
+      cause: "blocked",
+      task: task.id,
+      role: null,
+      class: task.blocker.class ?? "none",
+      detail: clip(`The task is blocked. Reason: ${task.blocker.reason}`),
+      count: 1
+    });
+  }
+  events.forEach((event, index) => {
+    const task = event.task ? tasks.get(event.task) : undefined;
+    if (event.type !== "worker.blocked" || !task || task.state === "resolved")
+      return;
+    const role = String(event.data.role);
+    const cleared = events.slice(index + 1).some((later) => later.type === "task.moved" && later.task === task.id && later.data.to !== "blocked");
+    if (cleared || task.workers[role]?.status === "running")
+      return;
+    add({
+      stop_id: stopId("worker-blocked", task.id, role, event.id ?? event.at),
+      cause: "worker-blocked",
+      task: task.id,
+      role,
+      class: "worker-fixable",
+      detail: clip(`The worker reported blocked. Reason: ${event.data.reason}`),
+      count: 1
+    });
+  });
+  for (const { task, role, minutes } of quiet) {
+    const launched = tasks.get(task)?.workers[role]?.launched_at;
+    add({
+      stop_id: stopId("worker-quiet", task, role, launched ?? "-"),
+      cause: "worker-quiet",
+      task,
+      role,
+      class: "worker-fixable",
+      detail: `The worker was quiet for ${minutes} minutes after its last turn.`,
+      count: 1
+    });
+  }
+  const prompts = new Map;
+  for (const event of events) {
+    const { session, kind, text } = event.data;
+    if (event.type !== "attention.requested" || !promptKinds.includes(kind) || typeof session !== "string" || typeof text !== "string")
+      continue;
+    const key = [session, kind, text.slice(0, 120)].join("\x00");
+    prompts.set(key, [...prompts.get(key) ?? [], event]);
+  }
+  for (const [key, group] of prompts) {
+    if (group.length < repeatedPrompts)
+      continue;
+    const { session, kind, role: eventRole } = group[0].data;
+    const owner = factory.tasks.flatMap((task) => Object.entries(task.workers ?? {}).map(([role, worker]) => ({ task: task.id, role, worker }))).find(({ worker }) => worker?.session === session);
+    const role = owner?.role ?? eventRole ?? null;
+    add({
+      stop_id: stopId("repeated-permission", owner?.task ?? null, role, short(key)),
+      cause: "repeated-permission",
+      task: owner?.task ?? null,
+      role,
+      class: "worker-fixable",
+      detail: `The worker asked for the same ${kind} approval ${group.length} times in one session.`,
+      count: group.length
+    });
+  }
+  const conflicts = new Map;
+  for (const event of events) {
+    if (event.type !== "stop.recorded" || event.data.cause !== "emit-refused" || !event.task || !event.data.head)
+      continue;
+    conflicts.set(event.task, [...conflicts.get(event.task) ?? [], event]);
+  }
+  for (const [task, group] of conflicts) {
+    const heads = new Set(group.map((event) => event.data.head));
+    if (heads.size < repeatedConflicts)
+      continue;
+    const { head, role } = group[0].data;
+    add({
+      stop_id: stopId("repeated-conflict", task, role ?? null, String(head).slice(0, 12)),
+      cause: "repeated-conflict",
+      task,
+      role: role ?? null,
+      class: "worker-fixable",
+      detail: `The head was not rebased on ${heads.size} different heads.`,
+      count: heads.size
+    });
+  }
+  return [...found.values()];
+}
+var stopId = (cause, task, role, key) => `${cause}:${task ?? "-"}:${role ?? "-"}:${key}`, causeTaskId = (id) => `cause-${createHash("sha256").update(id).digest("hex").slice(0, 8)}`, maxDetail = 300, repeatedPrompts = 2, repeatedConflicts = 2, promptKinds, short = (text) => createHash("sha256").update(text).digest("hex").slice(0, 8), clip = (text) => text.length > maxDetail ? `${text.slice(0, maxDetail - 3)}...` : text;
 var init_stops = __esm(() => {
   init_broker();
+  promptKinds = ["permission", "sandbox-bypass"];
 });
 
 // plugins/factory/skills/lifecycle/broker.ts
@@ -1285,6 +1381,7 @@ __export(exports_broker, {
   emit: () => emit,
   eventsFile: () => eventsFile,
   main: () => main2,
+  readEvents: () => readEvents,
   resolveFactory: () => resolveFactory,
   stopCauses: () => stopCauses,
   stopClasses: () => stopClasses,
@@ -1776,7 +1873,8 @@ async function recordRefusal(factory, { type, task, data }, kind) {
       role,
       class: "worker-fixable",
       detail: `The emit of ${type} was refused: ${kind}.`,
-      count: 1
+      count: 1,
+      ...kind === "not-rebased" && typeof data?.head === "string" && { head: data.head }
     });
   } catch {}
 }
@@ -3213,6 +3311,7 @@ async function reconcile(file, branchOverride, blockedAfter = intervalMs("24h"),
   const findings = [];
   const errors = [];
   const open = factory.tasks.filter((task) => task.state !== "resolved");
+  const quiet = [];
   if ((factory.status === "active" || open.length > 0) && await waiterPid(await resolveFactory(file)) === null) {
     findings.push({ kind: "no-waiter", status: factory.status ?? null, open: open.length });
   }
@@ -3267,8 +3366,10 @@ async function reconcile(file, branchOverride, blockedAfter = intervalMs("24h"),
       const resultFile = worker?.result ? join7(directory, worker.result) : null;
       const resultTime = resultFile ? await stat6(resultFile).then(({ mtimeMs }) => mtimeMs, () => null) : null;
       const idle = await quietMinutes(worker, resultTime);
-      if (idle !== null)
+      if (idle !== null) {
         findings.push({ kind: "worker-quiet", task: task.id, role, idle_minutes: idle });
+        quiet.push({ task: task.id, role, minutes: idle });
+      }
     }
     const blocked = task.state === "blocked" ? task.blocker : null;
     if (blocked && Date.now() - Date.parse(blocked.since) > blockedAfter) {
@@ -3401,6 +3502,28 @@ async function reconcile(file, branchOverride, blockedAfter = intervalMs("24h"),
     errors.push(`improve: ${error.message.split(`
 `)[0]}`);
   }
+  try {
+    const log = await resolveFactory(file);
+    for (const stop of detectStops(factory, (await readEvents(eventsFile(log), 0)).events, quiet))
+      await recordStop(log, stop);
+    for (const stop of (await scanStops(log, factory)).filter(({ cause_task }) => cause_task === null)) {
+      const details = JSON.stringify({ stop_id: stop.stop_id, cause_of: stop.task });
+      const title = `Cause: ${stop.cause} in ${stop.task ?? "no task"}`;
+      findings.push({
+        kind: "stop",
+        stop_id: stop.stop_id,
+        cause: stop.cause,
+        class: stop.class,
+        task: stop.task,
+        role: stop.role,
+        detail: stop.detail,
+        command: `node ${factoryScript} write ${file} --task ${causeTaskId(stop.stop_id)} --title '${title}' --issue null --next-action 'Find the root cause. Then propose a prevention, not only a retry.' --details '${details}'`
+      });
+    }
+  } catch (error) {
+    errors.push(`stops: ${error.message.split(`
+`)[0]}`);
+  }
   if (missing.length > 0 && rex()?.sessionGone) {
     findings.push({ kind: "rex-session-missing", session: factory.rex_session, workers: missing.length });
   }
@@ -3449,6 +3572,7 @@ var init_reconcile = __esm(() => {
   init_gate();
   init_proposals();
   init_state_dir();
+  init_stops();
   factoryScript = join7(dirname5(fileURLToPath(import.meta.url)), "factory.mjs");
   closes = /\b(?:fix(?:e[sd])?|close[sd]?|resolve[sd]?)\s*:?\s+#(\d+)/gi;
   quietAfter = intervalMs("10m");
@@ -3811,7 +3935,7 @@ var exports_serve = {};
 __export(exports_serve, {
   main: () => main6
 });
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash as createHash2, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 import { readFile as readFile10, readdir as readdir3, realpath as realpath4, stat as stat8 } from "node:fs/promises";
 import { homedir as homedir5, networkInterfaces } from "node:os";
@@ -4023,7 +4147,7 @@ An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
     const stops = await recentStops(entry.target, data);
     const usage = await factoryUsage(data, sessionStateDirectory());
     const briefs = await taskBriefs(entry.file, data);
-    const digest = createHash("sha1").update(JSON.stringify([attention, proposals, stops, usage, briefs])).digest("base64url");
+    const digest = createHash2("sha1").update(JSON.stringify([attention, proposals, stops, usage, briefs])).digest("base64url");
     return {
       tag: `${entry.tag.slice(0, -1)}-${digest}"`,
       body: async () => ({ ...await readFactory(entry), attention, proposals, stops, usage, briefs })
@@ -4064,7 +4188,7 @@ An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
         return { file, error };
       }
     }));
-    const tag = createHash("sha1").update(JSON.stringify(entries.map((entry) => [entry.file, "tag" in entry ? entry.tag : errorMessage2(entry.error)]))).digest("base64url");
+    const tag = createHash2("sha1").update(JSON.stringify(entries.map((entry) => [entry.file, "tag" in entry ? entry.tag : errorMessage2(entry.error)]))).digest("base64url");
     return { entries, tag: `"${tag}"` };
   }
   async function listFactories(entries) {
@@ -4121,7 +4245,7 @@ An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
   }
   async function sendAsset(request, response, name, type) {
     const body = await readFile10(join10(assets, name));
-    await sendBody(request, response, name, createHash("sha1").update(body).digest("base64url"), () => body, type);
+    await sendBody(request, response, name, createHash2("sha1").update(body).digest("base64url"), () => body, type);
   }
   async function sendTagged(request, response, key, tag, body) {
     const seen = request.headers["if-none-match"]?.split(",").map((value) => value.trim().replace(/^W\//, ""));
@@ -4424,7 +4548,7 @@ function main6(argv) {
     process.exitCode = 1;
   });
 }
-var import_write_file_atomic3, factoryFile2, maxBody = 16384, tokenPattern, errorCode3 = (error) => error.code, errorMessage2 = (error) => error.message, bracket = (host) => host.includes(":") ? `[${host}]` : host, isWildcard = (host) => host === "0.0.0.0" || host === "::", isLoopback = (host) => host === "localhost" || host === "::1" || /^127\./.test(host), digest = (value) => createHash("sha256").update(value).digest(), sameToken = (value, expected) => typeof value === "string" && timingSafeEqual(digest(value), digest(expected)), HttpError;
+var import_write_file_atomic3, factoryFile2, maxBody = 16384, tokenPattern, errorCode3 = (error) => error.code, errorMessage2 = (error) => error.message, bracket = (host) => host.includes(":") ? `[${host}]` : host, isWildcard = (host) => host === "0.0.0.0" || host === "::", isLoopback = (host) => host === "localhost" || host === "::1" || /^127\./.test(host), digest = (value) => createHash2("sha256").update(value).digest(), sameToken = (value, expected) => typeof value === "string" && timingSafeEqual(digest(value), digest(expected)), HttpError;
 var init_serve = __esm(() => {
   init_factory_data();
   init_attention();
@@ -4936,7 +5060,7 @@ var exports_migrate = {};
 __export(exports_migrate, {
   main: () => main10
 });
-import { createHash as createHash2, randomUUID as randomUUID3 } from "node:crypto";
+import { createHash as createHash3, randomUUID as randomUUID3 } from "node:crypto";
 import { access, link as link2, mkdir as mkdir2, readFile as readFile11, rename, rm as rm4, writeFile as writeFile2 } from "node:fs/promises";
 import { basename as basename7, dirname as dirname8, join as join13, resolve as resolve9 } from "node:path";
 import { parseArgs as parseArgs10 } from "node:util";
@@ -4960,7 +5084,7 @@ async function readSource(file) {
       throw new Error(`${file}: a task is missing id, goal, status, or updated_at. Repair it and retry.`);
     }
   }
-  return { file, data, hash: createHash2("sha256").update(raw).digest("hex") };
+  return { file, data, hash: createHash3("sha256").update(raw).digest("hex") };
 }
 function validLink(value) {
   try {
@@ -5241,7 +5365,7 @@ Run with --help for usage.`);
   };
   if (!options["dry-run"]) {
     for (const source of [...loaded.map((item) => item.source), ...reviewers]) {
-      if (createHash2("sha256").update(await readFile11(source.file)).digest("hex") !== source.hash) {
+      if (createHash3("sha256").update(await readFile11(source.file)).digest("hex") !== source.hash) {
         throw new Error(`${source.file} changed during migration. Stop its writer and retry.`);
       }
     }
@@ -5952,7 +6076,7 @@ function observe(input) {
       return null;
     const fields = Object.values(args.requestedSchema?.properties ?? {});
     const choices = fields.length === 1 && Array.isArray(fields[0]?.enum) ? fields[0].enum : [];
-    const options = choices.length > 0 && choices.every((option) => typeof option === "string") ? choices.slice(0, MAX_OPTIONS).map((option) => clip(option, MAX_OPTION)) : [];
+    const options = choices.length > 0 && choices.every((option) => typeof option === "string") ? choices.slice(0, MAX_OPTIONS).map((option) => clip2(option, MAX_OPTION)) : [];
     return { type: "ask-user", text: args.message, options };
   }
   if (input.toolName === "bash" && typeof args.command === "string") {
@@ -6002,7 +6126,7 @@ async function run4() {
   if (!PROMPTS.has(input.notification_type))
     return;
   const { kind, text, options } = describe(input, takeNote(who.session, now));
-  const data = { session: who.session, kind, text: clip(text, MAX_TEXT) };
+  const data = { session: who.session, kind, text: clip2(text, MAX_TEXT) };
   if (who.role)
     data.role = who.role;
   if (who.pane)
@@ -6017,7 +6141,7 @@ async function main13(_argv) {
     await run4();
   } catch {}
 }
-var MAX_TEXT = 2000, MAX_OPTIONS = 20, MAX_OPTION = 200, NOTE_TTL_MS = 30000, clip = (value, max) => String(value).slice(0, max), noteFile = (session) => join15(process.env.TMPDIR || tmpdir3(), `factory-attention-${session.replace(/[^\w-]/g, "_")}.json`), PROMPTS;
+var MAX_TEXT = 2000, MAX_OPTIONS = 20, MAX_OPTION = 200, NOTE_TTL_MS = 30000, clip2 = (value, max) => String(value).slice(0, max), noteFile = (session) => join15(process.env.TMPDIR || tmpdir3(), `factory-attention-${session.replace(/[^\w-]/g, "_")}.json`), PROMPTS;
 var init_attention2 = __esm(() => {
   init_gate();
   PROMPTS = new Set(["permission_prompt", "elicitation_dialog"]);
