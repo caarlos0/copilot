@@ -182,10 +182,62 @@ test("worker.result is refused unless its result file exists and matches the eve
     writeFileSync(join(f.directory, "t1-result.json"), JSON.stringify(saved));
     refuse(data, pattern);
   }
-  await assert.rejects(stat(f.log), { code: "ENOENT" });
+  const logged = (await readFile(f.log, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+  assert.ok(logged.length > 0 && logged.every(({ type }) => type === "stop.recorded"));
   writeFileSync(join(f.directory, "t1-result.json"), JSON.stringify({ task: "t1", role: "implementation", outcome: "complete" }));
   const out = f.run("emit", f.factory, "worker.result", "--task", "t1", "--data", JSON.stringify(data));
   assert.equal(out.status, 0, out.stderr);
+});
+
+test("a refused worker emit records one stop and keeps its exit code and message", async (t) => {
+  const f = await fixture(t);
+  const lines = async () => (await readFile(f.log, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+  const data = JSON.stringify({ role: "implementation", outcome: "complete", result: "t1-result.json" });
+  const refused = f.run("emit", f.factory, "worker.result", "--task", "t1", "--data", data);
+  assert.equal(refused.status, 1);
+  assert.match(refused.stderr, /^Result file t1-result\.json is not readable JSON/);
+  const [stop, ...rest] = await lines();
+  assert.equal(rest.length, 0);
+  assert.equal(stop.type, "stop.recorded");
+  assert.equal(stop.source, "stops");
+  assert.equal(stop.task, "t1");
+  assert.equal(stop.data.cause, "emit-refused");
+  assert.equal(stop.data.role, "implementation");
+  assert.equal(stop.data.detail, "The emit of worker.result was refused: bad-result.");
+  assert.match(stop.data.stop_id, /^emit-refused:t1:implementation:[0-9a-f-]{36}$/);
+
+  const again = f.run("emit", f.factory, "worker.blocked", "--task", "t1", "--data", JSON.stringify({ role: "implementation", reason: "r", result: "t1-result.json" }));
+  assert.equal(again.status, 1);
+  const stops = await lines();
+  assert.equal(stops.length, 2);
+  assert.notEqual(stops[1].data.stop_id, stop.data.stop_id);
+  assert.equal(stops[1].data.detail, "The emit of worker.blocked was refused: bad-result.");
+
+  // A usage error and a refused pr.merged record nothing.
+  assert.equal(f.run("emit", f.factory, "worker.result", "--task", "t1", "--data", "{}").status, 2);
+  assert.equal(f.run("emit", f.factory, "pr.merged", "--task", "t1", "--data", JSON.stringify({ pr: "u", merge_commit: "abc" })).status, 1);
+  assert.equal((await lines()).length, 2);
+});
+
+test("a failure while recording a stop keeps the exit code and the message", async (t) => {
+  const f = await fixture(t);
+  await mkdir(f.log);
+  const out = f.run("emit", f.factory, "worker.result", "--task", "t1", "--data", JSON.stringify({ role: "implementation", outcome: "complete", result: "t1-result.json" }));
+  assert.equal(out.status, 1);
+  assert.match(out.stderr, /^Result file t1-result\.json is not readable JSON[^\n]*\n$/);
+});
+
+test("emit refuses a stop.recorded with a cause or a class that is not in the lists", async (t) => {
+  const f = await fixture(t);
+  const stop = (data: object) => f.run("emit", f.factory, "stop.recorded", "--source", "stops", "--data", JSON.stringify({ stop_id: "s", cause: "blocked", class: "none", ...data }));
+  assert.equal(stop({}).status, 0);
+  const cause = stop({ cause: "tired" });
+  assert.equal(cause.status, 2);
+  assert.match(cause.stderr, /cause must be one of/);
+  const klass = stop({ class: "someone" });
+  assert.equal(klass.status, 2);
+  assert.match(klass.stderr, /class must be one of/);
+  assert.equal(f.run("emit", f.factory, "stop.recorded", "--data", JSON.stringify({ cause: "blocked", class: "none" })).status, 2);
 });
 
 test("worker.blocked checks a named result for outcome blocked, and pr.merged needs a full SHA", async (t) => {

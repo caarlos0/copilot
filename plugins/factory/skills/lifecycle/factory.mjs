@@ -1231,6 +1231,47 @@ var exists = (path) => {
 ];
 var init_state_dir = () => {};
 
+// plugins/factory/skills/lifecycle/stops.ts
+import { readFile as readFile3 } from "node:fs/promises";
+async function readStops(file) {
+  let text;
+  try {
+    text = await readFile3(eventsFile(file), "utf8");
+  } catch (error) {
+    if (error.code === "ENOENT")
+      return new Map;
+    throw error;
+  }
+  const stops = new Map;
+  for (const line of text.split(`
+`)) {
+    if (!line.includes('"stop.recorded"'))
+      continue;
+    let event;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    const id = event?.data?.stop_id;
+    if (event.type === "stop.recorded" && typeof id === "string" && !stops.has(id))
+      stops.set(id, event);
+  }
+  return stops;
+}
+async function recordStop(file, stop) {
+  const factory = await resolveFactory(file);
+  if ((await readStops(factory)).has(stop.stop_id))
+    return { recorded: false };
+  const { task, ...data } = stop;
+  await emit(factory, { type: "stop.recorded", task, source: "stops", data });
+  return { recorded: true };
+}
+var stopId = (cause, task, role, key) => `${cause}:${task ?? "-"}:${role ?? "-"}:${key}`;
+var init_stops = __esm(() => {
+  init_broker();
+});
+
 // plugins/factory/skills/lifecycle/broker.ts
 var exports_broker = {};
 __export(exports_broker, {
@@ -1238,13 +1279,15 @@ __export(exports_broker, {
   eventsFile: () => eventsFile,
   main: () => main2,
   resolveFactory: () => resolveFactory,
+  stopCauses: () => stopCauses,
+  stopClasses: () => stopClasses,
   waitForEvents: () => waitForEvents,
   waiterPid: () => waiterPid
 });
 import { execFileSync as execFileSync2 } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { fstatSync, readFileSync, statSync as statSync2, unlinkSync, watch } from "node:fs";
-import { link, open, readFile as readFile3, realpath, rm as rm2, stat as stat2, writeFile } from "node:fs/promises";
+import { link, open, readFile as readFile4, realpath, rm as rm2, stat as stat2, writeFile } from "node:fs/promises";
 import { basename as basename2, dirname as dirname2, extname as extname2, join as join3, resolve as resolve2 } from "node:path";
 import { parseArgs as parseArgs2 } from "node:util";
 function isWaiter(pid) {
@@ -1269,7 +1312,7 @@ function stdoutUnread() {
 async function waiterPid(factory) {
   let text;
   try {
-    text = await readFile3(waiterFile(factory), "utf8");
+    text = await readFile4(waiterFile(factory), "utf8");
   } catch (error) {
     if (error.code === "ENOENT")
       return null;
@@ -1331,6 +1374,19 @@ function validateEvent({ type, task, source, data }) {
     validateAttention(type, data);
   if (type.startsWith("improve."))
     validateImprove(type, data);
+  if (type === "stop.recorded")
+    validateStop(data);
+}
+function validateStop(data) {
+  if (typeof data.stop_id !== "string" || data.stop_id === "")
+    throw new UsageError('stop.recorded data "stop_id" must be a non-empty string.');
+  if (!stopCauses.includes(data.cause))
+    throw new UsageError(`stop.recorded cause must be one of: ${stopCauses.join(", ")}.`);
+  if (!stopClasses.includes(data.class))
+    throw new UsageError(`stop.recorded class must be one of: ${stopClasses.join(", ")}.`);
+  if (data.detail !== undefined && (typeof data.detail !== "string" || data.detail.length > maxStopDetail)) {
+    throw new UsageError(`stop.recorded data "detail" must be a string of at most ${maxStopDetail} characters.`);
+  }
 }
 function validateImprove(type, data) {
   const text = (key) => {
@@ -1385,30 +1441,30 @@ function validateAttention(type, data) {
 async function checkResult(factory, { type, task, data }) {
   const name = data.result;
   if (typeof name !== "string" || name !== basename2(name) || name.startsWith(".")) {
-    throw new Error(`${type} data "result" must name a result file in the state directory.`);
+    throw new RefusedError("bad-result", `${type} data "result" must name a result file in the state directory.`);
   }
   let saved;
   try {
-    saved = JSON.parse(await readFile3(join3(dirname2(factory), name), "utf8"));
+    saved = JSON.parse(await readFile4(join3(dirname2(factory), name), "utf8"));
   } catch (error) {
-    throw new Error(`Result file ${name} is not readable JSON in the state directory: ${error.message}`);
+    throw new RefusedError("bad-result", `Result file ${name} is not readable JSON in the state directory: ${error.message}`);
   }
   const outcome = type === "worker.blocked" ? "blocked" : data.outcome;
   for (const [key, want] of [["task", task], ["role", data.role], ["outcome", outcome]]) {
     if (saved?.[key] !== want)
-      throw new Error(`Result file ${name} has ${key} ${JSON.stringify(saved?.[key])}, but the event has ${JSON.stringify(want)}.`);
+      throw new RefusedError("bad-result", `Result file ${name} has ${key} ${JSON.stringify(saved?.[key])}, but the event has ${JSON.stringify(want)}.`);
   }
 }
 async function checkHead(factory, task, head) {
-  const record = JSON.parse(await readFile3(factory, "utf8")).tasks?.find(({ id }) => id === task);
+  const record = JSON.parse(await readFile4(factory, "utf8")).tasks?.find(({ id }) => id === task);
   const worktree = record?.worktree;
   if (!worktree?.path)
     return;
   const at = git2(worktree.path, "rev-parse", "HEAD");
   if (at !== head)
-    throw new Error(`The worktree ${worktree.path} is at ${at}, not at head ${head}. Commit the changes. Then report the correct head.`);
+    throw new RefusedError("head-mismatch", `The worktree ${worktree.path} is at ${at}, not at head ${head}. Commit the changes. Then report the correct head.`);
   if (git2(worktree.path, "status", "--porcelain"))
-    throw new Error(`The worktree ${worktree.path} has uncommitted changes. Commit them. Then emit the event again.`);
+    throw new RefusedError("dirty-worktree", `The worktree ${worktree.path} has uncommitted changes. Commit them. Then emit the event again.`);
   if (record.pr)
     return;
   const base = defaultBranch(worktree.path) ?? "main";
@@ -1417,7 +1473,7 @@ async function checkHead(factory, task, head) {
   } catch (error) {
     if (error.status !== 1)
       throw error;
-    throw new Error(`Head ${head} does not descend from ${base}. Run git rebase ${base}. Then emit the event again.`);
+    throw new RefusedError("not-rebased", `Head ${head} does not descend from ${base}. Run git rebase ${base}. Then emit the event again.`);
   }
 }
 async function checkEvent(factory, event) {
@@ -1509,7 +1565,7 @@ async function waitForEvents(factory, { since, timeout, exclude = [], due = fals
 async function armedWait(factory, { since, timeout, exclude, due, reconcile }) {
   const file = eventsFile(factory);
   let cursor = since ?? await size(file);
-  const state = async () => JSON.parse(await readFile3(factory, "utf8"));
+  const state = async () => JSON.parse(await readFile4(factory, "utf8"));
   const watchers = [];
   const timers = [];
   let dueTimers = [];
@@ -1698,9 +1754,26 @@ Run with --help for usage.`);
   } catch (error) {
     console.error(error.message);
     process.exitCode = error instanceof UsageError ? 2 : 1;
+    if (error instanceof RefusedError)
+      await recordRefusal(factory, event, error.kind);
   }
 }
-var maxTimer, maxLine, reconcileEvery = "5m", reconcileMs, workerOutcomes, attentionKinds, maxAttentionText = 2000, changeKinds, answers, decisions, eventTypes, eventsFile = (file) => join3(dirname2(file), `${basename2(file, extname2(file))}-events.jsonl`), waiterFile = (file) => join3(dirname2(file), `${basename2(file, extname2(file))}-waiter.pid`), UsageError, git2 = (cwd, ...args) => execFileSync2("git", ["-C", cwd, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim(), usage2;
+async function recordRefusal(factory, { type, task, data }, kind) {
+  try {
+    await Promise.resolve().then(() => init_stops());
+    const role = typeof data?.role === "string" ? data.role : null;
+    await recordStop(factory, {
+      stop_id: stopId("emit-refused", task ?? null, role, randomUUID()),
+      cause: "emit-refused",
+      task: task ?? null,
+      role,
+      class: "worker-fixable",
+      detail: `The emit of ${type} was refused: ${kind}.`,
+      count: 1
+    });
+  } catch {}
+}
+var maxTimer, maxLine, reconcileEvery = "5m", reconcileMs, workerOutcomes, attentionKinds, maxAttentionText = 2000, changeKinds, answers, decisions, stopCauses, stopClasses, maxStopDetail = 300, eventTypes, eventsFile = (file) => join3(dirname2(file), `${basename2(file, extname2(file))}-events.jsonl`), waiterFile = (file) => join3(dirname2(file), `${basename2(file, extname2(file))}-waiter.pid`), UsageError, RefusedError, git2 = (cwd, ...args) => execFileSync2("git", ["-C", cwd, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim(), usage2;
 var init_broker = __esm(() => {
   init_default_branch();
   init_factory_data();
@@ -1713,6 +1786,8 @@ var init_broker = __esm(() => {
   changeKinds = ["rule", "limit", "budget", "process", "skill", "grant"];
   answers = ["accept", "decline"];
   decisions = ["accepted", "declined"];
+  stopCauses = ["blocked", "worker-blocked", "worker-quiet", "emit-refused", "repeated-permission", "repeated-conflict"];
+  stopClasses = ["user-decision", "outside-action", "external-wait", "ci-infra", "approval", "worker-fixable", "none"];
   eventTypes = {
     "task.moved": { task: true, data: ["to"] },
     "task.updated": { task: true, data: ["revision"] },
@@ -1726,9 +1801,17 @@ var init_broker = __esm(() => {
     "attention.requested": { task: false, data: ["session", "kind", "text"] },
     "attention.resolved": { task: false, data: ["session"] },
     "improve.proposed": { task: false, data: ["rule", "change", "title", "evidence", "recommended", "proposal_id", "result"] },
-    "improve.decided": { task: false, data: ["proposal_id", "decision"] }
+    "improve.decided": { task: false, data: ["proposal_id", "decision"] },
+    "stop.recorded": { task: false, data: ["stop_id", "cause", "class"] }
   };
   UsageError = class UsageError extends Error {
+  };
+  RefusedError = class RefusedError extends Error {
+    kind;
+    constructor(kind, message) {
+      super(message);
+      this.kind = kind;
+    }
   };
   usage2 = `Factory event broker: a durable event log that only grows, with a waiter that wakes at once.
 
@@ -1758,13 +1841,21 @@ wait    Waits until an event exists after the cursor, prints {"events":[...],"cu
 emit    Appends one event and prints it. Types: ${Object.keys(eventTypes).join(", ")}.
         Needed data keys: ${Object.entries(eventTypes).map(([type, { data }]) => `${type}: ${data.join(", ")}`).join("; ")}.
         worker.result outcome: ${workerOutcomes.join(", ")}. --source defaults to worker.
-        emit refuses a worker.result (exit 1, nothing appended) when data.result is not a JSON
+        emit refuses a worker.result (exit 1, the event is not appended) when data.result is not a JSON
         file in the state directory with the same task, role, and outcome. A worker.blocked with
         data.result gets the same check with outcome blocked. A complete implementation
         worker.result with data.head must match HEAD of the worktree of the task. For a task
         without a PR, the head must also descend from main. emit skips these checks when the
         task has no worktree record.
         pr.merged needs a full merge_commit SHA.
+        When emit refuses a worker.result or a worker.blocked for one of these reasons, it also
+        appends one stop.recorded (--source stops, cause emit-refused) that names the reason
+        kind: not-rebased, dirty-worktree, head-mismatch or bad-result.
+        stop.recorded (--source stops, no --task needed) records one stop of a worker. data:
+        stop_id (unique; a second event with the same stop_id is ignored by readers), cause
+        (${stopCauses.join(", ")}), class (${stopClasses.join(", ")}), and optional
+        role, detail (a string of at most ${maxStopDetail} characters, no session text) and count.
+        Wait with --exclude-source stops, so a stop never wakes the factory.
         attention.requested and attention.resolved need no --task (a rule worker or the
         coordinator has none). A hook emits them with --source attention when a Copilot session
         waits for the user. attention.requested data: session (the Copilot session ID, a string),
@@ -1805,7 +1896,7 @@ var init_conflict = __esm(() => {
 });
 
 // plugins/factory/skills/lifecycle/sessions.ts
-import { appendFile, readFile as readFile4, readdir as readdir2, realpath as realpath2, stat as stat3 } from "node:fs/promises";
+import { appendFile, readFile as readFile5, readdir as readdir2, realpath as realpath2, stat as stat3 } from "node:fs/promises";
 import { homedir as homedir2 } from "node:os";
 import { basename as basename3, dirname as dirname3, extname as extname3, join as join4, resolve as resolve3 } from "node:path";
 function entry(line, file, number) {
@@ -1823,7 +1914,7 @@ function entry(line, file, number) {
 async function readSessions(file) {
   let text;
   try {
-    text = await readFile4(file, "utf8");
+    text = await readFile5(file, "utf8");
   } catch (error) {
     if (error.code === "ENOENT")
       return [];
@@ -1851,7 +1942,7 @@ async function findSessions(directory, cwd, since) {
     try {
       if ((await stat3(join4(directory, name))).mtimeMs < from)
         return;
-      const yaml = await readFile4(join4(directory, name, "workspace.yaml"), "utf8");
+      const yaml = await readFile5(join4(directory, name, "workspace.yaml"), "utf8");
       const field = (key) => yaml.match(new RegExp(`^${key}: *["']?(.+?)["']?$`, "m"))?.[1];
       const sessionCwd = field("cwd");
       if (!(Date.parse(field("created_at")) >= from) || !sessionCwd)
@@ -1876,7 +1967,7 @@ __export(exports_tasks, {
   update: () => update
 });
 import { randomUUID as randomUUID2 } from "node:crypto";
-import { open as open2, readFile as readFile5, realpath as realpath3, rm as rm3, stat as stat4 } from "node:fs/promises";
+import { open as open2, readFile as readFile6, realpath as realpath3, rm as rm3, stat as stat4 } from "node:fs/promises";
 import { basename as basename4, extname as extname4, resolve as resolve4 } from "node:path";
 import { parseArgs as parseArgs3 } from "node:util";
 function merge(current, patch) {
@@ -1892,7 +1983,7 @@ function merge(current, patch) {
 }
 async function readOptional(file) {
   try {
-    return await readFile5(file, "utf8");
+    return await readFile6(file, "utf8");
   } catch (error) {
     if (error.code === "ENOENT")
       return null;
@@ -2437,7 +2528,7 @@ async function locateSessions(current, previous, launches, now, track) {
 }
 async function lockOwner(lockFile) {
   try {
-    const pid = Number.parseInt(await readFile5(lockFile, "utf8"), 10);
+    const pid = Number.parseInt(await readFile6(lockFile, "utf8"), 10);
     if (Number.isInteger(pid) && pid > 0)
       return alive(pid) ? { pid } : null;
     return Date.now() - (await stat4(lockFile)).mtimeMs > lockMaxAge ? null : { pid: null };
@@ -2720,7 +2811,7 @@ var init_tasks = __esm(() => {
 
 // plugins/factory/skills/lifecycle/attention.ts
 import { execFile } from "node:child_process";
-import { open as open3, readFile as readFile6, stat as stat5 } from "node:fs/promises";
+import { open as open3, readFile as readFile7, stat as stat5 } from "node:fs/promises";
 import { homedir as homedir3 } from "node:os";
 import { join as join5 } from "node:path";
 import { promisify } from "node:util";
@@ -2796,7 +2887,7 @@ async function liveBlocks() {
 async function scanAttention(file, { now = Date.now(), panes } = {}) {
   let text;
   try {
-    text = await readFile6(eventsFile(file), "utf8");
+    text = await readFile7(eventsFile(file), "utf8");
   } catch (error) {
     if (errorCode2(error) === "ENOENT")
       return { open: [], resolved: [] };
@@ -2972,11 +3063,11 @@ var init_gate = __esm(() => {
 });
 
 // plugins/factory/skills/lifecycle/proposals.ts
-import { readFile as readFile7 } from "node:fs/promises";
+import { readFile as readFile8 } from "node:fs/promises";
 async function scanProposals(file) {
   let text;
   try {
-    text = await readFile7(eventsFile(file), "utf8");
+    text = await readFile8(eventsFile(file), "utf8");
   } catch (error) {
     if (error.code === "ENOENT")
       return { open: [], decided: [] };
@@ -3038,7 +3129,7 @@ __export(exports_reconcile, {
 });
 import { execFile as execFile2, execFileSync as execFileSync3 } from "node:child_process";
 import { existsSync } from "node:fs";
-import { readFile as readFile8, stat as stat6 } from "node:fs/promises";
+import { readFile as readFile9, stat as stat6 } from "node:fs/promises";
 import { dirname as dirname5, join as join7 } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs as parseArgs4, promisify as promisify2 } from "node:util";
@@ -3110,7 +3201,7 @@ async function quietMinutes(worker, resultTime) {
   return Math.floor((Date.now() - event.at) / 60000);
 }
 async function reconcile(file, branchOverride, blockedAfter = intervalMs("24h"), attentionAfter = intervalMs("30m")) {
-  const factory = JSON.parse(await readFile8(file, "utf8"));
+  const factory = JSON.parse(await readFile9(file, "utf8"));
   const directory = dirname5(file);
   const findings = [];
   const errors = [];
@@ -3715,7 +3806,7 @@ __export(exports_serve, {
 });
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
-import { readFile as readFile9, readdir as readdir3, realpath as realpath4, stat as stat8 } from "node:fs/promises";
+import { readFile as readFile10, readdir as readdir3, realpath as realpath4, stat as stat8 } from "node:fs/promises";
 import { homedir as homedir5, networkInterfaces } from "node:os";
 import { dirname as dirname6, join as join10, resolve as resolve6 } from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
@@ -3726,7 +3817,7 @@ function lanAddresses() {
 }
 async function persistedToken(path) {
   try {
-    const saved = (await readFile9(path, "utf8")).trim();
+    const saved = (await readFile10(path, "utf8")).trim();
     if (tokenPattern.test(saved))
       return saved;
   } catch (error) {
@@ -3845,7 +3936,7 @@ An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
     const cached = parsed.get(target);
     if (cached?.tag === tag)
       return cached.data;
-    const data = JSON.parse(await readFile9(target, "utf8"));
+    const data = JSON.parse(await readFile10(target, "utf8"));
     try {
       validate(data);
     } catch (error) {
@@ -4015,7 +4106,7 @@ An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
     send(response, 200, entry.gzip, type, { ...headers, "Content-Encoding": "gzip" });
   }
   async function sendAsset(request, response, name, type) {
-    const body = await readFile9(join10(assets, name));
+    const body = await readFile10(join10(assets, name));
     await sendBody(request, response, name, createHash("sha1").update(body).digest("base64url"), () => body, type);
   }
   async function sendTagged(request, response, key, tag, body) {
@@ -4283,7 +4374,7 @@ p{margin:0;color:#f87171}
         if (!name || !referenced) {
           throw new HttpError(403, "Artifact is not referenced by the selected factory.");
         }
-        send(response, 200, await readFile9(await briefFile(name)), "text/plain; charset=utf-8");
+        send(response, 200, await readFile10(await briefFile(name)), "text/plain; charset=utf-8");
       } else {
         throw new HttpError(404, "Not found.");
       }
@@ -4831,7 +4922,7 @@ __export(exports_migrate, {
   main: () => main10
 });
 import { createHash as createHash2, randomUUID as randomUUID3 } from "node:crypto";
-import { access, link as link2, mkdir as mkdir2, readFile as readFile10, rename, rm as rm4, writeFile as writeFile2 } from "node:fs/promises";
+import { access, link as link2, mkdir as mkdir2, readFile as readFile11, rename, rm as rm4, writeFile as writeFile2 } from "node:fs/promises";
 import { basename as basename7, dirname as dirname8, join as join13, resolve as resolve9 } from "node:path";
 import { parseArgs as parseArgs10 } from "node:util";
 async function exists2(path) {
@@ -4845,7 +4936,7 @@ async function exists2(path) {
   }
 }
 async function readSource(file) {
-  const raw = await readFile10(file, "utf8");
+  const raw = await readFile11(file, "utf8");
   const data = JSON.parse(raw);
   if (!data || !Array.isArray(data.tasks))
     throw new Error(`${file}: expected a handoff with a tasks array.`);
@@ -5135,7 +5226,7 @@ Run with --help for usage.`);
   };
   if (!options["dry-run"]) {
     for (const source of [...loaded.map((item) => item.source), ...reviewers]) {
-      if (createHash2("sha256").update(await readFile10(source.file)).digest("hex") !== source.hash) {
+      if (createHash2("sha256").update(await readFile11(source.file)).digest("hex") !== source.hash) {
         throw new Error(`${source.file} changed during migration. Stop its writer and retry.`);
       }
     }

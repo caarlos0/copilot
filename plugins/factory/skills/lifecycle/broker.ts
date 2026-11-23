@@ -34,6 +34,9 @@ const maxAttentionText = 2000;
 const changeKinds = ["rule", "limit", "budget", "process", "skill", "grant"];
 const answers = ["accept", "decline"];
 const decisions = ["accepted", "declined"];
+export const stopCauses = ["blocked", "worker-blocked", "worker-quiet", "emit-refused", "repeated-permission", "repeated-conflict"];
+export const stopClasses = ["user-decision", "outside-action", "external-wait", "ci-infra", "approval", "worker-fixable", "none"];
+const maxStopDetail = 300;
 
 // Each type lists whether it needs --task and the data keys it must carry.
 const eventTypes = {
@@ -50,6 +53,7 @@ const eventTypes = {
   "attention.resolved": { task: false, data: ["session"] },
   "improve.proposed": { task: false, data: ["rule", "change", "title", "evidence", "recommended", "proposal_id", "result"] },
   "improve.decided": { task: false, data: ["proposal_id", "decision"] },
+  "stop.recorded": { task: false, data: ["stop_id", "cause", "class"] },
 };
 
 export const eventsFile = (file: string) =>
@@ -59,6 +63,15 @@ const waiterFile = (file: string) =>
   join(dirname(file), `${basename(file, extname(file))}-waiter.pid`);
 
 class UsageError extends Error {}
+
+// A refused worker event. The kind names the reason without a path, SHA or command argument.
+class RefusedError extends Error {
+  kind: "not-rebased" | "dirty-worktree" | "head-mismatch" | "bad-result";
+  constructor(kind: RefusedError["kind"], message: string) {
+    super(message);
+    this.kind = kind;
+  }
+}
 
 function isWaiter(pid: number) {
   if (!alive(pid)) return false;
@@ -147,6 +160,16 @@ function validateEvent({ type, task, source, data }: { type: string; task: strin
   }
   if (type.startsWith("attention.")) validateAttention(type, data);
   if (type.startsWith("improve.")) validateImprove(type, data);
+  if (type === "stop.recorded") validateStop(data);
+}
+
+function validateStop(data: EventData) {
+  if (typeof data.stop_id !== "string" || data.stop_id === "") throw new UsageError('stop.recorded data "stop_id" must be a non-empty string.');
+  if (!stopCauses.includes(data.cause)) throw new UsageError(`stop.recorded cause must be one of: ${stopCauses.join(", ")}.`);
+  if (!stopClasses.includes(data.class)) throw new UsageError(`stop.recorded class must be one of: ${stopClasses.join(", ")}.`);
+  if (data.detail !== undefined && (typeof data.detail !== "string" || data.detail.length > maxStopDetail)) {
+    throw new UsageError(`stop.recorded data "detail" must be a string of at most ${maxStopDetail} characters.`);
+  }
 }
 
 function validateImprove(type: string, data: EventData) {
@@ -195,17 +218,17 @@ const git = (cwd: string, ...args: string[]) =>
 async function checkResult(factory: string, { type, task, data }: { type: string; task: string | null; data: EventData }) {
   const name = data.result;
   if (typeof name !== "string" || name !== basename(name) || name.startsWith(".")) {
-    throw new Error(`${type} data "result" must name a result file in the state directory.`);
+    throw new RefusedError("bad-result", `${type} data "result" must name a result file in the state directory.`);
   }
   let saved;
   try {
     saved = JSON.parse(await readFile(join(dirname(factory), name), "utf8"));
   } catch (error) {
-    throw new Error(`Result file ${name} is not readable JSON in the state directory: ${(error as Error).message}`);
+    throw new RefusedError("bad-result", `Result file ${name} is not readable JSON in the state directory: ${(error as Error).message}`);
   }
   const outcome = type === "worker.blocked" ? "blocked" : data.outcome;
   for (const [key, want] of [["task", task], ["role", data.role], ["outcome", outcome]]) {
-    if (saved?.[key] !== want) throw new Error(`Result file ${name} has ${key} ${JSON.stringify(saved?.[key])}, but the event has ${JSON.stringify(want)}.`);
+    if (saved?.[key] !== want) throw new RefusedError("bad-result", `Result file ${name} has ${key} ${JSON.stringify(saved?.[key])}, but the event has ${JSON.stringify(want)}.`);
   }
 }
 
@@ -216,15 +239,15 @@ async function checkHead(factory: string, task: string | null, head: string) {
   const worktree = record?.worktree;
   if (!worktree?.path) return;
   const at = git(worktree.path, "rev-parse", "HEAD");
-  if (at !== head) throw new Error(`The worktree ${worktree.path} is at ${at}, not at head ${head}. Commit the changes. Then report the correct head.`);
-  if (git(worktree.path, "status", "--porcelain")) throw new Error(`The worktree ${worktree.path} has uncommitted changes. Commit them. Then emit the event again.`);
+  if (at !== head) throw new RefusedError("head-mismatch", `The worktree ${worktree.path} is at ${at}, not at head ${head}. Commit the changes. Then report the correct head.`);
+  if (git(worktree.path, "status", "--porcelain")) throw new RefusedError("dirty-worktree", `The worktree ${worktree.path} has uncommitted changes. Commit them. Then emit the event again.`);
   if (record.pr) return;
   const base = defaultBranch(worktree.path) ?? "main";
   try {
     git(worktree.path, "merge-base", "--is-ancestor", base, head);
   } catch (error) {
     if ((error as { status?: number }).status !== 1) throw error;
-    throw new Error(`Head ${head} does not descend from ${base}. Run git rebase ${base}. Then emit the event again.`);
+    throw new RefusedError("not-rebased", `Head ${head} does not descend from ${base}. Run git rebase ${base}. Then emit the event again.`);
   }
 }
 
@@ -447,13 +470,21 @@ wait    Waits until an event exists after the cursor, prints {"events":[...],"cu
 emit    Appends one event and prints it. Types: ${Object.keys(eventTypes).join(", ")}.
         Needed data keys: ${Object.entries(eventTypes).map(([type, { data }]) => `${type}: ${data.join(", ")}`).join("; ")}.
         worker.result outcome: ${workerOutcomes.join(", ")}. --source defaults to worker.
-        emit refuses a worker.result (exit 1, nothing appended) when data.result is not a JSON
+        emit refuses a worker.result (exit 1, the event is not appended) when data.result is not a JSON
         file in the state directory with the same task, role, and outcome. A worker.blocked with
         data.result gets the same check with outcome blocked. A complete implementation
         worker.result with data.head must match HEAD of the worktree of the task. For a task
         without a PR, the head must also descend from main. emit skips these checks when the
         task has no worktree record.
         pr.merged needs a full merge_commit SHA.
+        When emit refuses a worker.result or a worker.blocked for one of these reasons, it also
+        appends one stop.recorded (--source stops, cause emit-refused) that names the reason
+        kind: not-rebased, dirty-worktree, head-mismatch or bad-result.
+        stop.recorded (--source stops, no --task needed) records one stop of a worker. data:
+        stop_id (unique; a second event with the same stop_id is ignored by readers), cause
+        (${stopCauses.join(", ")}), class (${stopClasses.join(", ")}), and optional
+        role, detail (a string of at most ${maxStopDetail} characters, no session text) and count.
+        Wait with --exclude-source stops, so a stop never wakes the factory.
         attention.requested and attention.resolved need no --task (a rule worker or the
         coordinator has none). A hook emits them with --source attention when a Copilot session
         waits for the user. attention.requested data: session (the Copilot session ID, a string),
@@ -561,5 +592,25 @@ export async function main(argv: string[]) {
   } catch (error) {
     console.error((error as Error).message);
     process.exitCode = error instanceof UsageError ? 2 : 1;
+    if (error instanceof RefusedError) await recordRefusal(factory, event, error.kind);
+  }
+}
+
+// The refusal is already reported, so a failure here must not change the exit code or the message.
+async function recordRefusal(factory: string, { type, task, data }: NewEvent, kind: RefusedError["kind"]) {
+  try {
+    const { recordStop, stopId } = await import("./stops.ts");
+    const role = typeof data?.role === "string" ? data.role : null;
+    await recordStop(factory, {
+      stop_id: stopId("emit-refused", task ?? null, role, randomUUID()),
+      cause: "emit-refused",
+      task: task ?? null,
+      role,
+      class: "worker-fixable",
+      detail: `The emit of ${type} was refused: ${kind}.`,
+      count: 1,
+    });
+  } catch {
+    // Recording is best effort.
   }
 }
