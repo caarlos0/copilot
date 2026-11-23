@@ -95,7 +95,10 @@ Before dispatch, resolve autonomy through `autonomy-dial` and spend through
 dials of the user, the latest explicit operator direction, the repository caps
 in `.github/lever.yml`, and the actual requirements of GitHub. No merge grant
 means L2 at most. Apply authority to issue creation, comments, commits, pushes,
-PRs, and landing, not only the final merge. Do not write either dials file
+PRs, and landing, not only the final merge. Commits and pushes of the task
+branch belong to L2 and above and need no extra approval. Merge,
+ready-for-review, reviewer requests, force-push, and pushes to other branches
+stay gated. Do not write either dials file
 unless the user requests it.
 
 Record these items in `details.lever` of each task: the resolved level, the
@@ -294,11 +297,13 @@ those IDs, the worker session, and `running` status. A short gap between launch
 and this write is unavoidable. If the write fails, stop the worker and
 reconcile the pane record.
 
-Before each result, branch-head change, merge attempt, and worker or worktree
+Before each result, factory-run merge attempt, and worker or worktree
 release, write the intended action to `next_action` or `details` of the task
-with `factory.mjs write`. Workers must pause at each such milestone
-until the factory confirms that write. After the action, write the observed
-result, the full head or merge commit SHA, and the worker status with
+with `factory.mjs write`. Workers pause for the factory only at a merge, a
+release, or another gated action (see "Tell every worker"). A worker does not
+wait for the factory before it commits or pushes its own task branch. The
+factory records the observed head after the push. After the action, write the
+observed result, the full head or merge commit SHA, and the worker status with
 `factory.mjs write` in the same turn, before any follow-up action. For a result,
 first mirror its summary, evidence, and result path. Then verify it and record
 the state change and disposition. Mirror the `summary` of the result into
@@ -309,11 +314,14 @@ dashboard card shows it and reads nothing else.
 If any write fails or is refused, stop further work and
 reconcile the latest file. Never continue with untracked work.
 
-Tell implementation workers to stop before every commit, push that changes a
-head, merge attempt, or release. They report the planned action and the current
-full head. Do not authorize the action until it is written to the factory
-file. Afterward, require the resulting full SHA or the confirmed outcome in the
-file before the worker continues.
+Tell implementation workers to commit and push their own task branch without
+asking. After each push, the worker writes the full new head to its result and
+emits `worker.result`. The factory records that head afterward. Tell them to
+stop and report the planned action and the current full head before a merge, a
+release, a force-push, a push to a branch that is not the task branch, or an
+action that the brief does not grant. Do not authorize such an action until it
+is written to the factory file. Afterward, require the resulting full SHA or
+the confirmed outcome in the file before the worker continues.
 
 At startup, on every wake, and before you report, reconcile the file against
 live state. Run `git worktree list --porcelain` and
@@ -850,7 +858,8 @@ Use Lever's brief template. Include the user's words verbatim, an observable
 done-when, the evidence level, the budget, the authority provenance, and the
 stop conditions.
 State separately whether the worker may edit code, commit, push, open a PR,
-comment, close an issue, or merge. Pass the resolved Lever permissions. Do not
+comment, close an issue, or merge. Default for commit and push: allowed, task
+branch only. Pass the resolved Lever permissions. Do not
 pass new grants that you infer from a task description. Attach the selected
 skills and the review mode. The factory is the escalation target.
 
@@ -880,6 +889,9 @@ main before you report. Do it again each time the factory tells you that main
 moved. If the task has no PR, run `git rebase main` (never merge main). If the
 task has a PR, run `git merge main` and push, never rebase and never
 force-push.
+Commit and push your task branch yourself, then record the full head and emit it.
+Do not wait for the factory or the user. Never merge, force-push, mark ready or
+request reviewers. (A task without a PR has no push: commit locally.)
 Never use `git stash`: all worktrees share the stash list.
 To compare against the base, use a scratch worktree or
 `git diff > $TMPDIR/x.patch`.
@@ -1009,11 +1021,19 @@ Tell every worker:
   evidence. Wait for the factory to save the planned disposition with
   `factory.mjs write`. Then write the result atomically. Wait for the factory to
   mirror and verify it before you do another action.
-- Before every commit or push that changes a head, and before every merge
-  attempt or release, stop. Report the planned action and the current full
-  head. Wait for the factory to confirm that it saved the plan. After the
-  action, report the exact new full head or the confirmed outcome. Wait for the
-  factory to save it before you continue.
+- Commit and push your own task branch without asking. Use a normal push.
+  Never force-push. For a task with a PR, merge main into the branch. For a
+  task without a PR, rebase on main. A task without a PR lands by local merge
+  and has no push, so a worker of such a task commits locally and does not
+  push. After each push, write the full new head to your result and emit
+  `worker.result`. The factory records the head afterward. Do not wait for the
+  factory or the user before a commit or a push.
+- Before a merge attempt, a release, a force-push, a push to a branch that is
+  not the task branch, or an action that the brief does not grant, stop.
+  Report the planned action and the current full head. Wait for the factory to
+  confirm that it saved the plan. After the action, report the exact new full
+  head or the confirmed outcome. Wait for the factory to save it before you
+  continue.
 - Read the task's feedback before you start a new action and before you land.
   If the ID differs from your brief or supplement, pause new work and request
   reconciliation. Do not infer permission from a dashboard comment. Include

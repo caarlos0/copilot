@@ -268,7 +268,8 @@ into the factory file. It refuses to run against a live legacy lock.
 
 The factory file is the only task tracker. Create every task there before
 launching its worker. Write the planned action with `factory.mjs write` before each
-launch, result disposition, head change, merge, or release. Write the
+launch, result disposition, merge, or release. Workers commit and push their own
+task branch without a plan. The factory records the new head afterward. Write the
 observed result in the same turn, before the next action. If the writer refuses
 a write, stop the work until you read the file again and reconcile the drift.
 Never track task
