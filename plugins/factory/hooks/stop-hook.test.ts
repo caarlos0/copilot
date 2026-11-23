@@ -80,7 +80,7 @@ test("blocks a non-finished run without an armed waiter, even after a prior bloc
   for (const stop_hook_active of [false, true]) {
     const out = f.run({ input: { stop_hook_active } });
     assert.equal(out.decision, "block");
-    assert.match(out.reason, /factory\.mjs broker wait .*owner\.repo-factory\.json --since CURSOR --exclude-source coordinator --due/);
+    assert.match(out.reason, /factory\.mjs broker wait .*owner\.repo-factory\.json --since CURSOR --exclude-source coordinator --exclude-source attention --exclude-source improve --exclude-source stops --due/);
   }
 });
 

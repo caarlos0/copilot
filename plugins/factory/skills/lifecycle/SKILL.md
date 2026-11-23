@@ -417,6 +417,12 @@ leave work undone. Treat each finding as unfinished work:
   `idle_minutes`. Send the worker one follow-up: "save your result, or a blocked
   result with the cause". If the log has no new event 10 minutes later,
   relaunch the worker in its worktree.
+- `stop`: a task or worker stopped, and no cause task holds its `stop_id` yet.
+  The sweep records each stop once as a `stop.recorded` event. The finding
+  names `stop_id`, `cause` (`blocked`, `worker-blocked`, `worker-quiet`,
+  `repeated-permission`, `repeated-conflict`), `class`, `task`, `role`,
+  `detail` and the exact `command` that creates the cause task. It stays until
+  a task has that `stop_id` in its `details`. Follow "Root cause, not retry".
 - `improve-decided-unapplied`: the user decided an `improve` proposal in the
   dashboard (an `improve.decided` event exists), but the result file has a
   `change` and no `decision`. The wake was lost or the change was not applied.
@@ -845,6 +851,29 @@ without a PR, check it with `git rev-parse BRANCH` in the worktree. An old
 head proves nothing about a new head. A new head always goes to `review` again.
 Do not treat a failed read as a clean result. Keep unknown outcomes in
 `details`. Do not guess.
+
+### Root cause, not retry
+
+An abnormal stop is a signal, not only a job to retry. For each `stop` finding
+of `factory.mjs reconcile`:
+
+1. Park the worker when `cause` is `worker-quiet`, `repeated-permission` or
+   `repeated-conflict`, so it cannot spend more. Verify that it is idle with
+   nothing unpushed. Then write `--workers` with status `idle`.
+2. Create the cause task. Run the `command` of the finding as it is. It makes
+   the task `cause-HASH` (one task for each `stop_id`) with `--issue null` and
+   `details.stop_id`. The task goes through `initial` and `investigation` like
+   all work. Its next action tells the worker to find the root cause. Then it
+   must propose a prevention: a guard rule, a brief line or a skill text. A retry
+   alone is not enough.
+3. For a worker-fixable cause, also send the worker the follow-up that the
+   sections above name. The cause task does not replace it.
+
+Default: create the cause task for every stop. Skip it for a `blocked` stop with
+`class` `user-decision` or `approval`: the user is the cause, and there is
+nothing to prevent. Say so once in your report. The user can override it. The
+finding stays while the stop is open, so do not run its `command` for a skipped
+stop. The cause task adds spend. The budget and the limits still apply to it.
 
 ## Brief the workers
 
@@ -1360,7 +1389,8 @@ attached async command:
 
 ```sh
 node factory.mjs broker wait /abs/state/owner.repo-factory.json --since CURSOR \
-  --exclude-source coordinator --exclude-source attention --exclude-source improve --due
+  --exclude-source coordinator --exclude-source attention --exclude-source improve \
+  --exclude-source stops --due
 ```
 
 It exits with `{"events":[...],"cursor":"N"}` when one event exists after
@@ -1376,6 +1406,7 @@ the cursor. Each event has `id`, `at`, `type`, `task`, `source`, and `data`:
 | `pr.merged` | the implementation worker after its final `merged: true` result | `role`, `pr`, `merge_commit`, `head` |
 | `attention.requested` | a hook (`--source attention`) when a Copilot session waits for the user; no `--task` | `session`, `kind` (`permission`, `sandbox-bypass`, `ask-user`; `other` is accepted for old logs but no hook writes it), `text` (at most 2000 characters), optional `role`, `pane`, `options` (strings) |
 | `attention.resolved` | a hook (`--source attention`) when that wait ends; no `--task` | `session` |
+| `stop.recorded` | `factory.mjs reconcile`, and `factory.mjs broker emit` when it refuses a worker event (`--source stops`); no `--task` needed | `stop_id` (unique), `cause` (`blocked`, `worker-blocked`, `worker-quiet`, `emit-refused`, `repeated-permission`, `repeated-conflict`), `class` (the blocker classes, `worker-fixable` or `none`), `detail` (at most 300 characters), `role`, `count`, optional `head` |
 | `improve.proposed` | you (`--source improve`), once per change an `improve` worker proposes; no `--task` | `rule`, `change` (`rule`, `limit`, `budget`, `process`, `skill`, `grant`), `title`, `evidence` (at most 2000 characters), `recommended` (`accept` or `decline`), `proposal_id` (unique), `result` (the result file name) |
 | `improve.decided` | the dashboard server (`--source dashboard`) when the user clicks Accept or Decline; no `--task` | `proposal_id`, `decision` (`accepted` or `declined`), optional `note` |
 | `rule.due` | `wait --due` itself, never stored | `rules`: due rule IDs |
@@ -1398,6 +1429,9 @@ Rules:
    is not work for you, so these events never wake you. `--exclude-source improve`
    skips your own `improve.proposed` events, so a proposal never wakes you. The
    user's `improve.decided` has source `dashboard` and always wakes you.
+   `--exclude-source stops` skips `stop.recorded`. `factory.mjs reconcile` and
+   `broker emit` write it for the dashboard and for the next sweep. A stop
+   never wakes you on its own. You see it as a `stop` finding in the sweep.
 3. Every turn of a non-finished factory ends with exactly one armed `wait`
    (async bash, latest cursor). Never end a turn without one: not after a
    notification, a merge, a test run, a tool completion, or a user message. Arm

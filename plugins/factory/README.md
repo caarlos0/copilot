@@ -41,6 +41,9 @@ and `resolved`. `blocked` is a side state. Every task has a GitHub issue.
   factory stays at L2 or below.
 - The factory keeps its state in `<owner.repo>-factory.json` in
   `~/.local/state/copilot-factory/`.
+- Each abnormal stop (a blocked task, a quiet worker, a repeated prompt or
+  conflict) becomes one `stop.recorded` event and one cause task. The
+  `improve` worker reads the stops and proposes a prevention, not only a retry.
 
 ## Dashboard
 

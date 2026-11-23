@@ -6174,7 +6174,7 @@ async function run5() {
   if (factory.status === "finished")
     return;
   if (await waiterPid(await resolveFactory(file)) === null) {
-    block(`No broker waiter is armed and the run is not finished. Arm the waiter now. Run \`node ${join16(lifecycle, "factory.mjs")} broker wait ${file} --since CURSOR --exclude-source coordinator --due\` as async bash with the latest cursor. If you have no cursor, run \`factory.mjs broker cursor\`. Then end the turn.`);
+    block(`No broker waiter is armed and the run is not finished. Arm the waiter now. Run \`node ${join16(lifecycle, "factory.mjs")} broker wait ${file} --since CURSOR --exclude-source coordinator --exclude-source attention --exclude-source improve --exclude-source stops --due\` as async bash with the latest cursor. If you have no cursor, run \`factory.mjs broker cursor\`. Then end the turn.`);
     return;
   }
   if (input.stop_hook_active || input.stopHookActive)

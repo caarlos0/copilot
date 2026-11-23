@@ -68,6 +68,7 @@ If you use `session_store_sql`, obey these rules:
    | Failures | `tools.<name>.failures` | Correct the tool profile or the brief; a tool that fails every call is a config bug |
    | User waits | `attention.requested` per `role`, and the median time to the `attention.resolved` for the same `session`, in the events log `<owner.repo>-factory-events.jsonl` beside the factory file | Give the worker a default answer, or allow the tool in its profile |
    | Permission prompts | `attention.requested` with `kind` `sandbox-bypass` or `permission`, per `role` and per command name or path (step 4) | Fix the prompt, skill, or agent; or a narrow `grant` |
+   | Stops | `stop.recorded` per `cause` and `role`, and the state of its cause task (step 5) | A prevention: a guard rule, a brief line, or a skill text |
 
    Four of these signals have a standing line in every implementation brief
    ("Standing cost lines" in the skill). If the signal is still high, the brief
@@ -124,12 +125,29 @@ If you use `session_store_sql`, obey these rules:
    scripts in this step. Never propose `--add-dir "$HOME/.copilot"`: it grants
    access to the whole Copilot home. Your own launch already has
    `--add-dir "$HOME/.copilot/session-state"`.
-5. **Pick one change, or none.** Choose the change with the largest expected
+5. **Prevent the stops.** Each stop that reconcile finds becomes one
+   `stop.recorded` event and one cause task. Read the `stop.recorded` events of
+   the window in the events log. Group them by `cause` and `role`, and rank the
+   groups by count. For each of the top 3 groups, find its cause task in the
+   factory file (`details.stop_id` equals the `stop_id`). When that task is
+   `resolved`, read its result for the root cause. Prefer a prevention over a
+   retry, in this order:
+   1. A guard rule (`guard.ts`) that blocks the action.
+   2. A standing line in the brief of the role.
+   3. A text change in the skill or agent.
+
+   These are `process` or `skill` changes. A group whose cause is the user
+   (`blocked` with class `user-decision` or `approval`) needs no prevention.
+   Name in the result what to count next run: the stops of that `cause` after
+   `decision.at`. Read only the fields `cause`, `class`, `role`, `count`, `task`
+   and `detail` (a short note that the factory wrote). Never read the session
+   log of a stopped worker to explain a stop, and never copy session text.
+6. **Pick one change, or none.** Choose the change with the largest expected
    effect on one metric. If the window has fewer than 3 worker sessions, prefer
    no change. If the cause is outside the factory (for example a CI outage), say
-   so and propose nothing. Put the other causes of step 4 in `findings`, with
+   so and propose nothing. Put the other causes of steps 4 and 5 in `findings`, with
    the grant that you considered.
-6. **Write the result** (below), atomically. Write a temporary file in the same
+7. **Write the result** (below), atomically. Write a temporary file in the same
    directory, then rename it. End with the result path.
 
 ## Change kinds

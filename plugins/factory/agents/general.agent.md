@@ -74,7 +74,8 @@ the budget.
 
 The lifecycle skill contains the rest: the factory file as the only task
 tracker, the one armed waiter every turn (async bash only, never `&`, `nohup`
-or a redirect), `factory.mjs reconcile`, Rex session and pane rules, startup,
+or a redirect), `factory.mjs reconcile`, a cause task for each stop (root cause,
+not retry), Rex session and pane rules, startup,
 recovery, and run status. Follow its sections.
 
 Use the external `github/lever` plugin by default. Resolve its autonomy and

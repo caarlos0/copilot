@@ -459,14 +459,23 @@ totals of a long session are cumulative over its whole life.
 The factory waits with `factory.mjs broker wait`. The broker keeps one
 append-only JSONL log, `<owner.repo>-factory-events.jsonl` (mode 0600), beside
 the factory file. Events are typed notifications (`task.moved`, `task.updated`,
-`feedback.pending`, `budget.updated`, `limits.updated`, `lever.updated`, `worker.result`, `worker.blocked`, `pr.merged`, `attention.requested`, `attention.resolved`, `improve.proposed`, `improve.decided`; `rule.due` and `reconcile.due` are computed by
+`feedback.pending`, `budget.updated`, `limits.updated`, `lever.updated`, `worker.result`, `worker.blocked`, `pr.merged`, `attention.requested`, `attention.resolved`, `stop.recorded`, `improve.proposed`, `improve.decided`; `rule.due` and `reconcile.due` are computed by
 `wait --due` and never stored), each with a `source`. A cursor is a byte offset,
 so no event is lost between two `wait` calls. `factory.mjs write` emits after every
 successful write (source `coordinator`, or `dashboard` for operator moves). The
-factory waits with `--exclude-source coordinator --exclude-source attention --exclude-source improve`.
-So its own writes, its `improve.proposed` events, and the attention events never wake it. Attention events have no task.
+factory waits with `--exclude-source coordinator --exclude-source attention --exclude-source improve --exclude-source stops`.
+So its own writes, its `improve.proposed` events, the attention events and the stop events never wake it. Attention events have no task.
 Hooks emit them with source `attention` when a session waits for the user. `improve.decided`
-(source `dashboard`) always wakes the factory. Workers write their result file atomically, then run
+(source `dashboard`) always wakes the factory. A stop is a Jidoka stop: the line stops, and
+the cause is fixed, not only the symptom. `stop.recorded` (source `stops`, `task` optional)
+has `data` with `stop_id` (unique; a repeat is ignored by readers), `cause`
+(`blocked`, `worker-blocked`, `worker-quiet`, `emit-refused`, `repeated-permission`,
+`repeated-conflict`), `class` (a blocker class, `worker-fixable` or `none`), and optional
+`role`, `detail` (at most 300 characters), `count` and `head`. `factory.mjs reconcile`
+records each detected stop once (`stops.ts`, `detectStops`). `factory.mjs broker emit`
+records an `emit-refused` stop when it refuses a worker event. The `stop` finding stays until a
+task has that `stop_id` in its `details` (the cause task). The dashboard Stops panel
+reads the same events (`stops` in `/api/factory`). Workers write their result file atomically, then run
 `factory.mjs broker emit worker.result` (or `worker.blocked`). `emit` validates before it
 appends. It exits 1 with a reason when it refuses. A `worker.result` needs
 `data.result`, a JSON file in the state directory whose `task`, `role` and
@@ -535,7 +544,13 @@ ends with an `assistant.turn_end` over 10 minutes old and that has no result fil
 its start (`worker-quiet`, which names task, role and idle minutes). The sweep reads the last
 256 KiB of the log with `lastEvent` of `attention.ts`. It reports a decided `improve` proposal whose result file
 still has a `change` and no `decision` (`improve-decided-unapplied`). An undecided proposal never
-produces a finding. It reports a missing waiter (`no-waiter`). It reports an owner lock whose
+produces a finding. It records each new abnormal stop once as `stop.recorded` (source `stops`)
+and reports a `stop` finding for each stop that has no cause task. The finding has `stop_id`,
+`cause`, `class`, `task`, `role`, `detail` and the exact `factory.mjs write` command that creates
+the cause task (`cause-<hash>`, `issue: null`, `details.stop_id` and `details.cause_of`). The
+coordinator parks the worker, runs the command, and skips only a `blocked` stop of class
+`user-decision` or `approval` (see "Root cause, not retry" in the lifecycle skill). The
+`improve` worker reads the stops and prefers a prevention. It reports a missing waiter (`no-waiter`). It reports an owner lock whose
 session the coordinator hooks would not match (`hooks-inactive`). The
 factory runs the sweep at startup, on every wake and user message, and before every
 report. So a missed waiter wake cannot leave finished work unmerged. The factory arms the waiter
