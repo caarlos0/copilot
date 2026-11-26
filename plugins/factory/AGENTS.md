@@ -237,7 +237,12 @@ another checkout. They never edit or commit on the primary checkout or default b
 A brief never gives the primary checkout as the repo path of a writing worker.
 If the cwd or branch of a worker differs from its brief, the worker writes a
 `blocked` result and does not edit. Every brief tells the worker to read
-`plugins/factory/AGENTS.md` before its first edit.
+`plugins/factory/AGENTS.md` before its first edit. Every brief (task,
+`backlog`, and `improve`) also carries the literal result JSON skeleton and
+`factory.mjs broker emit` commands from the lifecycle skill's "Brief the
+workers", filled with the worker's task or rule ID, role, absolute result path,
+result filename, and absolute factory file path. The coordinator verifies the
+filled skeleton before launch.
 
 The investigation step never implements. Its only job is to validate and
 hydrate a task before work starts. It checks the claim, finds related PRs, adds

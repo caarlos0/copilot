@@ -990,15 +990,23 @@ output is the result file, plus issue comments when the brief allows them. See
 "Investigation worker".
 
 Save the brief as `<project>-<task>-<role>-brief.md`. Tell the worker to
-save `<project>-<task>-<role>-result.json` in the state directory. Before
-launch, verify that the brief contains the exact absolute result path, the
-exact absolute factory file path, and the `factory.mjs broker emit` command below. The
-brief must tell the worker to write the cumulative result atomically at
-milestones, on completion, and on any blocker. It must also tell the worker to
-emit an event right after each write. This applies to task, backlog, and
-improve workers. Record the matching result filename in the worker record. Do
-not launch if the result path, the write instruction, or the emit command is
-missing. Never overwrite a file that a worker still uses.
+save `<project>-<task>-<role>-result.json` in the state directory.
+Standing rule: every brief, including `backlog` and `improve` briefs, must
+contain the literal result JSON skeleton and `factory.mjs broker emit` commands
+below, filled with that worker's exact task or rule ID (`"task"`), role
+(`"role"`), absolute result path, result filename (`"result"`), and absolute
+factory file path. Do not let a worker infer the JSON shape. Include one line
+that says the `task` key is required and equals the task or rule ID, and that
+`emit` refuses a result without it. Before launch, verify that the brief
+contains the exact absolute result path, the exact absolute factory file path,
+the literal filled result JSON skeleton, and the filled `factory.mjs broker emit`
+commands. The brief must tell the worker to write the cumulative result
+atomically at milestones, on completion, and on any blocker. It must also tell
+the worker to emit an event right after each write. This applies to task,
+backlog, and improve workers. Record the matching result filename in the worker
+record. Do not launch if the result path, the write instruction, the literal
+filled skeleton, or the emit command is missing. Never overwrite a file that a
+worker still uses.
 
 The result file is evidence. The event is the notification. It wakes the
 factory within milliseconds. A file change alone wakes the factory on every
@@ -1049,6 +1057,12 @@ A result file is cumulative and replaced atomically at each milestone:
   "evidence": { "reproduction": "", "checks": "", "pushed": false, "gaps": "" }
 }
 ```
+
+The `task` key is required and equals the task or rule ID (`--task`). `emit`
+refuses a result file without matching `task`, `role`, and `outcome` keys. Rule
+workers (`backlog`, `improve`) keep these top-level keys alongside their rule
+fields (`issues` and `candidates` for `backlog`; `format`, `window`, `previous`,
+`change`, and `findings` for `improve`).
 
 `verdict` is for investigation. `review` is for a published review. Keep it
 null if no review was posted. A clean `cross-model-review` result can be

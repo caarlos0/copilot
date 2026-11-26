@@ -2170,6 +2170,19 @@ test("the worker write boundary is present in the skill and plugin rules", () =>
   }
 });
 
+test("every brief requires the literal filled result JSON skeleton and emit commands", () => {
+  const skill = readFileSync(join(import.meta.dirname, "SKILL.md"), "utf8");
+  const agents = readFileSync(join(import.meta.dirname, "..", "..", "AGENTS.md"), "utf8");
+  for (const [text, file] of [[skill, "SKILL.md"], [agents, "AGENTS.md"]]) {
+    assert.match(text, /literal\s+result\s+JSON\s+skeleton/i, file);
+    assert.match(text, /`backlog`.*`improve`/s, file);
+  }
+  assert.match(skill, /Before\s+launch,\s+verify\s+that\s+the\s+brief\s+contains[^.]+literal\s+filled\s+result\s+JSON\s+skeleton/i);
+  assert.match(agents, /verifies\s+the\s+filled\s+skeleton\s+before\s+launch/i);
+  assert.match(skill, /`task`\s+key\s+is\s+required/i);
+  assert.match(skill, /`emit`\s+refuses\s+a\s+result/i);
+});
+
 test("the standing cost lines are one block in the skill and are mapped in improve.md", () => {
   const skill = readFileSync(join(import.meta.dirname, "SKILL.md"), "utf8");
   const block = skill.match(/Standing cost lines:\n([\s\S]*?)\n```/);
