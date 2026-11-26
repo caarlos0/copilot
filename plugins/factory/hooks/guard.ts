@@ -11,7 +11,6 @@ const DENIED_TOOLS = ["task", "read_agent", "write_agent", "run_dynamic_workflow
 const WRITE_TOOLS = ["edit", "create", "str_replace_editor", "apply_patch"];
 
 const isCopilot = (c: string) => /^copilot\s/.test(c);
-const isLaunch = (c: string) => isCopilot(c) && /\s(?:-i|--interactive|-p|--prompt)\b/.test(c);
 
 type Rule = { name: string; reason: string; deny: (command: string) => boolean };
 
@@ -42,11 +41,6 @@ const BASH_RULES: Rule[] = [
     name: "copilot-autopilot",
     reason: "A worker never runs with --autopilot.",
     deny: (c) => isCopilot(c) && /\s--autopilot\b/.test(c),
-  },
-  {
-    name: "copilot-model",
-    reason: "Every worker launch needs `--model claude-sonnet-5.5`.",
-    deny: (c) => isLaunch(c) && !/\s--model[ =]claude-sonnet-5\.5(?=\s|$)/.test(c),
   },
 ];
 

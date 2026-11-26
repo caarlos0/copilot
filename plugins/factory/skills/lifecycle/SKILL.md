@@ -697,6 +697,15 @@ no new worker until the count falls below the budget. Change it with
 it in the dashboard settings. Reread `limits` after every dashboard
 `limits.updated` event. The budget is a worker count, not the Lever spend budget.
 
+The optional root `models` and `efforts` objects set the model and the reasoning
+effort for each worker role. Their keys are `investigation`, `implementation`,
+`review`, `backlog`, and `improve`. A model is a name for `copilot --model` (no
+spaces, at most 100 characters). An effort is `none`, `minimal`, `low`, `medium`,
+`high`, `xhigh`, or `max` (`copilot --reasoning-effort`). A missing role means no
+flag, so the default of the user applies. "Launch rules" says how to use them.
+Change them with `factory.mjs write --models JSON --efforts JSON`, or in the
+dashboard settings. Each write emits `models.updated` or `efforts.updated`.
+
 ### Self-improve
 
 An `improve` rule reviews how the factory ran and proposes one change. It is
@@ -1136,12 +1145,13 @@ edits, commits, or pushes. Use a new worktree for every task:
 ```sh
 WT=$(node /abs/path/to/factory.mjs worktree create fix-login)   # run in the main checkout
 NAME=$(node /abs/path/to/factory.mjs worker-name --role implementation --ref '#42' --summary 'Fix login redirect')
-rex window new -c "$(echo "$WT" | jq -r .path)" -- env FACTORY_TASK=fix-login FACTORY_ROLE=implementation FACTORY_FILE="$FILE" copilot --agent coding:caarlos0 --model claude-sonnet-5.5 --name "$NAME" --yolo --sandbox --add-dir "$HOME/Developer/worktrees" --add-dir "$STATE_DIR" -i 'Read /abs/brief.md and do it.'
+rex window new -c "$(echo "$WT" | jq -r .path)" -- env FACTORY_TASK=fix-login FACTORY_ROLE=implementation FACTORY_FILE="$FILE" copilot --agent coding:caarlos0 --name "$NAME" --yolo --sandbox --add-dir "$HOME/Developer/worktrees" --add-dir "$STATE_DIR" -i 'Read /abs/brief.md and do it.'
 ```
 
 `$STATE_DIR` is the factory state directory. Replace `$HOME/Developer/worktrees`
 with the worktree root from `worktreePathTemplate` when it differs. Add the
-deny flags from "Launch rules" before `-i`.
+deny flags from "Launch rules" before `-i`. Add `--model` and
+`--reasoning-effort` after `--agent` only as "Launch rules" says.
 
 `factory.mjs worktree` is a dependency-free helper. It prints JSON
 `{path, branch, created_by_run}`. Record the worktree with `factory.mjs write
@@ -1263,9 +1273,19 @@ entries. Check `copilot instruction list` in that cwd and environment. If the
 launch loses these instructions, record a blocker. Never start an unconstrained
 worker. Do not edit the product worktree or a shared instructions directory.
 
-Every worker launch (implementation, investigation, review, backlog, and
-improve) uses `--model claude-sonnet-5.5`. Use a bigger model only on an
-explicit user request: two opus sessions caused 32% of spend.
+Model and reasoning effort come from the factory file, never from the agent
+file. Read `models.ROLE` and `efforts.ROLE` for the role of the worker
+(`investigation`, `implementation`, `review`, `backlog`, or `improve`). Add
+`--model MODEL` to the `copilot` command only when `models.ROLE` is set. Add
+`--reasoning-effort LEVEL` only when `efforts.ROLE` is set. When a value is
+not set, add no flag. The default of the user applies. Never choose a model
+yourself. A larger model costs more (two opus sessions once caused 32% of
+spend), so only the project settings choose it. Read both objects again after
+every dashboard `models.updated` or `efforts.updated` event. A change applies
+to the next launch. It never stops or restarts a running worker. The operator
+sets them in the dashboard settings, or you set them with
+`factory.mjs write --models '{"implementation":"MODEL"}' --efforts '{"implementation":"high"}'`.
+`null` removes a role.
 
 Every worker launch also carries the worker deny flags, one constant for all
 roles. Append them to the `copilot` command, before `-i`:
@@ -1311,8 +1331,7 @@ recorded in the owner lock; no launcher variable is needed. `FACTORY_COORDINATOR
 forces it on and `FACTORY_COORDINATOR=0` forces it off. The hook denies the subagent and workflow tools, edits outside the state
 directories, the session directory, and `$TMPDIR`, and these commands: `gh pr
 merge`, `git merge` without `--ff-only`, `rex new` and `rex session
-new|create|rename`, a `copilot` launch with `--autopilot` or without `--model
-claude-sonnet-5.5`. The hook sees only the command line,
+new|create|rename`, a `copilot` launch with `--autopilot`. The hook sees only the command line,
 so a launcher script hides what it runs: the script must enforce the same
 flags itself.
 
@@ -1339,7 +1358,7 @@ NAME=$(node /abs/path/to/factory.mjs worker-name --role review --ref '#57' --sum
 
 Open the tab in the factory's session with the worker name as its label. Verify
 the visible label. Pass the first message in the launch command with
-`-i`/`--interactive`: `copilot ... --model claude-sonnet-5.5 -i 'Read <absolute brief path> and do it.'`.
+`-i`/`--interactive`: `copilot ... -i 'Read <absolute brief path> and do it.'`.
 The brief that it names carries the standing cost lines for an implementation
 worker. The command starts the interactive session and runs the prompt at once.
 Do not use a fixed sleep. Do not wait for the input prompt. Do not use

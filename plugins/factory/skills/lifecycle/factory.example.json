@@ -49,6 +49,8 @@
   ],
   "limits": { "investigation": 3, "implementation": 3 },
   "budget": { "max_parallel_workers": 10 },
+  "models": { "implementation": "claude-sonnet-5.5", "review": "claude-opus-5.5" },
+  "efforts": { "implementation": "medium", "review": "high" },
   "tasks": [
     {
       "id": "issue-12",

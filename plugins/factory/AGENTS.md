@@ -50,9 +50,12 @@ the default branch.
 Standing worker rules: never use `git stash`, because the stash list is shared
 by all worktrees. To compare against the base, use a scratch worktree or
 `git diff > $TMPDIR/x.patch`. Tests that run git in a temp repo must ignore the
-global git config (signing, hooks, templates). Workers use `claude-sonnet-5.5`
-(`--model claude-sonnet-5.5` in the launch command). Use a larger model only
-when the user asks for it. Two opus sessions caused 32% of spend.
+global git config (signing, hooks, templates). The project sets the model and
+the reasoning effort of each worker role in the factory file (`models` and
+`efforts`; see the settings paragraph below). The coordinator adds
+`--model MODEL` or `--reasoning-effort LEVEL` to a launch only when the project
+sets a value for that role. With no value, it adds no flag, so the default of the
+user applies. A larger model costs more: two opus sessions caused 32% of spend.
 
 Every implementation brief also carries the four standing cost lines from the
 lifecycle skill's "Brief the workers". First, never poll: use no sleep loops and
@@ -138,7 +141,7 @@ as failed, even when its output arrived. Keep the limit much higher than the rea
 cost.
 
 Workers start with their brief in the launch command
-(`copilot ... --model claude-sonnet-5.5 -i 'Read <brief> and do it.'`). So there
+(`copilot ... -i 'Read <brief> and do it.'`). So there
 is no fixed sleep and no
 `rex send` for the first message. Use `rex send` only for follow-ups to idle
 workers. The factory file holds the planned role with `unknown` status before
@@ -203,10 +206,10 @@ rule: the `task`, `read_agent`, `write_agent` and `run_dynamic_workflow` tools;
 `edit`, `create` and `apply_patch` outside `~/.local/state/copilot-coordinator`,
 `~/.local/state/copilot-factory`, the session directory and `$TMPDIR`; and bash
 commands `gh pr merge`, `git merge` without `--ff-only`, `rex new`, `rex session
-new|create|rename`, a `copilot` launch with `--autopilot` or without `--model
-claude-sonnet-5.5`. The guard holds the rules in one table.
-`hooks/guard.test.ts` tests them. The hook matches the command text only, so it
-catches model slips, not a deliberate bypass (the hook unwraps `sh -c`; it does
+new|create|rename`, and a `copilot` launch with `--autopilot`. The guard holds the rules in one table.
+`hooks/guard.test.ts` tests them. A `copilot` launch with any model, or with no
+`--model`, is allowed. The hook matches the command text only, so it
+catches slips, not a deliberate bypass (the hook unwraps `sh -c`; it does
 not unwrap a launcher script). It allows every other call and any call it cannot
 parse. The script path comes from `PLUGIN_ROOT`. If no root variable is set, the
 hook allows the call and prints a warning on stderr.
@@ -359,12 +362,22 @@ root `budget.max_parallel_workers` (the most workers that run at once over all
 roles; absent means no total cap; a new file gets 10), `limits.investigation`
 and `limits.implementation` (integers 1 to 100), and the optional root `lever`
 ceilings `spend` (`standard`, `high`, `max`) and `autonomy_cap` (`L0` to `L5`).
+It also edits the optional root `models` and `efforts` objects: for each worker role
+(`investigation`, `implementation`, `review`, `backlog`, `improve`) a model name for
+`copilot --model` (no spaces, at most 100 characters) and a reasoning effort for
+`copilot --reasoning-effort` (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`,
+`max`). An empty field removes the role, and the stored objects never hold null. The
+writer takes `--models JSON` and `--efforts JSON` (a value of `null` removes a role)
+with `--expected-models` and `--expected-efforts`, and the model field has a `datalist`
+of suggestions (`modelSuggestions` in `dashboard.html`).
 It saves through `POST /api/settings` and the shared writer. For each changed field, a write
 carries the value that the browser saw (`--expected-budget`,
-`--expected-limits`, `--expected-lever`). A different current value is a
-conflict for that field. It emits `budget.updated`, `limits.updated`, and
-`lever.updated` with source `dashboard`. The coordinator reads these from the
-file and never exceeds the budget or a ceiling. A lower value stops no worker. Only the
+`--expected-limits`, `--expected-lever`, `--expected-models`, `--expected-efforts`). A different current value is a
+conflict for that field. It emits `budget.updated`, `limits.updated`, `lever.updated`,
+`models.updated`, and `efforts.updated` with source `dashboard`. The last two carry
+every role (`null` when not set). The coordinator reads these from the
+file and never exceeds the budget or a ceiling. A lower value stops no worker. A new model or
+effort applies to the next launch only. Only the
 coordinator's skill rules enforce the Lever ceilings; no code reads them. The dialog shows a
 short hint under each Lever select (`autonomyLevels` and `spendTiers` in `dashboard.html`, from
 Lever's `docs/autonomy.md` and `docs/spend.md`). The hint follows the chosen value. A
@@ -464,7 +477,7 @@ totals of a long session are cumulative over its whole life.
 The factory waits with `factory.mjs broker wait`. The broker keeps one
 append-only JSONL log, `<owner.repo>-factory-events.jsonl` (mode 0600), beside
 the factory file. Events are typed notifications (`task.moved`, `task.updated`,
-`feedback.pending`, `budget.updated`, `limits.updated`, `lever.updated`, `worker.result`, `worker.blocked`, `pr.merged`, `attention.requested`, `attention.resolved`, `stop.recorded`, `improve.proposed`, `improve.decided`; `rule.due` and `reconcile.due` are computed by
+`feedback.pending`, `budget.updated`, `limits.updated`, `lever.updated`, `models.updated`, `efforts.updated`, `worker.result`, `worker.blocked`, `pr.merged`, `attention.requested`, `attention.resolved`, `stop.recorded`, `improve.proposed`, `improve.decided`; `rule.due` and `reconcile.due` are computed by
 `wait --due` and never stored), each with a `source`. A cursor is a byte offset,
 so no event is lost between two `wait` calls. `factory.mjs write` emits after every
 successful write (source `coordinator`, or `dashboard` for operator moves). The

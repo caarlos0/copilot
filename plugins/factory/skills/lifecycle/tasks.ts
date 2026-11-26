@@ -8,7 +8,8 @@ import { emit, resolveFactory } from "./broker.ts";
 import { ConflictError } from "./conflict.ts";
 import {
   checkTransition, defaultBudget, defaultLimits, format, isObject, keepFirst, maxRoleLimit, mergeRefusal,
-  operatorOutcomes, outcomes, parseBlocker, resourceId, sharesWork, sortReferences, validate,
+  modelRoles, operatorOutcomes, outcomes, parseBlocker, resourceId, sharesWork, sortReferences, validate, validateEfforts,
+  validateModels,
 } from "./factory-data.ts";
 import { findSessions, recordSessions, registryFile, sessionID, sessionStateDirectory } from "./sessions.ts";
 import { alive } from "./state-dir.ts";
@@ -247,7 +248,7 @@ function checkInvestigation(patch: Record<string, any>, state: string) {
   }
 }
 
-const settingOptions = ["budget", "expected-budget", "limits", "expected-limits", "lever", "expected-lever"];
+const settingOptions = ["budget", "expected-budget", "limits", "expected-limits", "lever", "expected-lever", "models", "expected-models", "efforts", "expected-efforts"];
 
 // Each key a write changes must match what the caller saw; null means unset. A dashboard write needs it.
 function checkExpected(
@@ -323,7 +324,15 @@ async function writeFactory(file: string, values: Values, operator: boolean, sou
     }
   }
   if (values.lever !== undefined) rootPatch.lever = json(values.lever, "lever", isObject);
-  for (const name of ["limits", "lever"] as const) {
+  if (values.models !== undefined) {
+    rootPatch.models = json(values.models, "models", isObject);
+    validateModels(rootPatch.models, true);
+  }
+  if (values.efforts !== undefined) {
+    rootPatch.efforts = json(values.efforts, "efforts", isObject);
+    validateEfforts(rootPatch.efforts, true);
+  }
+  for (const name of ["limits", "lever", "models", "efforts"] as const) {
     if (values[`expected-${name}`] !== undefined && values[name] === undefined) {
       throw new Error(`--expected-${name} needs --${name}.`);
     }
@@ -351,7 +360,7 @@ async function writeFactory(file: string, values: Values, operator: boolean, sou
   }
   if (operator && values.task === undefined &&
       Object.keys(values).some((key) => !settingOptions.includes(key))) {
-    throw new Error("A dashboard write without a task can set only the budget, the limits, or the Lever ceilings.");
+    throw new Error("A dashboard write without a task can set only the budget, the limits, the Lever ceilings, the models, or the efforts.");
   }
   if (values.ignored !== undefined) rootPatch.ignored = json(values.ignored, "ignored", Array.isArray);
   const sessions: SessionEntry[] = [];
@@ -503,6 +512,11 @@ async function writeFactory(file: string, values: Values, operator: boolean, sou
   }
   const previous = current;
   current = merge(current, rootPatch);
+  for (const name of ["models", "efforts"] as const) {
+    if (current[name]) {
+      current[name] = Object.fromEntries(Object.entries<any>(current[name]!).filter(([, value]) => value !== null));
+    }
+  }
   current.tasks = tasks;
   validate(current);
   await locateSessions(current, previous, launches, now, track);
@@ -518,6 +532,12 @@ async function writeFactory(file: string, values: Values, operator: boolean, sou
     events.push({ type: "lever.updated", data: {
       spend: current.lever!.spend ?? null, autonomy_cap: current.lever!.autonomy_cap ?? null,
     } });
+  }
+  for (const name of ["models", "efforts"] as const) {
+    if (values[name] !== undefined) {
+      events.push({ type: `${name}.updated`, data: Object.fromEntries(
+        modelRoles.map((role) => [role, current[name]?.[role] ?? null])) });
+    }
   }
   let stale: Task[] = [];
   if (inserting) {
@@ -663,6 +683,10 @@ export async function main(argv: string[]) {
         lever: { type: "string" },
         "expected-limits": { type: "string" },
         "expected-lever": { type: "string" },
+        models: { type: "string" },
+        "expected-models": { type: "string" },
+        efforts: { type: "string" },
+        "expected-efforts": { type: "string" },
         "updated-at": { type: "string" },
         task: { type: "string" },
         restore: { type: "boolean" },
@@ -744,6 +768,20 @@ Run options:
                         Emits lever.updated
   --expected-lever JSON   Ceilings on which the write is based (null when not set). The rule is the
                         same as for --expected-limits
+  --models JSON         Merge the worker models, for example '{"implementation":"claude-sonnet-5.5"}'.
+                        Keys: investigation, implementation, review, backlog, improve. A value is
+                        a model name for copilot --model: no spaces, at most 100 characters. null
+                        removes the key. A role without a model gets no --model flag, so the user's
+                        default model applies. Emits models.updated
+  --expected-models JSON  Models on which the write is based (null when a role has none). The rule
+                        is the same as for --expected-limits
+  --efforts JSON        Merge the worker reasoning efforts, for example '{"implementation":"high"}'.
+                        Keys are the same as for --models. A value is one of: none, minimal, low,
+                        medium, high, xhigh, max (copilot --reasoning-effort). null removes the
+                        key. A role without an effort gets no --reasoning-effort flag. Emits
+                        efforts.updated
+  --expected-efforts JSON  Efforts on which the write is based (null when a role has none). The rule
+                        is the same as for --expected-limits
   --budget JSON         Merge the total worker budget, for example '{"max_parallel_workers":10}'
                         (1 to 100). The coordinator never runs more workers than this number, over
                         all roles. A new factory gets 10. A file without a budget has no total

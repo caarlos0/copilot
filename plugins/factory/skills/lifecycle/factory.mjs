@@ -921,6 +921,10 @@ function validate(data) {
     validateBudget(data.budget);
   if (data.lever !== undefined)
     validateLever(data.lever);
+  if (data.models !== undefined)
+    validateModels(data.models);
+  if (data.efforts !== undefined)
+    validateEfforts(data.efforts);
   if (!Array.isArray(data.tasks))
     throw new Error("tasks must be an array.");
   const seen = { ids: new Set, issue: new Set, pr: new Set };
@@ -946,13 +950,34 @@ function validateLever(lever) {
       oneOf(value, key === "spend" ? leverSpends : leverAutonomyCaps, `lever.${key}`);
   }
 }
+function validateModels(models, clear = false) {
+  if (!isObject(models))
+    throw new Error("models must be an object.");
+  for (const [role, value] of Object.entries(models)) {
+    oneOf(role, modelRoles, "models key");
+    if (clear && value === null)
+      continue;
+    if (typeof value !== "string" || !value || /\s/.test(value) || value.length > maxModelLength) {
+      throw new Error(`models.${role} must be a model name without spaces, at most ${maxModelLength} characters.`);
+    }
+  }
+}
+function validateEfforts(efforts, clear = false) {
+  if (!isObject(efforts))
+    throw new Error("efforts must be an object.");
+  for (const [role, value] of Object.entries(efforts)) {
+    oneOf(role, modelRoles, "efforts key");
+    if (!(clear && value === null))
+      oneOf(value, reasoningEfforts, `efforts.${role}`);
+  }
+}
 function countByState(tasks) {
   const counts = Object.fromEntries(states.map((state) => [state, 0]));
   for (const task of tasks)
     counts[task.state] += 1;
   return counts;
 }
-var format = "factory/v1", archiveFormat = "factory-archive/v1", states, transitions, runStatuses, outcomes, operatorOutcomes, mergeSources, workerRoles, workerModes, workerStatuses, ruleKinds, everyUnits, defaultLimits, maxWorkerSummary = 2000, defaultBudget, maxParallelWorkers = 100, maxRoleLimit = 100, leverSpends, leverAutonomyCaps, ownIds = (task) => [task.issue, task.pr].map(resourceId).filter(Boolean), namedIds = (task) => new Set([...ownIds(task), ...(task.links ?? []).map(resourceId).filter(Boolean)]), stageRank, stage = (task) => task.state === "resolved" ? -1 : stageRank[task.state === "blocked" ? task.blocker.from : task.state], issueURL = (value, field = "issue") => githubKind(value, "issues", field), prURL = (value, field = "pr") => githubKind(value, "pull", field), needsPR = (task) => task.issue != null && task.pr == null, openStates, maxBlockerOptions = 8, blockerClasses, blockerOwner, maxOptionLabel = 300, stripRecommended = (label) => label.replace(/\s*[(\[]\s*recommended\s*[)\]]\s*$/i, "");
+var format = "factory/v1", archiveFormat = "factory-archive/v1", states, transitions, runStatuses, outcomes, operatorOutcomes, mergeSources, workerRoles, workerModes, workerStatuses, ruleKinds, everyUnits, defaultLimits, maxWorkerSummary = 2000, defaultBudget, maxParallelWorkers = 100, maxRoleLimit = 100, leverSpends, leverAutonomyCaps, modelRoles, maxModelLength = 100, reasoningEfforts, ownIds = (task) => [task.issue, task.pr].map(resourceId).filter(Boolean), namedIds = (task) => new Set([...ownIds(task), ...(task.links ?? []).map(resourceId).filter(Boolean)]), stageRank, stage = (task) => task.state === "resolved" ? -1 : stageRank[task.state === "blocked" ? task.blocker.from : task.state], issueURL = (value, field = "issue") => githubKind(value, "issues", field), prURL = (value, field = "pr") => githubKind(value, "pull", field), needsPR = (task) => task.issue != null && task.pr == null, openStates, maxBlockerOptions = 8, blockerClasses, blockerOwner, maxOptionLabel = 300, stripRecommended = (label) => label.replace(/\s*[(\[]\s*recommended\s*[)\]]\s*$/i, "");
 var init_factory_data = __esm(() => {
   states = ["initial", "investigation", "implementation", "review", "blocked", "resolved"];
   transitions = {
@@ -976,6 +1001,8 @@ var init_factory_data = __esm(() => {
   defaultBudget = { max_parallel_workers: 10 };
   leverSpends = ["standard", "high", "max"];
   leverAutonomyCaps = ["L0", "L1", "L2", "L3", "L4", "L5"];
+  modelRoles = ["investigation", "implementation", "review", "backlog", "improve"];
+  reasoningEfforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
   stageRank = { initial: 0, investigation: 1, implementation: 2, review: 3 };
   openStates = ["initial", "investigation", "implementation", "review"];
   blockerClasses = ["user-decision", "outside-action", "external-wait", "ci-infra", "approval"];
@@ -1903,6 +1930,8 @@ var init_broker = __esm(() => {
     "budget.updated": { task: false, data: ["max_parallel_workers"] },
     "limits.updated": { task: false, data: ["investigation", "implementation"] },
     "lever.updated": { task: false, data: ["spend", "autonomy_cap"] },
+    "models.updated": { task: false, data: ["investigation", "implementation", "review", "backlog", "improve"] },
+    "efforts.updated": { task: false, data: ["investigation", "implementation", "review", "backlog", "improve"] },
     "attention.requested": { task: false, data: ["session", "kind", "text"] },
     "attention.resolved": { task: false, data: ["session"] },
     "improve.proposed": { task: false, data: ["rule", "change", "title", "evidence", "recommended", "proposal_id", "result"] },
@@ -1977,7 +2006,7 @@ emit    Appends one event and prints it. Types: ${Object.keys(eventTypes).join("
         pr.merged is a hint from the implementation worker (role, pr, merge_commit, head). The
         factory verifies the merge on GitHub before it resolves the task.
         factory.mjs write emits task.moved, task.updated, and feedback.pending after every task write.
-        It emits budget.updated, limits.updated, or lever.updated (no --task) after every write
+        It emits budget.updated, limits.updated, lever.updated, models.updated, or efforts.updated (no --task) after every write
         of that setting.
 cursor  Prints {"cursor":"N"} for the current end of the log.
 armed   Read-only. Prints {"armed":true,"pid":N} and exits 0 when a waiter for this factory is
@@ -2373,7 +2402,15 @@ async function writeFactory(file, values, operator, source) {
   }
   if (values.lever !== undefined)
     rootPatch.lever = json(values.lever, "lever", isObject);
-  for (const name of ["limits", "lever"]) {
+  if (values.models !== undefined) {
+    rootPatch.models = json(values.models, "models", isObject);
+    validateModels(rootPatch.models, true);
+  }
+  if (values.efforts !== undefined) {
+    rootPatch.efforts = json(values.efforts, "efforts", isObject);
+    validateEfforts(rootPatch.efforts, true);
+  }
+  for (const name of ["limits", "lever", "models", "efforts"]) {
     if (values[`expected-${name}`] !== undefined && values[name] === undefined) {
       throw new Error(`--expected-${name} needs --${name}.`);
     }
@@ -2400,7 +2437,7 @@ async function writeFactory(file, values, operator, source) {
     }
   }
   if (operator && values.task === undefined && Object.keys(values).some((key) => !settingOptions.includes(key))) {
-    throw new Error("A dashboard write without a task can set only the budget, the limits, or the Lever ceilings.");
+    throw new Error("A dashboard write without a task can set only the budget, the limits, the Lever ceilings, the models, or the efforts.");
   }
   if (values.ignored !== undefined)
     rootPatch.ignored = json(values.ignored, "ignored", Array.isArray);
@@ -2559,6 +2596,11 @@ async function writeFactory(file, values, operator, source) {
   }
   const previous = current;
   current = merge(current, rootPatch);
+  for (const name of ["models", "efforts"]) {
+    if (current[name]) {
+      current[name] = Object.fromEntries(Object.entries(current[name]).filter(([, value]) => value !== null));
+    }
+  }
   current.tasks = tasks;
   validate(current);
   await locateSessions(current, previous, launches, now, track);
@@ -2576,6 +2618,11 @@ async function writeFactory(file, values, operator, source) {
       spend: current.lever.spend ?? null,
       autonomy_cap: current.lever.autonomy_cap ?? null
     } });
+  }
+  for (const name of ["models", "efforts"]) {
+    if (values[name] !== undefined) {
+      events.push({ type: `${name}.updated`, data: Object.fromEntries(modelRoles.map((role) => [role, current[name]?.[role] ?? null])) });
+    }
   }
   let stale = [];
   if (inserting) {
@@ -2702,6 +2749,10 @@ async function main3(argv) {
         lever: { type: "string" },
         "expected-limits": { type: "string" },
         "expected-lever": { type: "string" },
+        models: { type: "string" },
+        "expected-models": { type: "string" },
+        efforts: { type: "string" },
+        "expected-efforts": { type: "string" },
         "updated-at": { type: "string" },
         task: { type: "string" },
         restore: { type: "boolean" },
@@ -2783,6 +2834,20 @@ Run options:
                         Emits lever.updated
   --expected-lever JSON   Ceilings on which the write is based (null when not set). The rule is the
                         same as for --expected-limits
+  --models JSON         Merge the worker models, for example '{"implementation":"claude-sonnet-5.5"}'.
+                        Keys: investigation, implementation, review, backlog, improve. A value is
+                        a model name for copilot --model: no spaces, at most 100 characters. null
+                        removes the key. A role without a model gets no --model flag, so the user's
+                        default model applies. Emits models.updated
+  --expected-models JSON  Models on which the write is based (null when a role has none). The rule
+                        is the same as for --expected-limits
+  --efforts JSON        Merge the worker reasoning efforts, for example '{"implementation":"high"}'.
+                        Keys are the same as for --models. A value is one of: none, minimal, low,
+                        medium, high, xhigh, max (copilot --reasoning-effort). null removes the
+                        key. A role without an effort gets no --reasoning-effort flag. Emits
+                        efforts.updated
+  --expected-efforts JSON  Efforts on which the write is based (null when a role has none). The rule
+                        is the same as for --expected-limits
   --budget JSON         Merge the total worker budget, for example '{"max_parallel_workers":10}'
                         (1 to 100). The coordinator never runs more workers than this number, over
                         all roles. A new factory gets 10. A file without a budget has no total
@@ -2889,7 +2954,7 @@ var init_tasks = __esm(() => {
   init_sessions();
   init_state_dir();
   import_write_file_atomic2 = __toESM(require_lib(), 1);
-  settingOptions = ["budget", "expected-budget", "limits", "expected-limits", "lever", "expected-lever"];
+  settingOptions = ["budget", "expected-budget", "limits", "expected-limits", "lever", "expected-lever", "models", "expected-models", "efforts", "expected-efforts"];
   lockMaxAge = 10 * 60 * 1000;
   taskOptions = [
     "title",
@@ -4365,10 +4430,15 @@ An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
   async function setSettings(request, file) {
     const body = await readJSONBody(request);
     const known = (value, keys) => isObject(value) && Object.keys(value).every((key) => keys.includes(key));
-    const fields = { limits: ["investigation", "implementation"], lever: ["spend", "autonomy_cap"] };
+    const fields = {
+      limits: ["investigation", "implementation"],
+      lever: ["spend", "autonomy_cap"],
+      models: [...modelRoles],
+      efforts: [...modelRoles]
+    };
     const sections = isObject(body?.set) ? Object.keys(body.set) : [];
     if (!known(body, ["set", "expected"]) || !known(body.expected, ["budget", ...Object.keys(fields)]) || !sections.length || !known(body.set, ["budget", ...Object.keys(fields)]) || sections.some((section) => !Object.hasOwn(body.expected, section)) || sections.includes("budget") && !Number.isSafeInteger(body.set.budget) || !(body.expected.budget === undefined || body.expected.budget === null || Number.isSafeInteger(body.expected.budget)) || Object.entries(fields).some(([section, keys]) => sections.includes(section) && !(known(body.set[section], keys) && known(body.expected[section], keys) && Object.keys(body.set[section]).length && Object.keys(body.set[section]).every((key) => Object.hasOwn(body.expected[section], key))))) {
-      throw new HttpError(400, "The request needs set (budget, limits, or lever values). It also needs expected, with the value that the browser saw for each field.");
+      throw new HttpError(400, "The request needs set (budget, limits, lever, models, or efforts values). It also needs expected, with the value that the browser saw for each field.");
     }
     await loadFactory(file);
     const values = {};
@@ -6018,7 +6088,7 @@ function main12(_argv) {
     }
   } catch {}
 }
-var DENIED_TOOLS, WRITE_TOOLS, isCopilot = (c) => /^copilot\s/.test(c), isLaunch = (c) => isCopilot(c) && /\s(?:-i|--interactive|-p|--prompt)\b/.test(c), BASH_RULES;
+var DENIED_TOOLS, WRITE_TOOLS, isCopilot = (c) => /^copilot\s/.test(c), BASH_RULES;
 var init_guard = __esm(() => {
   init_gate();
   DENIED_TOOLS = ["task", "read_agent", "write_agent", "run_dynamic_workflow"];
@@ -6048,11 +6118,6 @@ var init_guard = __esm(() => {
       name: "copilot-autopilot",
       reason: "A worker never runs with --autopilot.",
       deny: (c) => isCopilot(c) && /\s--autopilot\b/.test(c)
-    },
-    {
-      name: "copilot-model",
-      reason: "Every worker launch needs `--model claude-sonnet-5.5`.",
-      deny: (c) => isLaunch(c) && !/\s--model[ =]claude-sonnet-5\.5(?=\s|$)/.test(c)
     }
   ];
 });

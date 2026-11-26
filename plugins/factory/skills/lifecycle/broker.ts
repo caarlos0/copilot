@@ -49,6 +49,8 @@ const eventTypes = {
   "budget.updated": { task: false, data: ["max_parallel_workers"] },
   "limits.updated": { task: false, data: ["investigation", "implementation"] },
   "lever.updated": { task: false, data: ["spend", "autonomy_cap"] },
+  "models.updated": { task: false, data: ["investigation", "implementation", "review", "backlog", "improve"] },
+  "efforts.updated": { task: false, data: ["investigation", "implementation", "review", "backlog", "improve"] },
   "attention.requested": { task: false, data: ["session", "kind", "text"] },
   "attention.resolved": { task: false, data: ["session"] },
   "improve.proposed": { task: false, data: ["rule", "change", "title", "evidence", "recommended", "proposal_id", "result"] },
@@ -501,7 +503,7 @@ emit    Appends one event and prints it. Types: ${Object.keys(eventTypes).join("
         pr.merged is a hint from the implementation worker (role, pr, merge_commit, head). The
         factory verifies the merge on GitHub before it resolves the task.
         factory.mjs write emits task.moved, task.updated, and feedback.pending after every task write.
-        It emits budget.updated, limits.updated, or lever.updated (no --task) after every write
+        It emits budget.updated, limits.updated, lever.updated, models.updated, or efforts.updated (no --task) after every write
         of that setting.
 cursor  Prints {"cursor":"N"} for the current end of the log.
 armed   Read-only. Prints {"armed":true,"pid":N} and exits 0 when a waiter for this factory is

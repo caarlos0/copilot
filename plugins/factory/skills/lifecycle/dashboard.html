@@ -553,7 +553,7 @@
     <noscript>The factory page needs JavaScript.</noscript>
     <script type="module">
       import { marked, DOMPurify } from "./dashboard.mjs";
-      import { states, outcomes, transitions, artifactName, briefName, githubURL, advisoryURL, validate, countByState, entered, byRecency, cardSummary, rankTasks, compareFactories, factorySection, factorySections, fitProjectLabel, sortReferences, cyclesOf, operatorStates, operatorOutcomes, unblockState, unblockChoice, stripRecommended, blockerClasses, blockerMeta, nextRun, nextDue, leverSpends, leverAutonomyCaps, maxParallelWorkers, maxRoleLimit, digitIndex } from "./dashboard.mjs";
+      import { states, outcomes, transitions, artifactName, briefName, githubURL, advisoryURL, validate, countByState, entered, byRecency, cardSummary, rankTasks, compareFactories, factorySection, factorySections, fitProjectLabel, sortReferences, cyclesOf, operatorStates, operatorOutcomes, unblockState, unblockChoice, stripRecommended, blockerClasses, blockerMeta, nextRun, nextDue, leverSpends, leverAutonomyCaps, maxParallelWorkers, maxRoleLimit, modelRoles, maxModelLength, reasoningEfforts, digitIndex } from "./dashboard.mjs";
 
       const SVG = "http://www.w3.org/2000/svg";
       const NODE = { w: 160, h: 110 };
@@ -1387,25 +1387,41 @@
         high: ["High", "A premium model only for judgment. One reviewer for each PR."],
         max: ["Max", "Premium models by default. A review panel for risky diffs."],
       };
+      const roleNames = {
+        investigation: "Investigation", implementation: "Implementation", review: "Review", backlog: "Find work", improve: "Improve",
+      };
+      const modelSuggestions = ["claude-sonnet-5.5", "claude-opus-5.5", "claude-haiku-5.5", "gpt-6.2-sol", "gemini-4-neon"];
       const settingFields = [
-        { section: "budget", label: "Maximum workers that run at the same time", blank: "No limit", min: 1, max: maxParallelWorkers },
+        { section: "budget", heading: true, label: "Maximum workers that run at the same time", blank: "No limit", min: 1, max: maxParallelWorkers },
         { section: "limits", key: "investigation", label: "Investigation workers", min: 1, max: maxRoleLimit },
         { section: "limits", key: "implementation", label: "Implementation workers", min: 1, max: maxRoleLimit },
-        { section: "lever", key: "spend", label: "Spend limit", choices: leverSpends, levels: spendTiers,
+        { section: "lever", key: "spend", heading: true, label: "Spend limit", choices: leverSpends, levels: spendTiers,
           none: "No limit. Lever selects the tier." },
         { section: "lever", key: "autonomy_cap", label: "Autonomy limit", choices: leverAutonomyCaps, levels: autonomyLevels,
           none: "No limit. Lever selects the level." },
+        ...modelRoles.map((role, index) => ({
+          section: "models", key: role, heading: index === 0, label: `${roleNames[role]} worker model`, text: true,
+        })),
+        ...modelRoles.map((role, index) => ({
+          section: "efforts", key: role, heading: index === 0, label: `${roleNames[role]} worker reasoning effort`,
+          choices: reasoningEfforts, empty: "User default",
+        })),
       ];
       const settingHeadings = {
         budget: ["Workers", "The factory reads these values at its next check. The factory does not start a worker above a limit. A lower limit does not stop a running worker."],
         lever: ["Lever", "These values are limits only. They can lower the level that Lever selects. They cannot raise it. They give no permission."],
+        models: ["Worker models", "The factory starts a worker with copilot --model MODEL when you set a model. If a model is empty, the worker uses your default model. A new value does not change a running worker."],
+        efforts: ["Reasoning effort", "The factory starts a worker with copilot --reasoning-effort LEVEL when you set a level. If a level is empty, the worker uses your default. A new value does not change a running worker."],
       };
 
       function seenSettings(data) {
+        const perRole = (values) => Object.fromEntries(modelRoles.map((role) => [role, values?.[role] ?? null]));
         return {
           budget: data.budget?.max_parallel_workers ?? null,
           limits: { investigation: data.limits.investigation ?? null, implementation: data.limits.implementation ?? null },
           lever: { spend: data.lever?.spend ?? null, autonomy_cap: data.lever?.autonomy_cap ?? null },
+          models: perRole(data.models),
+          efforts: perRole(data.efforts),
         };
       }
 
@@ -1440,11 +1456,19 @@
         const file = selection;
         let expected = seenSettings(snapshot);
         const form = element("form", null, "settings-form move-form");
+        const suggestions = element("datalist");
+        suggestions.id = "model-suggestions";
+        suggestions.append(...modelSuggestions.map((name) => {
+          const option = element("option");
+          option.value = name;
+          return option;
+        }));
         const fields = element("fieldset");
+        fields.append(suggestions);
         const controls = new Map();
         const initial = new Map();
         for (const field of settingFields) {
-          if (settingHeadings[field.section] && (field.section === "budget" || field.key === "spend")) {
+          if (settingHeadings[field.section] && field.heading) {
             const [title, note] = settingHeadings[field.section];
             fields.append(element("h3", title), element("p", note, "muted"));
             if (field.section === "lever") fields.append(element("p", leverNow(snapshot), "muted"));
@@ -1454,11 +1478,17 @@
           control.name = field.key ?? field.section;
           if (field.choices) {
             control.append(...["", ...field.choices].map((value) => {
-              const name = field.levels[value]?.[0];
-              const option = element("option", value ? (field.key === "autonomy_cap" ? `${value} - ${name}` : name) : "No limit");
+              const name = field.levels?.[value]?.[0];
+              const option = element("option", value ? (field.key === "autonomy_cap" ? `${value} - ${name}` : name ?? value) : field.empty ?? "No limit");
               option.value = value;
               return option;
             }));
+          } else if (field.text) {
+            control.type = "text";
+            control.maxLength = maxModelLength;
+            control.placeholder = "User default";
+            control.setAttribute("list", "model-suggestions");
+            control.autocomplete = "off";
           } else {
             control.type = "number";
             control.min = String(field.min);
@@ -1529,7 +1559,12 @@
           for (const field of changed()) {
             const raw = controls.get(field).value;
             let value = raw || null;
-            if (!field.choices) {
+            if (field.text) {
+              value = raw.trim() || null;
+              if (value && (/\s/.test(value) || value.length > maxModelLength)) {
+                return failed(new Error(`${field.label} must be a model name without spaces, at most ${maxModelLength} characters.`), false);
+              }
+            } else if (!field.choices) {
               value = raw === "" ? null : Number(raw);
               if (!Number.isInteger(value) || value < field.min || value > field.max) {
                 return failed(new Error(`${field.label} must be a whole number from ${field.min} to ${field.max}.`), false);

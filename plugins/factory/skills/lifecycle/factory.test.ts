@@ -304,6 +304,35 @@ test("--lever merges ceilings, null clears one, and each write emits lever.updat
   ]);
 });
 
+test("--models and --efforts validate roles and values, null clears a role, and each write emits an event", async (t) => {
+  const f = await fixture(t, example);
+  const before = await readFile(f.file, "utf8");
+  f.fails(/models key must be one of/, "--models", '{"search":"gpt-6.2-sol"}');
+  f.fails(/models\.review must be a model name/, "--models", '{"review":"two words"}');
+  f.fails(/models\.review must be a model name/, "--models", '{"review":""}');
+  f.fails(/models\.review must be a model name/, "--models", '{"review":7}');
+  f.fails(/models\.review must be a model name/, "--models", JSON.stringify({ review: "x".repeat(101) }));
+  f.fails(/efforts key must be one of/, "--efforts", '{"search":"high"}');
+  f.fails(/efforts\.review must be one of/, "--efforts", '{"review":"extreme"}');
+  f.fails(/needs --models/, "--expected-models", "{}");
+  f.fails(/models changed since it was read/, "--models", '{"review":"gpt-6.2-sol"}', "--expected-models", '{"review":null}');
+  assert.equal(await readFile(f.file, "utf8"), before);
+  f.ok("--models", JSON.stringify({ backlog: "x".repeat(100), review: null }), "--efforts", '{"improve":"xhigh","review":null}');
+  const data = await f.read();
+  assert.deepEqual(data.models, { implementation: "claude-sonnet-5.5", backlog: "x".repeat(100) });
+  assert.deepEqual(data.efforts, { implementation: "medium", improve: "xhigh" });
+  const events = (await readFile(join(f.directory, "owner.repo-factory-events.jsonl"), "utf8"))
+    .trim().split("\n").map((line) => JSON.parse(line));
+  assert.deepEqual(events.map(({ type, task, source, data }) => [type, task, source, data]), [
+    ["models.updated", null, "coordinator", {
+      investigation: null, implementation: "claude-sonnet-5.5", review: null, backlog: "x".repeat(100), improve: null,
+    }],
+    ["efforts.updated", null, "coordinator", {
+      investigation: null, implementation: "medium", review: null, backlog: null, improve: "xhigh",
+    }],
+  ]);
+});
+
 test("--limits and --lever compare each changed key with the expected value", async (t) => {
   const f = await fixture(t, example);
   f.fails(/needs --limits/, "--expected-limits", "{}");
@@ -335,7 +364,7 @@ test("an operator write needs the seen limits and lever and keeps the 1 to 100 c
       /from 1 to 100/, bad);
   }
   await assert.rejects(update(f.file, { limits, "expected-limits": '{"implementation":3}', rules: "[]" }, { operator: true }),
-    /can set only the budget, the limits, or the Lever/);
+    /can set only the budget, the limits, the Lever ceilings, the models, or the efforts/);
   assert.equal(await readFile(f.file, "utf8"), original);
   const data = await update(f.file, {
     limits, "expected-limits": '{"implementation":3}', lever, "expected-lever": '{"autonomy_cap":null}',

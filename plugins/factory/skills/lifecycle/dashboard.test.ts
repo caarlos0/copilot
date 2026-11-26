@@ -405,6 +405,44 @@ test("the settings endpoint saves every section, returns the factory, and emits 
   assert.deepEqual((await one.json()).limits, { investigation: 2, implementation: 1 });
 });
 
+test("models and efforts save through the settings endpoint and emit dashboard events", async (t) => {
+  const { url, directory } = await server(t);
+  const file = join(directory, factoryFile);
+  const response = await settings(url, {
+    set: { models: { implementation: "gpt-6.2-sol", review: null }, efforts: { review: "max" } },
+    expected: { models: { implementation: "claude-sonnet-5.5", review: "claude-opus-5.5" }, efforts: { review: "high" } },
+  });
+  assert.equal(response.status, 200, await response.clone().text());
+  const data = await response.json();
+  assert.deepEqual(data.models, { implementation: "gpt-6.2-sol" });
+  assert.deepEqual(data.efforts, { implementation: "medium", review: "max" });
+  const events = (await readFile(join(directory, "owner.repo-factory-events.jsonl"), "utf8")).trim().split("\n")
+    .map((line) => JSON.parse(line));
+  assert.deepEqual(events.map(({ type, task, source, data }) => [type, task, source, data]), [
+    ["models.updated", null, "dashboard", {
+      investigation: null, implementation: "gpt-6.2-sol", review: null, backlog: null, improve: null,
+    }],
+    ["efforts.updated", null, "dashboard", {
+      investigation: null, implementation: "medium", review: "max", backlog: null, improve: null,
+    }],
+  ]);
+  const original = await readFile(file, "utf8");
+  const seenModels = { models: { implementation: "gpt-6.2-sol", backlog: null } };
+  const bad: [Json, Json, number][] = [
+    [{ models: { backlog: "two words" } }, seenModels, 400],
+    [{ models: { backlog: "" } }, seenModels, 400],
+    [{ models: { backlog: "x".repeat(101) } }, seenModels, 400],
+    [{ models: { search: "gpt-6.2-sol" } }, { models: { search: null } }, 400],
+    [{ efforts: { backlog: "extreme" } }, { efforts: { backlog: null } }, 400],
+    [{ models: { implementation: "gpt-6.2-sol" } }, { models: { implementation: "claude-sonnet-5.5" } }, 409],
+  ];
+  for (const [set, expected, status] of bad) {
+    const rejected = await settings(url, { set, expected });
+    assert.equal(rejected.status, status, JSON.stringify({ set, body: await rejected.text() }));
+    assert.equal(await readFile(file, "utf8"), original);
+  }
+});
+
 test("each settings section reports a stale read as a conflict, and old files still save", async (t) => {
   const { url, directory } = await server(t);
   const file = join(directory, factoryFile);
@@ -1873,9 +1911,13 @@ test("the Settings item at the bottom of the sidebar opens one settings dialog",
   await ui.get("open-settings").fire("click");
   assert.equal(ui.get("settings-dialog").open, true);
   const form = ui.get("settings-body").querySelector("form");
-  assert.deepEqual(form.querySelectorAll("input").map((input: Json) => input.value), ["10", "3", "3"]);
-  const [spend, cap] = form.querySelectorAll("select");
+  assert.deepEqual(form.querySelectorAll("input").map((input: Json) => input.value),
+    ["10", "3", "3", "", "claude-sonnet-5.5", "claude-opus-5.5", "", ""]);
+  const [spend, cap, ...efforts] = form.querySelectorAll("select");
   assert.deepEqual([spend.value, cap.value], ["", ""]);
+  assert.deepEqual(efforts.map((select: Json) => select.value), ["", "medium", "high", "", ""]);
+  assert.deepEqual(efforts[0].options.map((option: Json) => option.value),
+    ["", "none", "minimal", "low", "medium", "high", "xhigh", "max"]);
   assert.deepEqual(spend.options.map((option: Json) => option.value), ["", "standard", "high", "max"]);
   assert.deepEqual(cap.options.map((option: Json) => option.value), ["", "L0", "L1", "L2", "L3", "L4", "L5"]);
   assert.match(form.textContent, /Latest recorded autonomy level: L4 \(issue-3\)/);
@@ -1912,7 +1954,7 @@ test("each autonomy and spend choice has a short hint, and a saved limit shows i
   assert.equal(ui.get("limits-note").textContent, "Limits: autonomy L2 (Ready, human lands), spend max. Change them in Settings.");
   await ui.get("open-settings").fire("click");
   const reopened = ui.get("settings-body").querySelector("form");
-  assert.deepEqual(reopened.querySelectorAll("select").map((select: Json) => select.value), ["max", "L2"]);
+  assert.deepEqual(reopened.querySelectorAll("select").slice(0, 2).map((select: Json) => select.value), ["max", "L2"]);
   assert.match(reopened.textContent, /Latest recorded autonomy level: L4 \(issue-3\)\. You cannot change it here\. It is above the limit L2\./);
   const events = (await readFile(join(ui.directory, "owner.repo-factory-events.jsonl"), "utf8")).trim().split("\n")
     .map((line) => JSON.parse(line));
@@ -1977,6 +2019,27 @@ test("the settings dialog validates numbers before sending and saves nothing whe
   assert.equal(await readFile(file, "utf8"), original);
 });
 
+test("the settings dialog saves a model and an effort, and an empty field clears the role", async (t) => {
+  const ui = await dashboard(t);
+  const file = join(ui.directory, factoryFile);
+  await ui.get("open-settings").fire("click");
+  const form = ui.get("settings-body").querySelector("form");
+  const [, , , , , review, backlog, improve] = form.querySelectorAll("input");
+  const selects = form.querySelectorAll("select");
+  review.value = "two words";
+  await form.fire("submit");
+  assert.match(form.querySelector(".save-error").textContent, /model/i);
+  review.value = "";
+  backlog.value = "gpt-6.2-sol";
+  selects[5].value = "xhigh";
+  await form.fire("submit");
+  assert.equal(ui.get("settings-dialog").open, false);
+  const saved = JSON.parse(await readFile(file, "utf8"));
+  assert.deepEqual(saved.models, { implementation: "claude-sonnet-5.5", backlog: "gpt-6.2-sol" });
+  assert.deepEqual(saved.efforts, { implementation: "medium", review: "high", backlog: "xhigh" });
+  assert.equal(improve.value, "");
+});
+
 test("the delegate-always rule is present in the agent, skill, and plugin rules", () => {
   const plugin = join(import.meta.dirname, "..", "..");
   for (const file of [
@@ -1989,7 +2052,7 @@ test("the delegate-always rule is present in the agent, skill, and plugin rules"
     assert.match(text, /git rebase main/, file);
     assert.match(text, /git merge --ff-only/, file);
     assert.doesNotMatch(text, /git merge --no-ff/, file);
-    assert.match(text, /claude-sonnet-5\.5/, file);
+    assert.doesNotMatch(text, /claude-sonnet-5\.5/, file);
     assert.match(text, /never use `git stash`|never to use `git stash`/i, file);
     assert.match(text, /never\s+waits?\s+on\s+another\s+task/i, file);
     assert.match(text, /only\s+for\s+a\s+user\s+decision/i, file);

@@ -60,8 +60,10 @@ result or event.
 discovery, and improve workers, is a Copilot session in a Rex tab with a
 brief, a result file, and `factory.mjs broker emit`.
 
-Workers use `claude-sonnet-5.5`. Use a bigger model only when the user asks for
-it explicitly. Every implementation brief tells the worker to run
+Pass the model and the reasoning effort only when the project sets them for the
+role (`models` and `efforts` in the factory file; see "Launch rules" in the
+lifecycle skill). With no value, add no flag, so the default of the user
+applies. Every implementation brief tells the worker to run
 `git rebase main` before it reports. For a task with a PR, the brief tells the
 worker to merge main in and never to rebase. Every brief also tells the worker
 to never use `git stash`. While your session is the session in the factory owner

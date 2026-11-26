@@ -26,6 +26,9 @@ export const maxParallelWorkers = 100;
 export const maxRoleLimit = 100;
 export const leverSpends = ["standard", "high", "max"] as const;
 export const leverAutonomyCaps = ["L0", "L1", "L2", "L3", "L4", "L5"] as const;
+export const modelRoles = ["investigation", "implementation", "review", "backlog", "improve"] as const;
+export const maxModelLength = 100;
+export const reasoningEfforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 
 export type State = (typeof states)[number];
 export type RunStatus = (typeof runStatuses)[number];
@@ -115,6 +118,8 @@ export type Rule = {
 export type Ignored = { url: string; at: string; reason: string };
 export type Limits = Partial<Record<"investigation" | "implementation", number>>;
 export type Budget = { max_parallel_workers: number };
+export type Models = Partial<Record<(typeof modelRoles)[number], string>>;
+export type Efforts = Partial<Record<(typeof modelRoles)[number], (typeof reasoningEfforts)[number]>>;
 export type Lever = { spend?: LeverSpend | null; autonomy_cap?: LeverAutonomyCap | null };
 export type Factory = {
   format: typeof format;
@@ -129,6 +134,8 @@ export type Factory = {
   limits: Limits;
   budget?: Budget;
   lever?: Lever;
+  models?: Models;
+  efforts?: Efforts;
   tasks: Task[];
 };
 export type Archive = { format: typeof archiveFormat; project: string; day: string; tasks: Task[] };
@@ -640,6 +647,8 @@ export function validate(data: any) {
   }
   if (data.budget !== undefined) validateBudget(data.budget);
   if (data.lever !== undefined) validateLever(data.lever);
+  if (data.models !== undefined) validateModels(data.models);
+  if (data.efforts !== undefined) validateEfforts(data.efforts);
   if (!Array.isArray(data.tasks)) throw new Error("tasks must be an array.");
   const seen: Seen = { ids: new Set(), issue: new Set(), pr: new Set() };
   for (const task of data.tasks) validateTask(task, seen);
@@ -660,6 +669,28 @@ function validateLever(lever: any) {
   for (const [key, value] of Object.entries(lever)) {
     oneOf(key, ["spend", "autonomy_cap"], "lever key");
     if (value !== null) oneOf(value, key === "spend" ? leverSpends : leverAutonomyCaps, `lever.${key}`);
+  }
+}
+
+// A model is the value of `copilot --model` for one worker role. A missing role means the user's default model.
+// A change may clear a role with null; the stored object never holds null.
+export function validateModels(models: any, clear = false) {
+  if (!isObject(models)) throw new Error("models must be an object.");
+  for (const [role, value] of Object.entries(models)) {
+    oneOf(role, modelRoles, "models key");
+    if (clear && value === null) continue;
+    if (typeof value !== "string" || !value || /\s/.test(value) || value.length > maxModelLength) {
+      throw new Error(`models.${role} must be a model name without spaces, at most ${maxModelLength} characters.`);
+    }
+  }
+}
+
+// Same shape as models: the value of `copilot --reasoning-effort` for one worker role.
+export function validateEfforts(efforts: any, clear = false) {
+  if (!isObject(efforts)) throw new Error("efforts must be an object.");
+  for (const [role, value] of Object.entries(efforts)) {
+    oneOf(role, modelRoles, "efforts key");
+    if (!(clear && value === null)) oneOf(value, reasoningEfforts, `efforts.${role}`);
   }
 }
 

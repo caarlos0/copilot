@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { gzipSync } from "node:zlib";
 import writeFileAtomic from "write-file-atomic";
-import { briefName as checkBriefName, countByState, isObject, validate } from "./factory-data.ts";
+import { briefName as checkBriefName, countByState, isObject, modelRoles, validate } from "./factory-data.ts";
 import type { Factory, Worker } from "./factory-data.ts";
 import { resolveAttention, scanStamp, sendAnswer } from "./attention.ts";
 import type { AttentionItem } from "./attention.ts";
@@ -525,7 +525,10 @@ An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
   async function setSettings(request: IncomingMessage, file: string | null) {
     const body = await readJSONBody(request);
     const known = (value: any, keys: string[]) => isObject(value) && Object.keys(value).every((key) => keys.includes(key));
-    const fields = { limits: ["investigation", "implementation"], lever: ["spend", "autonomy_cap"] };
+    const fields = {
+      limits: ["investigation", "implementation"], lever: ["spend", "autonomy_cap"],
+      models: [...modelRoles], efforts: [...modelRoles],
+    };
     const sections = isObject(body?.set) ? Object.keys(body.set) : [];
     if (!known(body, ["set", "expected"]) || !known(body.expected, ["budget", ...Object.keys(fields)]) ||
         !sections.length || !known(body.set, ["budget", ...Object.keys(fields)]) ||
@@ -536,7 +539,7 @@ An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
           !(known(body.set[section], keys) && known(body.expected[section], keys) &&
             Object.keys(body.set[section]).length && Object.keys(body.set[section]).every((key) =>
               Object.hasOwn(body.expected[section], key))))) {
-      throw new HttpError(400, "The request needs set (budget, limits, or lever values). It also needs expected, with the value that the browser saw for each field.");
+      throw new HttpError(400, "The request needs set (budget, limits, lever, models, or efforts values). It also needs expected, with the value that the browser saw for each field.");
     }
     await loadFactory(file);
     const values: Json = {};
