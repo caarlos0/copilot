@@ -118,6 +118,30 @@ apply to that plugin only. Keep them current when that plugin changes.
 A plugin without a file has no rules beyond this one. Add a file only when a
 plugin has rules that do not apply elsewhere.
 
+## Model freshness
+
+Agents must use the newest model of their family and tier. Check this on a
+schedule and after a new Copilot CLI release.
+
+1. List the models of the installed CLI. Run `copilot --help` and read the
+   `--model` choices. If the CLI does not run, use the `model` enum of the
+   `task` tool in your own session. If you find no reliable list, stop and
+   report `blocked`. Do not write a model ID from memory.
+2. Find every place that sets or names a model. Search all plugins for
+   `^model:` in `agents/*.agent.md`, for `--model`, and for model names
+   (`claude`, `gpt`, `gemini`, `grok`, `opus`, `sonnet`, `haiku`, `codex`,
+   `luna`, `astra`, `sol`, `terra`) in agents, skills, `AGENTS.md` files,
+   READMEs, and scripts.
+3. For each model, find the newest ID in the same family and tier. The tier is
+   the name part (for example `luna`, `astra`, `sol`, `haiku`, `opus`). Do not
+   change the family or the tier. Do not add `model:` to an agent that has none.
+4. Replace the ID. Update each document that names the old ID.
+5. Do not bump the plugin version. A release does that.
+6. The factory plugin pins `claude-sonnet-5.5` for its workers on purpose. Its
+   own rules in `plugins/factory/AGENTS.md` control it. Change it only in a
+   factory task.
+7. Run `node --test plugins scripts`.
+
 ## Validation
 
 Load local changes with `copilot --plugin-dir /path/to/copilot/plugins/coding`

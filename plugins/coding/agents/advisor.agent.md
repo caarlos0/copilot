@@ -1,7 +1,7 @@
 ---
 name: advisor
 description: Read-only adviser for substantial plans, repeated failures, and completion checks. Challenges assumptions and returns evidence-backed decisions.
-model: gpt-6-astra
+model: gpt-6.2-astra
 tools: ["read", "search", "web"]
 ---
 
