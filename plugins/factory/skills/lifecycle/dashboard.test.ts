@@ -1930,10 +1930,9 @@ test("the Settings item at the bottom of the sidebar opens one settings dialog",
   assert.equal(ui.get("detail").hidden, false, "Escape must not close the task panel behind the dialog.");
 });
 
-test("each autonomy and spend choice has a short hint, and a saved limit shows in the project view and the file", async (t) => {
+test("each autonomy and spend choice has a short hint, and a saved limit shows in the dialog and the file", async (t) => {
   const ui = await dashboard(t);
   const file = join(ui.directory, factoryFile);
-  assert.equal(ui.get("limits-note").hidden, true, "No limit, no note.");
   await ui.get("open-settings").fire("click");
   const form = ui.get("settings-body").querySelector("form");
   const [spend, cap] = form.querySelectorAll("select");
@@ -1960,8 +1959,6 @@ test("each autonomy and spend choice has a short hint, and a saved limit shows i
   await form.fire("submit");
   assert.deepEqual(JSON.parse(await readFile(file, "utf8")).lever, { spend: "max", autonomy_cap: "L2" });
   assert.equal(ui.get("settings-dialog").open, false);
-  assert.equal(ui.get("limits-note").hidden, false);
-  assert.equal(ui.get("limits-note").textContent, "Limits: autonomy L2 (Ready, human lands), spend max. Change them in Settings.");
   await ui.get("open-settings").fire("click");
   const reopened = ui.get("settings-body").querySelector("form");
   assert.deepEqual(reopened.querySelectorAll("select").slice(0, 2).map((select: Json) => select.value), ["max", "L2"]);

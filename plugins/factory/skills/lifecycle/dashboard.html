@@ -198,7 +198,6 @@
       .settings-panel[hidden] { display: none; }
       .settings-panel > .field-hint { margin: 0 0 12px; }
       .settings-form input { display: block; width: 100%; margin: 6px 0 0; padding: 5px 12px; background: var(--bg); font-weight: 400; }
-      #limits-note { margin: 8px 24px 0; }
       #rule-list, #improve-list, #ignored-list { list-style: none; margin: 0; padding: 0; }
       #producers-note { margin: 16px 24px 0; }
       #producers-note:empty { display: none; }
@@ -489,7 +488,6 @@
         <ul id="skipped-files"></ul>
       </details>
       <p id="error" role="alert" hidden></p>
-      <p id="limits-note" class="muted" hidden></p>
       <div id="flow-wrap">
         <svg id="flow" viewBox="0 0 1160 720" role="group" aria-label="Factory flow: number of tasks in each state"></svg>
       </div>
@@ -1012,7 +1010,6 @@
         drawSource(enabled);
         drawAttention();
         drawStops();
-        drawLimits();
         renderDetail(chosen);
       }
 
@@ -1457,17 +1454,6 @@
         return cap && leverAutonomyCaps.indexOf(level) > leverAutonomyCaps.indexOf(cap)
           ? `${text} It is above the limit ${cap}. A limit does not change a recorded level. The factory applies the limit when it resolves the next dispatch.`
           : text;
-      }
-
-      // The project view shows the saved limits, so a save has a visible result.
-      function drawLimits() {
-        const note = document.getElementById("limits-note");
-        const lever = snapshot?.lever ?? {};
-        const parts = [];
-        if (lever.autonomy_cap) parts.push(`autonomy ${lever.autonomy_cap} (${autonomyLevels[lever.autonomy_cap][0]})`);
-        if (lever.spend) parts.push(`spend ${lever.spend}`);
-        note.textContent = parts.length ? `Limits: ${parts.join(", ")}. Change them in Settings.` : "";
-        note.hidden = !parts.length;
       }
 
       function settingsForm() {
