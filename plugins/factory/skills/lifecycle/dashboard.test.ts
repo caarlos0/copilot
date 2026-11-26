@@ -1889,6 +1889,10 @@ test("the popup can resolve an initial task with an outcome and comment", async 
   assert.equal(outcome.value, "completed");
   outcome.value = "cancelled";
   const comment = form.querySelector("textarea");
+  const commentHint = form.querySelector(".field-hint");
+  assert.ok(commentHint, "Move dialog comment hint uses the shared .field-hint class.");
+  assert.equal(comment["aria-describedby"], commentHint.id, "Comment links to its hint via aria-describedby.");
+  assert.equal(commentHint.parentNode, comment.parentNode.parentNode, "Hint sits in the same .form-field group as the comment label.");
   comment.value = "No longer needed. Stop work on this task.";
   await ui.run("refresh()");
   assert.equal(form.querySelectorAll("select").find((select: Json) => select.name === "resolution").value, "cancelled");
@@ -1933,6 +1937,12 @@ test("each autonomy and spend choice has a short hint, and a saved limit shows i
   await ui.get("open-settings").fire("click");
   const form = ui.get("settings-body").querySelector("form");
   const [spend, cap] = form.querySelectorAll("select");
+  const hintNodes = form.querySelectorAll(".level-hint");
+  for (const [index, select] of [spend, cap].entries()) {
+    assert.ok(hintNodes[index].className.split(" ").includes("field-hint"), "Level hints use the shared .field-hint class.");
+    assert.equal(select["aria-describedby"], hintNodes[index].id, "Select links to its hint via aria-describedby.");
+    assert.equal(hintNodes[index].parentNode, select.parentNode.parentNode, "Hint sits in the same .form-field group as its label.");
+  }
   const hints = () => form.querySelectorAll(".level-hint").map((hint: Json) => hint.textContent);
   assert.deepEqual(hints(), ["No limit. Lever selects the tier.", "No limit. Lever selects the level."]);
   assert.deepEqual(cap.options.map((option: Json) => option.textContent), ["No limit", "L0 - Propose", "L1 - Draft",

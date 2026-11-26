@@ -196,12 +196,9 @@
         background: transparent; }
       .settings-tab:focus-visible { outline-offset: -2px; }
       .settings-panel[hidden] { display: none; }
-      .settings-panel > p.muted:first-child { margin-top: 0; }
-      .settings-form input { display: block; width: 100%; margin-top: 4px; padding: 5px 12px; background: var(--bg); font-weight: 400; }
-      .settings-form label { margin-top: 12px; }
-      .settings-form p.muted { margin: 4px 0 12px; }
+      .settings-panel > .field-hint { margin: 0 0 12px; }
+      .settings-form input { display: block; width: 100%; margin: 6px 0 0; padding: 5px 12px; background: var(--bg); font-weight: 400; }
       #limits-note { margin: 8px 24px 0; }
-      .settings-form .controls { margin-top: 24px; }
       #rule-list, #improve-list, #ignored-list { list-style: none; margin: 0; padding: 0; }
       #producers-note { margin: 16px 24px 0; }
       #producers-note:empty { display: none; }
@@ -233,7 +230,6 @@
         border-bottom: 1px solid var(--border); }
       .detail-head h2 { flex: 1; min-width: 0; overflow-wrap: anywhere; }
       .close-button { font-size: 24px; color: var(--fg-muted); background: transparent; border-color: transparent; }
-      .move-form .controls { justify-content: flex-end; }
       #detail-empty { margin: 16px 24px; }
       .counter { display: inline-block; min-width: 20px; margin-left: 8px; padding: 0 6px; border-radius: 2em;
         background: color-mix(in srgb, var(--neutral) 20%, transparent); font-size: 12px; font-weight: 500;
@@ -256,16 +252,24 @@
       .move { flex: none; padding: 3px 12px; font-size: 12px; }
       .move-form { padding: 16px 24px; }
       .move-form fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
-      .move-form label + label { margin-top: 12px; }
-      .move-form label[hidden] { display: none; }
-      .move-form select, .move-form textarea { display: block; width: 100%; margin-top: 4px; font-weight: 400; }
-      .unblock-context { margin: 0 0 12px; padding: 8px 12px; border-left: 3px solid var(--attention); background: var(--bg-muted); }
+      .move-form .controls { justify-content: flex-end; margin: 20px 0 0; }
+      .move-form .save-error { margin: 12px 0 0; }
+      .move-form select, .move-form textarea { display: block; width: 100%; margin: 6px 0 0; font-weight: 400; }
+      .form-field { margin-top: 16px; }
+      .form-field[hidden] { display: none; }
+      .form-field > label { margin: 0; }
+      .settings-panel > .form-field:first-child, .move-form fieldset > .form-field:first-child { margin-top: 0; }
+      .field-hint { margin: 6px 0 0; padding: 0; color: var(--fg-muted); font-size: 12px; line-height: 1.5; }
+      .settings-status { margin: 12px 0 0; }
+      .settings-status:empty { display: none; }
+      .unblock-context { margin: 0 0 16px; padding: 8px 12px; border-left: 3px solid var(--attention); background: var(--bg-muted); }
       .unblock-context p { margin: 0; }
       .unblock-context .unblock-reason { margin-top: 4px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 40vh; overflow: auto; }
       .unblock-notes { margin: 8px 0 0; padding: 0; list-style: none; font-size: 12px; color: var(--fg-muted);
         white-space: pre-wrap; overflow-wrap: anywhere; }
-      .unblock-options { display: flex; flex-direction: column; gap: 8px; margin: 12px 0; }
-      .unblock-options p { margin: 0; }
+      .unblock-options { display: flex; flex-direction: column; gap: 8px; margin: 16px 0 0; }
+      .unblock-options[hidden] { display: none; }
+      .unblock-options .field-hint { margin: 0; }
       .unblock-options button { display: block; width: 100%; text-align: left; font-weight: 400;
         white-space: normal; overflow-wrap: anywhere; }
       .unblock-options button[aria-pressed="true"] { border-color: var(--accent); }
@@ -1510,8 +1514,8 @@
           tabpanel.id = `settings-panel-${tab.id}`;
           tabpanel.setAttribute("role", "tabpanel");
           tabpanel.setAttribute("aria-labelledby", button.id);
-          tabpanel.append(element("p", tab.note, "muted"));
-          if (tab.id === "lever") tabpanel.append(element("p", leverNow(snapshot), "muted"));
+          tabpanel.append(element("p", tab.note, "field-hint"));
+          if (tab.id === "lever") tabpanel.append(element("p", leverNow(snapshot), "field-hint"));
           panels.set(tab.id, tabpanel);
         }
         const suggestions = element("datalist");
@@ -1527,6 +1531,7 @@
         const initial = new Map();
         for (const field of settingFields) {
           const tabpanel = panels.get(field.tab);
+          const group = element("div", null, "form-field");
           const label = element("label", field.label);
           const control = element(field.choices ? "select" : "input");
           control.name = field.key ?? field.section;
@@ -1554,17 +1559,20 @@
           controls.set(field, control);
           initial.set(field, control.value);
           label.append(control);
-          tabpanel.append(label);
+          group.append(label);
           if (field.levels) {
-            const hint = element("p", levelHint(field, control.value), "muted level-hint");
+            const hint = element("p", levelHint(field, control.value), "field-hint level-hint");
+            hint.id = `settings-hint-${control.name}`;
+            control.setAttribute("aria-describedby", hint.id);
             control.addEventListener("change", () => { hint.textContent = levelHint(field, control.value); });
-            tabpanel.append(hint);
+            group.append(hint);
           }
+          tabpanel.append(group);
         }
         const error = element("p", null, "save-error");
         error.setAttribute("role", "alert");
         error.hidden = true;
-        const status = element("p", null, "muted");
+        const status = element("p", null, "field-hint settings-status");
         status.setAttribute("role", "status");
         const reload = element("button", "Reload settings");
         reload.type = "button";
@@ -1696,10 +1704,12 @@
         const unblock = task.state === "blocked";
         const context = element("section", null, "unblock-context");
         context.setAttribute("aria-label", "Why this task is blocked");
+        const stateField = element("div", null, "form-field");
         const stateLabel = element("label", "Move to");
         const state = element("select");
         state.name = "state";
         state.autofocus = true;
+        const resolutionField = element("div", null, "form-field");
         const resolutionLabel = element("label", "Resolution outcome");
         const resolution = element("select");
         resolution.name = "resolution";
@@ -1711,9 +1721,10 @@
         }
         resolution.value = "completed";
         resolutionLabel.append(resolution);
+        resolutionField.append(resolutionLabel);
         const showResolution = () => {
-          resolutionLabel.hidden = state.value !== "resolved";
-          resolution.disabled = resolutionLabel.hidden;
+          resolutionField.hidden = state.value !== "resolved";
+          resolution.disabled = resolutionField.hidden;
         };
         state.addEventListener("change", showResolution);
         const setChoices = () => {
@@ -1738,7 +1749,7 @@
           context.replaceChildren(...(blocked ? blockContext(current) : []));
           const suggested = blocked ? current.blocker.options ?? [] : [];
           options.hidden = !suggested.length;
-          options.replaceChildren(...(suggested.length ? [element("p", "Suggested answers. Select one. Then change it or write your own answer below.", "muted")] : []),
+          options.replaceChildren(...(suggested.length ? [element("p", "Suggested answers. Select one. Then change it or write your own answer below.", "field-hint")] : []),
             ...suggested.map((option) => {
               const choice = rich("button", stripRecommended(option.label), "option");
               choice.type = "button";
@@ -1758,6 +1769,8 @@
         const comment = element("textarea");
         setChoices();
         stateLabel.append(state);
+        stateField.append(stateLabel);
+        const commentField = element("div", null, "form-field");
         const commentLabel = element("label", "Comment for the factory");
         comment.name = "comment";
         comment.required = true;
@@ -1767,7 +1780,10 @@
         commentLabel.append(comment);
         const notice = element("p",
           "The factory must read the saved comment and reconcile the workers. This action does not stop a running worker. It does not merge a PR.",
-          "muted");
+          "field-hint");
+        notice.id = "move-comment-hint";
+        comment.setAttribute("aria-describedby", notice.id);
+        commentField.append(commentLabel, notice);
         const error = element("p", null, "save-error");
         error.setAttribute("role", "alert");
         error.hidden = true;
@@ -1779,7 +1795,7 @@
         reload.hidden = true;
         const actions = element("div", null, "controls");
         actions.append(reload, save);
-        fields.append(...(unblock ? [context] : []), stateLabel, resolutionLabel, options, commentLabel, notice, error, actions);
+        fields.append(...(unblock ? [context] : []), stateField, resolutionField, options, commentField, error, actions);
         form.append(fields);
         const failed = (cause) => {
           error.textContent = cause.message;
