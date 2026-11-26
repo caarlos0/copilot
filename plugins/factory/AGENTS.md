@@ -358,8 +358,9 @@ the workers have a new brief or are parked. CLI writes after dashboard feedback 
 The factory waits on dashboard events even when all workers are blocked.
 Dashboard changes do not stop workers, resume a paused run, or grant authority.
 The "Settings" item pinned at the bottom of the sidebar opens one settings dialog.
-The dialog groups settings into four tabs (`Workers`, `Lever`, `Models`, `Effort`)
-and shows one tab at a time. It keeps the active tab in memory across refreshes
+The dialog groups settings into three tabs (`Workers`, `Lever`, `Models`)
+and shows one tab at a time. The `Models` tab lists one block per worker role
+with the model input and reasoning effort select side by side. It keeps the active tab in memory across refreshes
 and supports keyboard navigation (`ArrowLeft`, `ArrowRight`, `Home`, `End`). It edits the optional
 root `budget.max_parallel_workers` (the most workers that run at once over all
 roles; absent means no total cap; a new file gets 10), `limits.investigation`

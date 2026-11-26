@@ -2058,14 +2058,26 @@ test("the settings dialog shows one tab at a time, supports keyboard navigation,
   const tabs = form.querySelectorAll(".settings-tab");
   const panels = form.querySelectorAll(".settings-panel");
   assert.equal(tablist.role, "tablist");
-  assert.deepEqual(tabs.map((tab: Json) => tab.textContent), ["Workers", "Lever", "Models", "Effort"]);
-  assert.equal(panels.length, 4);
+  assert.deepEqual(tabs.map((tab: Json) => tab.textContent), ["Workers", "Lever", "Models"]);
+  assert.equal(panels.length, 3);
   for (const [index, tab] of tabs.entries()) {
     assert.equal(tab.role, "tab");
     assert.equal(panels[index].role, "tabpanel");
     assert.equal(tab["aria-controls"], panels[index].id);
     assert.equal(panels[index]["aria-labelledby"], tab.id);
   }
+  const roles = panels[2].querySelectorAll(".role-setting");
+  assert.deepEqual(roles.map((block: Json) => block.querySelector(".role-heading").textContent),
+    ["Investigation", "Implementation", "Review", "Backlog", "Improve"]);
+  for (const block of roles) {
+    const row = block.querySelector(".role-row");
+    const heading = block.querySelector(".role-heading").textContent;
+    assert.equal(row.querySelectorAll("input").length, 1);
+    assert.equal(row.querySelectorAll("select").length, 1);
+    assert.equal(row.querySelector("input")["aria-label"], `${heading} model`);
+    assert.equal(row.querySelector("select")["aria-label"], `${heading} reasoning effort`);
+  }
+  assert.ok(panels[2].querySelector(".field-hint"), "Models tab uses the shared .field-hint style.");
   const controlsInPanels = panels.flatMap((panel: Json) => [...panel.querySelectorAll("input"), ...panel.querySelectorAll("select")]);
   const allControls = [...form.querySelectorAll("input"), ...form.querySelectorAll("select")];
   assert.equal(controlsInPanels.length, allControls.length, "Every setting belongs to exactly one tab panel.");
@@ -2080,13 +2092,13 @@ test("the settings dialog shows one tab at a time, supports keyboard navigation,
   checkActive(1);
   assert.equal(ui.document.activeElement, tabs[1]);
   await tabs[1].fire("keydown", { key: "End" });
-  checkActive(3);
-  assert.equal(ui.document.activeElement, tabs[3]);
-  await tabs[3].fire("keydown", { key: "ArrowRight" });
+  checkActive(2);
+  assert.equal(ui.document.activeElement, tabs[2]);
+  await tabs[2].fire("keydown", { key: "ArrowRight" });
   checkActive(0);
   await tabs[0].fire("keydown", { key: "ArrowLeft" });
-  checkActive(3);
-  await tabs[3].fire("keydown", { key: "Home" });
+  checkActive(2);
+  await tabs[2].fire("keydown", { key: "Home" });
   checkActive(0);
   await tabs[2].fire("click");
   checkActive(2);

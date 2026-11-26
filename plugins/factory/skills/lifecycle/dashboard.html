@@ -258,8 +258,11 @@
       .form-field { margin-top: 16px; }
       .form-field[hidden] { display: none; }
       .form-field > label { margin: 0; }
-      .settings-panel > .form-field:first-child, .move-form fieldset > .form-field:first-child { margin-top: 0; }
+      .settings-panel > :first-child, .move-form fieldset > .form-field:first-child { margin-top: 0; }
       .field-hint { margin: 6px 0 0; padding: 0; color: var(--fg-muted); font-size: 12px; line-height: 1.5; }
+      .role-heading { margin: 0 0 6px; font-size: 14px; font-weight: 600; }
+      .role-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(140px, 168px); gap: 8px; }
+      .role-row input, .role-row select { margin: 0; }
       .settings-status { margin: 12px 0 0; }
       .settings-status:empty { display: none; }
       .unblock-context { margin: 0 0 16px; padding: 8px 12px; border-left: 3px solid var(--attention); background: var(--bg-muted); }
@@ -1400,7 +1403,7 @@
         max: ["Max", "Premium models by default. A review panel for risky diffs."],
       };
       const roleNames = {
-        investigation: "Investigation", implementation: "Implementation", review: "Review", backlog: "Find work", improve: "Improve",
+        investigation: "Investigation", implementation: "Implementation", review: "Review", backlog: "Backlog", improve: "Improve",
       };
       const modelSuggestions = ["claude-sonnet-5.5", "claude-opus-5.5", "claude-haiku-5.5", "gpt-6.2-sol", "gemini-4-neon"];
       const settingTabs = [
@@ -1409,9 +1412,7 @@
         { id: "lever", label: "Lever",
           note: "These values are limits only. They can lower the level that Lever selects. They cannot raise it. They give no permission." },
         { id: "models", label: "Models",
-          note: "The factory starts a worker with copilot --model MODEL when you set a model. If a model is empty, the worker uses your default model. A new value does not change a running worker." },
-        { id: "efforts", label: "Effort",
-          note: "The factory starts a worker with copilot --reasoning-effort LEVEL when you set a level. If a level is empty, the worker uses your default. A new value does not change a running worker." },
+          note: "Set a model (--model) and reasoning effort (--reasoning-effort) for each worker role. Leave a field empty to use your default. A new value applies to the next launch only." },
       ];
       let settingsTab = settingTabs[0].id;
       const settingFields = [
@@ -1423,11 +1424,11 @@
         { tab: "lever", section: "lever", key: "autonomy_cap", label: "Autonomy limit", choices: leverAutonomyCaps, levels: autonomyLevels,
           none: "No limit. Lever selects the level." },
         ...modelRoles.map((role) => ({
-          tab: "models", section: "models", key: role, label: `${roleNames[role]} worker model`, text: true,
+          tab: "models", role, section: "models", key: role, label: `${roleNames[role]} model`, text: true,
         })),
         ...modelRoles.map((role) => ({
-          tab: "efforts", section: "efforts", key: role, label: `${roleNames[role]} worker reasoning effort`,
-          choices: reasoningEfforts, empty: "User default",
+          tab: "models", role, section: "efforts", key: role, label: `${roleNames[role]} reasoning effort`,
+          choices: reasoningEfforts, empty: "Default effort",
         })),
       ];
 
@@ -1529,10 +1530,9 @@
         fields.append(suggestions, ...panels.values());
         const controls = new Map();
         const initial = new Map();
+        const roleRows = new Map();
         for (const field of settingFields) {
           const tabpanel = panels.get(field.tab);
-          const group = element("div", null, "form-field");
-          const label = element("label", field.label);
           const control = element(field.choices ? "select" : "input");
           control.name = field.key ?? field.section;
           if (field.choices) {
@@ -1545,7 +1545,7 @@
           } else if (field.text) {
             control.type = "text";
             control.maxLength = maxModelLength;
-            control.placeholder = "User default";
+            control.placeholder = "Default model";
             control.setAttribute("list", "model-suggestions");
             control.autocomplete = "off";
           } else {
@@ -1558,6 +1558,22 @@
           control.value = String(settingValue(expected, field) ?? "");
           controls.set(field, control);
           initial.set(field, control.value);
+          if (field.role) {
+            control.setAttribute("aria-label", field.label);
+            let row = roleRows.get(field.role);
+            if (!row) {
+              const group = element("div", null, "form-field role-setting");
+              const heading = element("h3", roleNames[field.role], "role-heading");
+              row = element("div", null, "role-row");
+              group.append(heading, row);
+              tabpanel.append(group);
+              roleRows.set(field.role, row);
+            }
+            row.append(control);
+            continue;
+          }
+          const group = element("div", null, "form-field");
+          const label = element("label", field.label);
           label.append(control);
           group.append(label);
           if (field.levels) {
