@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { eventsFile } from "./broker.ts";
 import type { Factory } from "./factory-data.ts";
-import { causeTaskId, causes, classes, detectStops, recordStop, scanStops, stopId } from "./stops.ts";
+import { causeTaskId, causeTaskValues, causes, classes, detectStops, dismissStop, isStopDismissed, recordStop, scanStops, stopId } from "./stops.ts";
 import type { Stop } from "./stops.ts";
 
 async function fixture(t: TestContext) {
@@ -150,4 +150,41 @@ test("detectStops reports repeated conflicts only for 2 or more different heads 
   assert.equal(stop.stop_id, `repeated-conflict:t1:implementation:${"a".repeat(12)}`);
   assert.equal(stop.count, 3);
   assert.equal(stop.class, "worker-fixable");
+});
+
+test("dismissStop records stop.dismissed once, hides the stop from scanStops, and prevents re-recording", async (t) => {
+  const file = await fixture(t);
+  const first = stop("k1");
+  const second = stop("k2", { task: null, role: null });
+  await recordStop(file, first);
+  await recordStop(file, second);
+
+  assert.equal(await dismissStop(file, "missing"), null);
+  assert.deepEqual(await dismissStop(file, first.stop_id), { dismissed: true, recorded: true });
+  assert.deepEqual(await dismissStop(file, first.stop_id), { dismissed: true, recorded: false });
+  assert.equal(await isStopDismissed(file, first.stop_id), true);
+  assert.equal(await isStopDismissed(file, second.stop_id), false);
+
+  assert.deepEqual(await recordStop(file, first), { recorded: false }, "A dismissed stop is already recorded and is not appended again.");
+  const scanned = await scanStops(file, world([]));
+  assert.deepEqual(scanned.map(({ stop_id }) => stop_id), [second.stop_id]);
+  const lines = (await readFile(eventsFile(file), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+  const dismissed = lines.filter(({ type }) => type === "stop.dismissed");
+  assert.equal(dismissed.length, 1);
+  assert.deepEqual([dismissed[0].source, dismissed[0].task, dismissed[0].data], ["stops", null, { stop_id: first.stop_id }]);
+
+  assert.deepEqual(causeTaskValues(first), {
+    task: causeTaskId(first.stop_id),
+    title: "Cause: worker-quiet in t1",
+    issue: "null",
+    "next-action": "Find the root cause. Then propose a prevention, not only a retry.",
+    details: JSON.stringify({ stop_id: first.stop_id, cause_of: "t1" }),
+  });
+  assert.deepEqual(causeTaskValues(second), {
+    task: causeTaskId(second.stop_id),
+    title: "Cause: worker-quiet in no task",
+    issue: "null",
+    "next-action": "Find the root cause. Then propose a prevention, not only a retry.",
+    details: JSON.stringify({ stop_id: second.stop_id, cause_of: null }),
+  });
 });

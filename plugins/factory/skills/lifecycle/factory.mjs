@@ -1261,19 +1261,30 @@ var init_state_dir = () => {};
 // plugins/factory/skills/lifecycle/stops.ts
 import { createHash } from "node:crypto";
 import { readFile as readFile3 } from "node:fs/promises";
-async function readStops(file) {
+function causeTaskValues(stop) {
+  return {
+    task: causeTaskId(stop.stop_id),
+    title: `Cause: ${stop.cause} in ${stop.task ?? "no task"}`,
+    issue: "null",
+    "next-action": causeTaskNextAction,
+    details: JSON.stringify({ stop_id: stop.stop_id, cause_of: stop.task })
+  };
+}
+async function readStopEvents(file) {
   let text;
   try {
     text = await readFile3(eventsFile(file), "utf8");
   } catch (error) {
-    if (error.code === "ENOENT")
-      return new Map;
+    if (error.code === "ENOENT") {
+      return { stops: new Map, dismissed: new Set };
+    }
     throw error;
   }
   const stops = new Map;
+  const dismissed = new Set;
   for (const line of text.split(`
 `)) {
-    if (!line.includes('"stop.recorded"'))
+    if (!line.includes('"stop.'))
       continue;
     let event;
     try {
@@ -1282,22 +1293,39 @@ async function readStops(file) {
       continue;
     }
     const id = event?.data?.stop_id;
-    if (event.type === "stop.recorded" && typeof id === "string" && !stops.has(id))
+    if (typeof id !== "string" || !id)
+      continue;
+    if (event.type === "stop.recorded" && !stops.has(id))
       stops.set(id, event);
+    else if (event.type === "stop.dismissed")
+      dismissed.add(id);
   }
-  return stops;
+  return { stops, dismissed };
 }
 async function recordStop(file, stop) {
   const factory = await resolveFactory(file);
-  if ((await readStops(factory)).has(stop.stop_id))
+  if ((await readStopEvents(factory)).stops.has(stop.stop_id))
     return { recorded: false };
   const { task, ...data } = stop;
   await emit(factory, { type: "stop.recorded", task, source: "stops", data });
   return { recorded: true };
 }
+async function dismissStop(file, id) {
+  const factory = await resolveFactory(file);
+  const { stops, dismissed } = await readStopEvents(factory);
+  if (!stops.has(id))
+    return null;
+  if (dismissed.has(id))
+    return { dismissed: true, recorded: false };
+  await emit(factory, { type: "stop.dismissed", source: "stops", data: { stop_id: id } });
+  return { dismissed: true, recorded: true };
+}
+async function isStopDismissed(file, id) {
+  return (await readStopEvents(await resolveFactory(file))).dismissed.has(id);
+}
 async function scanStops(file, factory) {
-  const stops = await readStops(await resolveFactory(file));
-  return [...stops.values()].map(({ at, task, data }) => {
+  const { stops, dismissed } = await readStopEvents(await resolveFactory(file));
+  return [...stops.values()].filter(({ data }) => !dismissed.has(data.stop_id)).map(({ at, task, data }) => {
     const cause = factory.tasks.find((candidate) => candidate.details?.stop_id === data.stop_id);
     return { ...data, task, at, cause_task: cause?.id ?? null, cause_state: cause?.state ?? null };
   });
@@ -1396,7 +1424,7 @@ function detectStops(factory, events, quiet = []) {
   }
   return [...found.values()];
 }
-var stopId = (cause, task, role, key) => `${cause}:${task ?? "-"}:${role ?? "-"}:${key}`, causeTaskId = (id) => `cause-${createHash("sha256").update(id).digest("hex").slice(0, 8)}`, maxDetail = 300, repeatedPrompts = 2, repeatedConflicts = 2, promptKinds, short = (text) => createHash("sha256").update(text).digest("hex").slice(0, 8), clip = (text) => text.length > maxDetail ? `${text.slice(0, maxDetail - 3)}...` : text;
+var stopId = (cause, task, role, key) => `${cause}:${task ?? "-"}:${role ?? "-"}:${key}`, causeTaskId = (id) => `cause-${createHash("sha256").update(id).digest("hex").slice(0, 8)}`, causeTaskNextAction = "Find the root cause. Then propose a prevention, not only a retry.", maxDetail = 300, repeatedPrompts = 2, repeatedConflicts = 2, promptKinds, short = (text) => createHash("sha256").update(text).digest("hex").slice(0, 8), clip = (text) => text.length > maxDetail ? `${text.slice(0, maxDetail - 3)}...` : text;
 var init_stops = __esm(() => {
   init_broker();
   promptKinds = ["permission", "sandbox-bypass"];
@@ -1505,12 +1533,14 @@ function validateEvent({ type, task, source, data }) {
     validateAttention(type, data);
   if (type.startsWith("improve."))
     validateImprove(type, data);
-  if (type === "stop.recorded")
-    validateStop(data);
+  if (type === "stop.recorded" || type === "stop.dismissed")
+    validateStop(type, data);
 }
-function validateStop(data) {
-  if (typeof data.stop_id !== "string" || data.stop_id === "")
-    throw new UsageError('stop.recorded data "stop_id" must be a non-empty string.');
+function validateStop(type, data) {
+  if (typeof data.stop_id !== "string" || data.stop_id.trim() === "")
+    throw new UsageError(`${type} data "stop_id" must be a non-empty string.`);
+  if (type === "stop.dismissed")
+    return;
   if (!stopCauses.includes(data.cause))
     throw new UsageError(`stop.recorded cause must be one of: ${stopCauses.join(", ")}.`);
   if (!stopClasses.includes(data.class))
@@ -1936,7 +1966,8 @@ var init_broker = __esm(() => {
     "attention.resolved": { task: false, data: ["session"] },
     "improve.proposed": { task: false, data: ["rule", "change", "title", "evidence", "recommended", "proposal_id", "result"] },
     "improve.decided": { task: false, data: ["proposal_id", "decision"] },
-    "stop.recorded": { task: false, data: ["stop_id", "cause", "class"] }
+    "stop.recorded": { task: false, data: ["stop_id", "cause", "class"] },
+    "stop.dismissed": { task: false, data: ["stop_id"] }
   };
   UsageError = class UsageError extends Error {
   };
@@ -1989,7 +2020,9 @@ emit    Appends one event and prints it. Types: ${Object.keys(eventTypes).join("
         stop_id (unique; a second event with the same stop_id is ignored by readers), cause
         (${stopCauses.join(", ")}), class (${stopClasses.join(", ")}), and optional
         role, detail (a string of at most ${maxStopDetail} characters, no session text) and count.
-        Wait with --exclude-source stops, so a stop never wakes the factory.
+        stop.dismissed (--source stops, no --task needed) marks one stop_id as acknowledged so
+        readers, reconcile, and the stop hook ignore it.
+        Wait with --exclude-source stops, so stop events never wake the factory.
         attention.requested and attention.resolved need no --task (a rule worker or the
         coordinator has none). A hook emits them with --source attention when a Copilot session
         waits for the user. attention.requested data: session (the Copilot session ID, a string),
@@ -3593,8 +3626,7 @@ async function reconcile(file, branchOverride, blockedAfter = intervalMs("24h"),
     for (const stop of detectStops(factory, (await readEvents(eventsFile(log), 0)).events, quiet))
       await recordStop(log, stop);
     for (const stop of (await scanStops(log, factory)).filter(({ cause_task }) => cause_task === null)) {
-      const details = JSON.stringify({ stop_id: stop.stop_id, cause_of: stop.task });
-      const title = `Cause: ${stop.cause} in ${stop.task ?? "no task"}`;
+      const values = causeTaskValues(stop);
       findings.push({
         kind: "stop",
         stop_id: stop.stop_id,
@@ -3603,7 +3635,7 @@ async function reconcile(file, branchOverride, blockedAfter = intervalMs("24h"),
         task: stop.task,
         role: stop.role,
         detail: stop.detail,
-        command: `node ${factoryScript} write ${file} --task ${causeTaskId(stop.stop_id)} --title '${title}' --issue null --next-action 'Find the root cause. Then propose a prevention, not only a retry.' --details '${details}'`
+        command: `node ${factoryScript} write ${file} --task ${values.task} --title '${values.title}' --issue ${values.issue} --next-action '${values["next-action"]}' --details '${values.details}'`
       });
     }
   } catch (error) {
@@ -4363,9 +4395,9 @@ An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
     return Buffer.concat(chunks).toString("utf8");
   }
   const readJSONBody = async (request) => JSON.parse(await readBody(request, "application/json"));
-  async function write(file, values) {
+  async function write(file, values, operator = true) {
     try {
-      return await update(await localFile(file), values, { operator: true });
+      return await update(await localFile(file), values, { operator, source: "dashboard" });
     } catch (error) {
       if (error instanceof ConflictError)
         throw new HttpError(409, error.message);
@@ -4426,6 +4458,45 @@ An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
     if (!result)
       throw new HttpError(404, "The proposal does not exist.");
     return result;
+  }
+  let stopping = Promise.resolve();
+  async function readStopBody(request) {
+    const body = await readJSONBody(request);
+    if (!isObject(body) || Object.keys(body).some((key) => key !== "stop_id") || typeof body.stop_id !== "string" || !body.stop_id.trim()) {
+      throw new HttpError(400, "The request needs a stop_id that is not empty.");
+    }
+    return body.stop_id;
+  }
+  async function dismissStopRequest(request, file) {
+    const id = await readStopBody(request);
+    const { target } = await factoryTag(file);
+    const run = stopping.then(() => dismissStop(target, id));
+    stopping = run.catch(() => {});
+    const result = await run;
+    if (!result)
+      throw new HttpError(404, "The stop does not exist.");
+    return result;
+  }
+  async function createStopCauseTask(request, file) {
+    const id = await readStopBody(request);
+    const { target } = await factoryTag(file);
+    const run = stopping.then(async () => {
+      const data = await loadFactory(file);
+      const stop = (await scanStops(target, data)).find(({ stop_id }) => stop_id === id);
+      if (!stop) {
+        if (await isStopDismissed(target, id))
+          throw new HttpError(409, "The stop is already dismissed.");
+        throw new HttpError(404, "The stop does not exist.");
+      }
+      const existing = stop.cause_task ?? (data.tasks.some((task) => task.id === causeTaskId(stop.stop_id)) ? causeTaskId(stop.stop_id) : null);
+      if (existing)
+        return { created: false, task: existing };
+      const values = causeTaskValues(stop);
+      await write(file, values, false);
+      return { created: true, task: values.task };
+    });
+    stopping = run.catch(() => {});
+    return run;
   }
   async function setSettings(request, file) {
     const body = await readJSONBody(request);
@@ -4582,8 +4653,12 @@ p{margin:0;color:#f87171}
         send(response, 200, await answerAttention(request, url.searchParams.get("file")));
       } else if (request.method === "POST" && url.pathname === "/api/improve/decide") {
         send(response, 200, await decideImprove(request, url.searchParams.get("file")));
+      } else if (request.method === "POST" && url.pathname === "/api/stops/dismiss") {
+        send(response, 200, await dismissStopRequest(request, url.searchParams.get("file")));
+      } else if (request.method === "POST" && url.pathname === "/api/stops/cause-task") {
+        send(response, 200, await createStopCauseTask(request, url.searchParams.get("file")));
       } else if (request.method !== "GET") {
-        throw new HttpError(405, "Use GET. To change the dashboard, use POST /api/move, /api/settings, /api/attention/answer or /api/improve/decide.");
+        throw new HttpError(405, "Use GET. To change the dashboard, use POST /api/move, /api/settings, /api/attention/answer, /api/improve/decide, /api/stops/dismiss or /api/stops/cause-task.");
       } else if (url.pathname === "/" || url.pathname === "/dashboard.html") {
         await sendAsset(request, response, "dashboard.html", "text/html; charset=utf-8");
       } else if (url.pathname === "/dashboard.mjs") {

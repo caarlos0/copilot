@@ -419,12 +419,14 @@ leave work undone. Treat each finding as unfinished work:
   `idle_minutes`. Send the worker one follow-up: "save your result, or a blocked
   result with the cause". If the log has no new event 10 minutes later,
   relaunch the worker in its worktree.
-- `stop`: a task or worker stopped, and no cause task holds its `stop_id` yet.
+- `stop`: a task or worker stopped, and no cause task holds its `stop_id` yet
+  and no `stop.dismissed` event exists for it.
   The sweep records each stop once as a `stop.recorded` event. The finding
   names `stop_id`, `cause` (`blocked`, `worker-blocked`, `worker-quiet`,
   `repeated-permission`, `repeated-conflict`), `class`, `task`, `role`,
   `detail` and the exact `command` that creates the cause task. It stays until
-  a task has that `stop_id` in its `details`. Follow "Root cause, not retry".
+  a task has that `stop_id` in its `details` or the user dismisses the stop in
+  the dashboard Stops panel. Follow "Root cause, not retry".
 - `improve-decided-unapplied`: the user decided an `improve` proposal in the
   dashboard (an `improve.decided` event exists), but the result file has a
   `change` and no `decision`. The wake was lost or the change was not applied.
@@ -1428,6 +1430,7 @@ the cursor. Each event has `id`, `at`, `type`, `task`, `source`, and `data`:
 | `attention.requested` | a hook (`--source attention`) when a Copilot session waits for the user; no `--task` | `session`, `kind` (`permission`, `sandbox-bypass`, `ask-user`; `other` is accepted for old logs but no hook writes it), `text` (at most 2000 characters), optional `role`, `pane`, `options` (strings; only `ask-user` has them, because no hook payload holds the rows of a permission prompt; the dashboard adds the one `sandbox-bypass` option itself) |
 | `attention.resolved` | a hook (`--source attention`) when that wait ends; no `--task` | `session` |
 | `stop.recorded` | `factory.mjs reconcile`, and `factory.mjs broker emit` when it refuses a worker event (`--source stops`); no `--task` needed | `stop_id` (unique), `cause` (`blocked`, `worker-blocked`, `worker-quiet`, `emit-refused`, `repeated-permission`, `repeated-conflict`), `class` (the blocker classes, `worker-fixable` or `none`), `detail` (at most 300 characters), `role`, `count`, optional `head` |
+| `stop.dismissed` | the dashboard server (`--source stops`) when the user dismisses a stop; no `--task` | `stop_id` |
 | `improve.proposed` | you (`--source improve`), once per change an `improve` worker proposes; no `--task` | `rule`, `change` (`rule`, `limit`, `budget`, `process`, `skill`, `grant`), `title`, `evidence` (at most 2000 characters), `recommended` (`accept` or `decline`), `proposal_id` (unique), `result` (the result file name) |
 | `improve.decided` | the dashboard server (`--source dashboard`) when the user clicks Accept or Decline; no `--task` | `proposal_id`, `decision` (`accepted` or `declined`), optional `note` |
 | `rule.due` | `wait --due` itself, never stored | `rules`: due rule IDs |
@@ -1450,9 +1453,9 @@ Rules:
    is not work for you, so these events never wake you. `--exclude-source improve`
    skips your own `improve.proposed` events, so a proposal never wakes you. The
    user's `improve.decided` has source `dashboard` and always wakes you.
-   `--exclude-source stops` skips `stop.recorded`. `factory.mjs reconcile` and
-   `broker emit` write it for the dashboard and for the next sweep. A stop
-   never wakes you on its own. You see it as a `stop` finding in the sweep.
+   `--exclude-source stops` skips `stop.recorded` and `stop.dismissed`. `factory.mjs reconcile` and
+   `broker emit` write `stop.recorded`, and the dashboard writes `stop.dismissed`, for the dashboard and for the next sweep. A stop
+   never wakes you on its own. You see open stops as `stop` findings in the sweep.
 3. Every turn of a non-finished factory ends with exactly one armed `wait`
    (async bash, latest cursor). Never end a turn without one: not after a
    notification, a merge, a test run, a tool completion, or a user message. Arm

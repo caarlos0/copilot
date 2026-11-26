@@ -489,7 +489,7 @@ totals of a long session are cumulative over its whole life.
 The factory waits with `factory.mjs broker wait`. The broker keeps one
 append-only JSONL log, `<owner.repo>-factory-events.jsonl` (mode 0600), beside
 the factory file. Events are typed notifications (`task.moved`, `task.updated`,
-`feedback.pending`, `budget.updated`, `limits.updated`, `lever.updated`, `models.updated`, `efforts.updated`, `worker.result`, `worker.blocked`, `pr.merged`, `attention.requested`, `attention.resolved`, `stop.recorded`, `improve.proposed`, `improve.decided`; `rule.due` and `reconcile.due` are computed by
+`feedback.pending`, `budget.updated`, `limits.updated`, `lever.updated`, `models.updated`, `efforts.updated`, `worker.result`, `worker.blocked`, `pr.merged`, `attention.requested`, `attention.resolved`, `stop.recorded`, `stop.dismissed`, `improve.proposed`, `improve.decided`; `rule.due` and `reconcile.due` are computed by
 `wait --due` and never stored), each with a `source`. A cursor is a byte offset,
 so no event is lost between two `wait` calls. `factory.mjs write` emits after every
 successful write (source `coordinator`, or `dashboard` for operator moves). The
@@ -503,9 +503,17 @@ has `data` with `stop_id` (unique; a repeat is ignored by readers), `cause`
 `repeated-conflict`), `class` (a blocker class, `worker-fixable` or `none`), and optional
 `role`, `detail` (at most 300 characters), `count` and `head`. `factory.mjs reconcile`
 records each detected stop once (`stops.ts`, `detectStops`). `factory.mjs broker emit`
-records an `emit-refused` stop when it refuses a worker event. The `stop` finding stays until a
-task has that `stop_id` in its `details` (the cause task). The dashboard Stops panel
-reads the same events (`stops` in `/api/factory`). Workers write their result file atomically, then run
+records an `emit-refused` stop when it refuses a worker event. `stop.dismissed`
+(source `stops`, `data.stop_id`) marks a stop as dismissed. Dismissed stops leave
+`scanStops`, so the dashboard Stops panel, `reconcile` `stop` findings, and `stop-hook`
+ignore them, and `reconcile` does not record the same `stop_id` again. The `stop` finding
+stays until a task has that `stop_id` in its `details` (the cause task) or a
+`stop.dismissed` event exists for it. The dashboard Stops panel reads `stops` in
+`/api/factory` and shows one card per open stop with actions: Open task, Unblock task
+(for `user-decision` stops or blocked tasks), Create cause task (`POST /api/stops/cause-task?file=`
+with `{stop_id}`, reusing `causeTaskValues` and the shared `update` writer with source
+`dashboard`), Open cause task, and Dismiss (`POST /api/stops/dismiss?file=` with `{stop_id}`,
+appending `stop.dismissed` with source `stops`). Workers write their result file atomically, then run
 `factory.mjs broker emit worker.result` (or `worker.blocked`). `emit` validates before it
 appends. It exits 1 with a reason when it refuses. A `worker.result` needs
 `data.result`, a JSON file in the state directory whose `task`, `role` and
@@ -575,7 +583,7 @@ its start (`worker-quiet`, which names task, role and idle minutes). The sweep r
 256 KiB of the log with `lastEvent` of `attention.ts`. It reports a decided `improve` proposal whose result file
 still has a `change` and no `decision` (`improve-decided-unapplied`). An undecided proposal never
 produces a finding. It records each new abnormal stop once as `stop.recorded` (source `stops`)
-and reports a `stop` finding for each stop that has no cause task. The finding has `stop_id`,
+and reports a `stop` finding for each open stop that has no cause task and is not dismissed. The finding has `stop_id`,
 `cause`, `class`, `task`, `role`, `detail` and the exact `factory.mjs write` command that creates
 the cause task (`cause-<hash>`, `issue: null`, `details.stop_id` and `details.cause_of`). The
 coordinator parks the worker, runs the command, and skips only a `blocked` stop of class

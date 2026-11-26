@@ -17,7 +17,7 @@ import { update } from "./tasks.ts";
 import { decideProposal, scanProposals } from "./proposals.ts";
 import type { Proposal } from "./proposals.ts";
 import { sessionStateDirectory } from "./sessions.ts";
-import { scanStops } from "./stops.ts";
+import { causeTaskId, causeTaskValues, dismissStop, isStopDismissed, scanStops } from "./stops.ts";
 import { factoryUsage } from "./usage.ts";
 import { candidates, stateDirectories } from "./state-dir.ts";
 
@@ -450,9 +450,9 @@ An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
   const readJSONBody = async (request: IncomingMessage): Promise<any> =>
     JSON.parse(await readBody(request, "application/json"));
 
-  async function write(file: string | null, values: Json) {
+  async function write(file: string | null, values: Json, operator = true) {
     try {
-      return await update(await localFile(file), values, { operator: true });
+      return await update(await localFile(file), values, { operator, source: "dashboard" });
     } catch (error) {
       if (error instanceof ConflictError) throw new HttpError(409, error.message);
       if (errorCode(error)) throw error;
@@ -519,6 +519,47 @@ An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
     const result = await run;
     if (!result) throw new HttpError(404, "The proposal does not exist.");
     return result;
+  }
+
+  let stopping: Promise<unknown> = Promise.resolve();
+  async function readStopBody(request: IncomingMessage) {
+    const body = await readJSONBody(request);
+    if (!isObject(body) || Object.keys(body).some((key) => key !== "stop_id") ||
+        typeof body.stop_id !== "string" || !body.stop_id.trim()) {
+      throw new HttpError(400, "The request needs a stop_id that is not empty.");
+    }
+    return body.stop_id;
+  }
+
+  async function dismissStopRequest(request: IncomingMessage, file: string | null) {
+    const id = await readStopBody(request);
+    const { target } = await factoryTag(file);
+    const run = stopping.then(() => dismissStop(target, id));
+    stopping = run.catch(() => {});
+    const result = await run;
+    if (!result) throw new HttpError(404, "The stop does not exist.");
+    return result;
+  }
+
+  async function createStopCauseTask(request: IncomingMessage, file: string | null) {
+    const id = await readStopBody(request);
+    const { target } = await factoryTag(file);
+    const run = stopping.then(async () => {
+      const data = await loadFactory(file);
+      const stop = (await scanStops(target, data)).find(({ stop_id }) => stop_id === id);
+      if (!stop) {
+        if (await isStopDismissed(target, id)) throw new HttpError(409, "The stop is already dismissed.");
+        throw new HttpError(404, "The stop does not exist.");
+      }
+      const existing = stop.cause_task ??
+        (data.tasks.some((task) => task.id === causeTaskId(stop.stop_id)) ? causeTaskId(stop.stop_id) : null);
+      if (existing) return { created: false, task: existing };
+      const values = causeTaskValues(stop);
+      await write(file, values, false);
+      return { created: true, task: values.task };
+    });
+    stopping = run.catch(() => {});
+    return run;
   }
 
   // set holds only the sections the user changed; expected holds what the browser saw for each of them.
@@ -689,8 +730,12 @@ p{margin:0;color:#f87171}
         send(response, 200, await answerAttention(request, url.searchParams.get("file")));
       } else if (request.method === "POST" && url.pathname === "/api/improve/decide") {
         send(response, 200, await decideImprove(request, url.searchParams.get("file")));
+      } else if (request.method === "POST" && url.pathname === "/api/stops/dismiss") {
+        send(response, 200, await dismissStopRequest(request, url.searchParams.get("file")));
+      } else if (request.method === "POST" && url.pathname === "/api/stops/cause-task") {
+        send(response, 200, await createStopCauseTask(request, url.searchParams.get("file")));
       } else if (request.method !== "GET") {
-        throw new HttpError(405, "Use GET. To change the dashboard, use POST /api/move, /api/settings, /api/attention/answer or /api/improve/decide.");
+        throw new HttpError(405, "Use GET. To change the dashboard, use POST /api/move, /api/settings, /api/attention/answer, /api/improve/decide, /api/stops/dismiss or /api/stops/cause-task.");
       } else if (url.pathname === "/" || url.pathname === "/dashboard.html") {
         await sendAsset(request, response, "dashboard.html", "text/html; charset=utf-8");
       } else if (url.pathname === "/dashboard.mjs") {

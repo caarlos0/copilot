@@ -27,20 +27,36 @@ export const stopId = (cause: string, task: string | null, role: string | null, 
 // The id of the cause task for a stop: one task for each stop_id.
 export const causeTaskId = (id: string) => `cause-${createHash("sha256").update(id).digest("hex").slice(0, 8)}`;
 
+const causeTaskNextAction = "Find the root cause. Then propose a prevention, not only a retry.";
+
+// Writer values that create the cause task for a stop. Shared by reconcile and the dashboard server.
+export function causeTaskValues(stop: Pick<Stop, "stop_id" | "cause" | "task">) {
+  return {
+    task: causeTaskId(stop.stop_id),
+    title: `Cause: ${stop.cause} in ${stop.task ?? "no task"}`,
+    issue: "null",
+    "next-action": causeTaskNextAction,
+    details: JSON.stringify({ stop_id: stop.stop_id, cause_of: stop.task }),
+  };
+}
+
 type StopEvent = { at: string; task: string | null; data: Omit<Stop, "task"> };
 
-// Reads the first stop.recorded event of each stop_id, oldest first.
-async function readStops(file: string) {
+// Reads the first stop.recorded event of each stop_id (oldest first) and every dismissed stop_id.
+async function readStopEvents(file: string) {
   let text: string;
   try {
     text = await readFile(eventsFile(file), "utf8");
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return new Map<string, StopEvent>();
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return { stops: new Map<string, StopEvent>(), dismissed: new Set<string>() };
+    }
     throw error;
   }
   const stops = new Map<string, StopEvent>();
+  const dismissed = new Set<string>();
   for (const line of text.split("\n")) {
-    if (!line.includes('"stop.recorded"')) continue;
+    if (!line.includes('"stop.')) continue;
     let event;
     try {
       event = JSON.parse(line);
@@ -48,27 +64,45 @@ async function readStops(file: string) {
       continue;
     }
     const id = event?.data?.stop_id;
-    if (event.type === "stop.recorded" && typeof id === "string" && !stops.has(id)) stops.set(id, event);
+    if (typeof id !== "string" || !id) continue;
+    if (event.type === "stop.recorded" && !stops.has(id)) stops.set(id, event);
+    else if (event.type === "stop.dismissed") dismissed.add(id);
   }
-  return stops;
+  return { stops, dismissed };
 }
 
 // Appends one stop.recorded event (source stops). A stop_id that is already in the log records nothing.
 export async function recordStop(file: string, stop: Stop) {
   const factory = await resolveFactory(file);
-  if ((await readStops(factory)).has(stop.stop_id)) return { recorded: false };
+  if ((await readStopEvents(factory)).stops.has(stop.stop_id)) return { recorded: false };
   const { task, ...data } = stop;
   await emit(factory, { type: "stop.recorded", task, source: "stops", data });
   return { recorded: true };
 }
 
-// Pairs each recorded stop with its cause task: the task whose details.stop_id equals the stop_id.
+// Appends one stop.dismissed event (source stops). Returns null for an unknown stop_id.
+export async function dismissStop(file: string, id: string) {
+  const factory = await resolveFactory(file);
+  const { stops, dismissed } = await readStopEvents(factory);
+  if (!stops.has(id)) return null;
+  if (dismissed.has(id)) return { dismissed: true, recorded: false };
+  await emit(factory, { type: "stop.dismissed", source: "stops", data: { stop_id: id } });
+  return { dismissed: true, recorded: true };
+}
+
+export async function isStopDismissed(file: string, id: string) {
+  return (await readStopEvents(await resolveFactory(file))).dismissed.has(id);
+}
+
+// Pairs each non-dismissed recorded stop with its cause task: the task whose details.stop_id equals the stop_id.
 export async function scanStops(file: string, factory: Factory): Promise<ScannedStop[]> {
-  const stops = await readStops(await resolveFactory(file));
-  return [...stops.values()].map(({ at, task, data }) => {
-    const cause = factory.tasks.find((candidate) => candidate.details?.stop_id === data.stop_id);
-    return { ...data, task, at, cause_task: cause?.id ?? null, cause_state: cause?.state ?? null };
-  });
+  const { stops, dismissed } = await readStopEvents(await resolveFactory(file));
+  return [...stops.values()]
+    .filter(({ data }) => !dismissed.has(data.stop_id))
+    .map(({ at, task, data }) => {
+      const cause = factory.tasks.find((candidate) => candidate.details?.stop_id === data.stop_id);
+      return { ...data, task, at, cause_task: cause?.id ?? null, cause_state: cause?.state ?? null };
+    });
 }
 
 const maxDetail = 300;

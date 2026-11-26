@@ -238,6 +238,9 @@ test("emit refuses a stop.recorded with a cause or a class that is not in the li
   assert.equal(klass.status, 2);
   assert.match(klass.stderr, /class must be one of/);
   assert.equal(f.run("emit", f.factory, "stop.recorded", "--data", JSON.stringify({ cause: "blocked", class: "none" })).status, 2);
+  assert.equal(f.run("emit", f.factory, "stop.dismissed", "--source", "stops", "--data", JSON.stringify({ stop_id: "s" })).status, 0);
+  assert.equal(f.run("emit", f.factory, "stop.dismissed", "--source", "stops", "--data", JSON.stringify({ stop_id: " " })).status, 2);
+  assert.equal(f.run("emit", f.factory, "stop.dismissed", "--source", "stops", "--data", JSON.stringify({})).status, 2);
 });
 
 test("worker.blocked checks a named result for outcome blocked, and pr.merged needs a full SHA", async (t) => {

@@ -220,9 +220,12 @@
       #stops-badge[hidden] { display: none; }
       #stops-badge[aria-pressed="true"] { background: color-mix(in srgb, var(--blocked) 14%, var(--bg)); }
       #stops-note, #stops-empty { margin: 16px 24px 0; }
-      #stops-table { width: calc(100% - 48px); margin: 16px 24px 0; border-collapse: collapse; font-size: 12px; }
-      #stops-table th, #stops-table td { padding: 6px 8px 6px 0; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
-      #stops-table td.stop-detail { overflow-wrap: anywhere; }
+      #stops-list { list-style: none; margin: 16px 0 0; padding: 0; border-top: 1px solid var(--border); }
+      .stop-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin: 8px 0 0; font-size: 12px; }
+      .stop-detail { margin: 8px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+      .stop-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0 0; }
+      .stop-action { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .stop-actions p { flex-basis: 100%; margin: 0; }
       body:has(dialog[open]) { overflow: hidden; }
       .detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
         position: sticky; top: 0; z-index: 1; padding: 16px 24px; background: var(--bg-muted);
@@ -405,7 +408,7 @@
         #palette-list { max-height: 40dvh; }
         #palette-list li { padding: 12px 16px; }
         #palette-status { padding-left: 16px; padding-right: 16px; }
-        #producers-note, #detail-empty, #attention-note, #attention-empty { margin-left: 16px; margin-right: 16px; }
+        #producers-note, #detail-empty, #attention-note, #attention-empty, #stops-note, #stops-empty { margin-left: 16px; margin-right: 16px; }
         #producers-view h3.section, #ignored-list li, #ignored-empty { padding-left: 16px; padding-right: 16px; }
         .move-form { padding: 16px; }
         .move-form .controls button { flex: 1 1 auto; }
@@ -552,13 +555,8 @@
         <p id="attention-empty" class="muted" hidden>No item waits for you.</p>
       </div>
       <div id="stops-view" hidden>
-        <p id="stops-note" class="muted">Each open stop needs a cause task. The factory creates it.</p>
-        <table id="stops-table">
-          <thead>
-            <tr><th>Age</th><th>Cause</th><th>Class</th><th>Task</th><th>Role</th><th>Detail</th><th>Cause task</th></tr>
-          </thead>
-          <tbody id="stops-list"></tbody>
-        </table>
+        <p id="stops-note" class="muted">Review each open stop. Open or unblock its task, create a cause task, or dismiss the stop.</p>
+        <ul id="stops-list"></ul>
         <p id="stops-empty" class="muted" hidden>No stop is open.</p>
       </div>
     </aside>
@@ -2412,38 +2410,150 @@
         document.getElementById("attention-empty").hidden = items.length > 0;
       }
 
-      // The stops table is read only. Every cell is text. The cause task cell opens that task.
+      const STOP_TOKEN = /(`[^`\n]+`)|(https?:\/\/[^\s<>()`]*[^\s<>()`.,;:!?'"])/gi;
+
+      function stopDetail(text) {
+        const node = element("p", null, "stop-detail");
+        const value = String(text);
+        let last = 0;
+        for (const match of value.matchAll(STOP_TOKEN)) {
+          if (match.index > last) node.append(...codeParts(value.slice(last, match.index)));
+          if (match[1]) node.append(...codeParts(match[1]));
+          else if (/^https:\/\/github\.com\//i.test(match[2])) node.append(...linkify(match[2]));
+          else node.append(githubLink(match[2], match[2]));
+          last = match.index + match[0].length;
+        }
+        if (last < value.length) node.append(...codeParts(value.slice(last)));
+        return node;
+      }
+
+      function stopCard(stop) {
+        const node = element("li", null, "task-row stop-card");
+        node.dataset.stopId = stop.stop_id;
+        const heading = element("div", null, "row-head");
+        const badges = element("span", null, "chips");
+        const cause = element("span", stop.cause, "chip state");
+        cause.style.setProperty("--c", "var(--blocked)");
+        badges.append(cause);
+        if (stop.class && stop.class !== "none") badges.append(element("span", stop.class, "chip"));
+        const age = element("span", null, "chip");
+        age.append(elapsedLabel(stop.at));
+        heading.append(badges, age);
+        node.append(heading);
+
+        const task = stop.task ? snapshot.tasks.find((item) => item.id === stop.task) ?? null : null;
+        const taskLink = (id) => {
+          const open = element("button", id, "link-button");
+          open.type = "button";
+          open.addEventListener("click", () => openTask(id));
+          return open;
+        };
+        const meta = [];
+        if (stop.task) {
+          const item = element("span");
+          item.append("Task ");
+          if (task) {
+            item.append(taskLink(stop.task));
+            if (task.title) item.append(`: ${task.title}`);
+          } else {
+            item.append(stop.task);
+          }
+          meta.push(item);
+        }
+        if (stop.role) meta.push(element("span", `Role ${stop.role}`));
+        if (stop.cause_task) {
+          const item = element("span");
+          item.append("Cause task ", taskLink(stop.cause_task));
+          meta.push(item);
+        }
+        if (meta.length) {
+          const line = element("p", null, "stop-meta muted");
+          line.append(...meta);
+          node.append(line);
+        }
+        if (stop.detail) node.append(stopDetail(stop.detail));
+
+        const box = element("div", null, "stop-actions");
+        const status = element("p", null, "muted");
+        status.hidden = true;
+        status.setAttribute("role", "status");
+        const buttons = [];
+        const addAction = (label, action, onClick) => {
+          const button = element("button", label, "stop-action");
+          button.type = "button";
+          button.dataset.action = action;
+          button.addEventListener("click", onClick);
+          buttons.push(button);
+          return button;
+        };
+        if (task) addAction("Open task", "open-task", () => openTask(stop.task));
+        if (stop.class === "user-decision") {
+          if (task?.state === "blocked") addAction("Unblock task", "unblock-task", () => openMove(task));
+          else if (stop.cause_task) addAction("Open cause task", "open-cause", () => openTask(stop.cause_task));
+        } else {
+          if (stop.cause === "blocked" && task?.state === "blocked") {
+            addAction("Unblock task", "unblock-task", () => openMove(task));
+          }
+          if (stop.cause_task) {
+            addAction("Open cause task", "open-cause", () => openTask(stop.cause_task));
+          } else {
+            addAction("Create cause task", "create-cause", () => runStopAction(
+              "/api/stops/cause-task", stop, box, buttons, status,
+              (result) => (result.created ? `Created cause task ${result.task}.` : `Cause task ${result.task} already exists.`),
+              "The factory did not create the cause task",
+            ));
+          }
+        }
+        addAction("Dismiss", "dismiss", () => runStopAction(
+          "/api/stops/dismiss", stop, box, buttons, status,
+          () => "Dismissed.",
+          "The factory did not dismiss the stop",
+        ));
+        box.append(...buttons, status);
+        node.append(box);
+        return node;
+      }
+
+      async function runStopAction(endpoint, stop, box, buttons, status, okText, failPrefix) {
+        const file = selection;
+        for (const button of buttons) button.disabled = true;
+        box.setAttribute("aria-busy", "true");
+        status.hidden = true;
+        try {
+          const result = await requestJSON(`${endpoint}?${new URLSearchParams({ file })}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ stop_id: stop.stop_id }),
+          });
+          status.textContent = okText(result);
+          status.hidden = false;
+          if (selection === file) refresh();
+        } catch (cause) {
+          status.textContent = `${failPrefix}: ${cause.message}`;
+          status.hidden = false;
+          for (const button of buttons) button.disabled = false;
+        } finally {
+          box.setAttribute("aria-busy", "false");
+        }
+      }
+
       function renderStops() {
         const stops = openStops();
         document.getElementById("detail-title").textContent = "Stops";
         document.getElementById("detail-title").append(element("span", String(stops.length), "counter"));
         setCloseLabel("Close stops");
-        const body = document.getElementById("stops-list");
-        const signature = JSON.stringify(stops);
-        if (body.dataset.signature !== signature) {
-          body.replaceChildren(...stops.map((stop) => {
-            const row = element("tr");
-            const age = element("td");
-            age.append(elapsedLabel(stop.at));
-            const cause = element("td");
-            cause.append(element("span", stop.cause, "chip"));
-            const link = element("td");
-            if (stop.cause_task) {
-              const open = element("button", stop.cause_task, "link-button");
-              open.type = "button";
-              open.addEventListener("click", () => openTask(stop.cause_task));
-              link.append(open);
-            } else {
-              link.textContent = "None";
-            }
-            row.append(age, cause, element("td", stop.class), element("td", stop.task ?? "None"),
-              element("td", stop.role ?? "None"), element("td", stop.detail, "stop-detail"), link);
-            return row;
-          }));
-          body.dataset.signature = signature;
+        const list = document.getElementById("stops-list");
+        const linked = stops.map((stop) => {
+          const task = stop.task ? snapshot.tasks.find((item) => item.id === stop.task) : null;
+          return task ? [task.id, task.state, task.title] : null;
+        });
+        const signature = JSON.stringify([stops, linked]);
+        if (list.dataset.signature !== signature) {
+          list.replaceChildren(...stops.map(stopCard));
+          list.dataset.signature = signature;
         }
-        refreshElapsedLabels(body);
-        document.getElementById("stops-table").hidden = stops.length === 0;
+        refreshElapsedLabels(list);
+        list.hidden = stops.length === 0;
         document.getElementById("stops-empty").hidden = stops.length > 0;
       }
 

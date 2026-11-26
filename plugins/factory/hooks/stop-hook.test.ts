@@ -371,6 +371,30 @@ test("blocks once for worker-fixable stops and stale blockers, then allows uncha
   assert.match(stopBlock.reason, /repeated-permission/);
   assert.equal(f.run(), null);
 
+  await writeFile(f.eventsFile, `${JSON.stringify({
+    id: "e2",
+    at: "2026-05-01T12:00:00Z",
+    type: "stop.recorded",
+    task: "t",
+    source: "stops",
+    data: {
+      stop_id: "repeated-permission:t:implementation:cafebabe",
+      cause: "repeated-permission",
+      role: "implementation",
+      class: "worker-fixable",
+      detail: "The worker asked for the same permission approval 2 times in one session.",
+      count: 2,
+    },
+  })}\n${JSON.stringify({
+    id: "d2",
+    at: "2026-05-01T12:01:00Z",
+    type: "stop.dismissed",
+    task: null,
+    source: "stops",
+    data: { stop_id: "repeated-permission:t:implementation:cafebabe" },
+  })}\n`);
+  assert.equal(f.run(), null, "A dismissed stop does not block the stop hook.");
+
   await rm(f.eventsFile, { force: true });
   const old = new Date(Date.now() - 48 * 60 * 60_000).toISOString();
   await f.write({

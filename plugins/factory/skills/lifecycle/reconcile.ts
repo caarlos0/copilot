@@ -11,7 +11,7 @@ import { defaultBranch } from "./default-branch.ts";
 import { hooksInactive } from "./gate.ts";
 import { scanProposals } from "./proposals.ts";
 import { readJSON } from "./state-dir.ts";
-import { causeTaskId, detectStops, recordStop, scanStops, type QuietWorker } from "./stops.ts";
+import { causeTaskValues, detectStops, recordStop, scanStops, type QuietWorker } from "./stops.ts";
 
 const usage = "Usage: node factory.mjs reconcile FACTORY_FILE [--default-branch NAME] [--blocked-after 24h] [--attention-after 30m]";
 
@@ -321,13 +321,12 @@ async function reconcile(file: string, branchOverride?: string, blockedAfter = i
     errors.push(`improve: ${(error as Error).message.split("\n")[0]}`);
   }
 
-  // Record each new stop once. A stop stays a finding until a cause task holds its stop_id.
+  // Record each new stop once. A stop stays a finding until a cause task holds its stop_id or the stop is dismissed.
   try {
     const log = await resolveFactory(file);
     for (const stop of detectStops(factory, (await readEvents(eventsFile(log), 0)).events, quiet)) await recordStop(log, stop);
     for (const stop of (await scanStops(log, factory)).filter(({ cause_task }) => cause_task === null)) {
-      const details = JSON.stringify({ stop_id: stop.stop_id, cause_of: stop.task });
-      const title = `Cause: ${stop.cause} in ${stop.task ?? "no task"}`;
+      const values = causeTaskValues(stop);
       findings.push({
         kind: "stop",
         stop_id: stop.stop_id,
@@ -336,7 +335,7 @@ async function reconcile(file: string, branchOverride?: string, blockedAfter = i
         task: stop.task,
         role: stop.role,
         detail: stop.detail,
-        command: `node ${factoryScript} write ${file} --task ${causeTaskId(stop.stop_id)} --title '${title}' --issue null --next-action 'Find the root cause. Then propose a prevention, not only a retry.' --details '${details}'`,
+        command: `node ${factoryScript} write ${file} --task ${values.task} --title '${values.title}' --issue ${values.issue} --next-action '${values["next-action"]}' --details '${values.details}'`,
       });
     }
   } catch (error) {

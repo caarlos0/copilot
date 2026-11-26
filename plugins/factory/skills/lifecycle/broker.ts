@@ -56,6 +56,7 @@ const eventTypes = {
   "improve.proposed": { task: false, data: ["rule", "change", "title", "evidence", "recommended", "proposal_id", "result"] },
   "improve.decided": { task: false, data: ["proposal_id", "decision"] },
   "stop.recorded": { task: false, data: ["stop_id", "cause", "class"] },
+  "stop.dismissed": { task: false, data: ["stop_id"] },
 };
 
 export const eventsFile = (file: string) =>
@@ -162,11 +163,12 @@ function validateEvent({ type, task, source, data }: { type: string; task: strin
   }
   if (type.startsWith("attention.")) validateAttention(type, data);
   if (type.startsWith("improve.")) validateImprove(type, data);
-  if (type === "stop.recorded") validateStop(data);
+  if (type === "stop.recorded" || type === "stop.dismissed") validateStop(type, data);
 }
 
-function validateStop(data: EventData) {
-  if (typeof data.stop_id !== "string" || data.stop_id === "") throw new UsageError('stop.recorded data "stop_id" must be a non-empty string.');
+function validateStop(type: string, data: EventData) {
+  if (typeof data.stop_id !== "string" || data.stop_id.trim() === "") throw new UsageError(`${type} data "stop_id" must be a non-empty string.`);
+  if (type === "stop.dismissed") return;
   if (!stopCauses.includes(data.cause)) throw new UsageError(`stop.recorded cause must be one of: ${stopCauses.join(", ")}.`);
   if (!stopClasses.includes(data.class)) throw new UsageError(`stop.recorded class must be one of: ${stopClasses.join(", ")}.`);
   if (data.detail !== undefined && (typeof data.detail !== "string" || data.detail.length > maxStopDetail)) {
@@ -486,7 +488,9 @@ emit    Appends one event and prints it. Types: ${Object.keys(eventTypes).join("
         stop_id (unique; a second event with the same stop_id is ignored by readers), cause
         (${stopCauses.join(", ")}), class (${stopClasses.join(", ")}), and optional
         role, detail (a string of at most ${maxStopDetail} characters, no session text) and count.
-        Wait with --exclude-source stops, so a stop never wakes the factory.
+        stop.dismissed (--source stops, no --task needed) marks one stop_id as acknowledged so
+        readers, reconcile, and the stop hook ignore it.
+        Wait with --exclude-source stops, so stop events never wake the factory.
         attention.requested and attention.resolved need no --task (a rule worker or the
         coordinator has none). A hook emits them with --source attention when a Copilot session
         waits for the user. attention.requested data: session (the Copilot session ID, a string),

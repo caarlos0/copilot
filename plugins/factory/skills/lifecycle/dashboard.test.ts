@@ -2878,9 +2878,18 @@ test("the badge, the page title and the waiting list show pending attention as d
   assert.equal(ui.get("detail").hidden, true, "A second click closes the list.");
 });
 
-test("the stops link counts the open stops, and the panel shows them as text", async (t) => {
+test("the stops link counts open stops, renders cards without None, links text, and runs actions", async (t) => {
   assert.match(html, /<button id="stops-badge"[^>]* hidden>/);
-  const ui = await dashboard(t, { now: Date.parse("2026-05-01T12:10:00Z") });
+  const posts: Json[] = [];
+  let reply: Json = { status: 409, body: { error: "Conflict." } };
+  const ui = await dashboard(t, {
+    now: Date.parse("2026-05-01T12:10:00Z"),
+    fetchRequest: async (path, init, request) => {
+      if (!path.startsWith("/api/stops/")) return request();
+      posts.push({ path, body: JSON.parse(init.body) });
+      return new Response(JSON.stringify(reply.body), { status: reply.status });
+    },
+  });
   const link = ui.get("stops-badge");
   assert.equal(link.hidden, true, "The link is hidden at zero.");
 
@@ -2890,31 +2899,131 @@ test("the stops link counts the open stops, and the panel shows them as text", a
   });
   const show = (stops: Json[]) => ui.run(`load({ ...snapshot, stops: ${JSON.stringify(stops)} }, lastSource)`);
   show([
-    stop(1, { detail: "<img src=x onerror=alert(1)>", cause_task: "issue-9", cause_state: "implementation" }),
-    stop(2, { task: null, role: null }),
+    stop(1, { detail: "Check <img src=x onerror=alert(1)> and https://example.com/logs/run.json and #9", cause_task: "issue-9", cause_state: "implementation" }),
+    stop(2, { task: null, role: null, class: "none", detail: "Quiet for 2 minutes" }),
     stop(3, { cause_task: "issue-3", cause_state: "resolved" }),
+    stop(4, { cause: "blocked", class: "user-decision", task: "issue-5", role: null, detail: "Needs a decision on https://github.com/owner/repo/pull/7" }),
   ]);
   assert.equal(link.hidden, false);
-  assert.equal(ui.get("stops-count").textContent, "2", "A stop with a resolved cause task is not open.");
+  assert.equal(ui.get("stops-count").textContent, "3", "A stop with a resolved cause task is not open.");
 
   await link.fire("click");
   assert.equal(ui.get("detail").hidden, false);
   assert.equal(ui.get("stops-view").hidden, false);
   assert.equal(ui.get("task-view").hidden, true);
-  const [first, second] = ui.get("stops-list").children;
-  assert.equal(ui.get("stops-list").children.length, 2);
-  assert.match(first.textContent, /9m.*worker-quiet.*worker-fixable.*issue-5.*implementation.*<img src=x onerror=alert\(1\)>.*issue-9/);
+  const [first, second, third] = ui.get("stops-list").children;
+  assert.equal(ui.get("stops-list").children.length, 3);
+  assert.equal(first.tagName, "LI");
+  assert.match(first.textContent, /worker-quiet.*worker-fixable.*9m.*Task issue-5.*Role implementation.*Cause task issue-9/);
   assert.equal(first.querySelector("img"), null, "A detail with markup is text.");
-  assert.match(second.textContent, /8m.*worker-quiet.*worker-fixable.*None.*None.*Quiet for 2 minutes.*None/);
-  assert.equal(second.querySelector("button"), null, "A stop without a cause task has no link.");
+  assert.deepEqual(
+    first.querySelector(".stop-detail").querySelectorAll("a").map((anchor: Json) => anchor.href),
+    ["https://example.com/logs/run.json", "https://github.com/owner/repo/issues/9"],
+  );
+  assert.doesNotMatch(second.textContent, /\bNone\b/, "Empty fields are hidden, never None.");
+  const action = (card: Json, name: string) => card.querySelectorAll(".stop-action").find((button: Json) => button.dataset.action === name);
+  assert.deepEqual(
+    second.querySelectorAll(".stop-action").map((button: Json) => button.textContent),
+    ["Create cause task", "Dismiss"],
+  );
+  assert.deepEqual(
+    third.querySelectorAll(".stop-action").map((button: Json) => button.textContent),
+    ["Open task", "Unblock task", "Dismiss"],
+    "A user-decision stop links to Unblock task instead of Create cause task.",
+  );
 
-  await first.querySelector("button").fire("click");
-  assert.equal(ui.run("location.hash"), "#implementation", "A click on the cause task opens that task.");
+  await action(third, "unblock-task").fire("click");
+  assert.equal(ui.get("move-dialog").open, true, "Unblock task opens the Unblock popup.");
+  ui.get("move-dialog").open = false;
+
+  const create = action(second, "create-cause");
+  await create.fire("click");
+  assert.deepEqual(posts, [{ path: `/api/stops/cause-task?file=${encodeURIComponent(factoryFile)}`, body: { stop_id: "worker-quiet:issue-5:implementation:2" } }]);
+  assert.match(second.textContent, /The factory did not create the cause task: Conflict\./);
+  assert.equal(create.disabled, false, "A refused stop action can be tried again.");
+
+  reply = { status: 200, body: { created: true, task: "cause-12345678" } };
+  await create.fire("click");
+  assert.match(second.textContent, /Created cause task cause-12345678\./);
+  assert.equal(create.disabled, true);
+
+  reply = { status: 200, body: { dismissed: true, recorded: true } };
+  await action(first, "dismiss").fire("click");
+  assert.deepEqual(posts.at(-1), { path: `/api/stops/dismiss?file=${encodeURIComponent(factoryFile)}`, body: { stop_id: "worker-quiet:issue-5:implementation:1" } });
+  assert.match(first.textContent, /Dismissed\./);
+
+  await action(first, "open-cause").fire("click");
+  assert.equal(ui.run("location.hash"), "#implementation", "Open cause task opens that task.");
 
   show([]);
   assert.equal(link.hidden, true);
   await link.fire("click");
   assert.equal(ui.get("stops-empty").hidden, false);
+});
+
+test("stop actions dismiss a stop and create a cause task through the shared writer", async (t) => {
+  const { url, directory } = await server(t);
+  const path = `/api/factory?file=${factoryFile}`;
+  const events = join(directory, "owner.repo-factory-events.jsonl");
+  const recorded = (stop_id: string, ageMs: number, task: string | null = "issue-5") => ({
+    id: `e-${stop_id}`, at: new Date(Date.now() - ageMs).toISOString(), type: "stop.recorded", task, source: "stops",
+    data: { stop_id, cause: "worker-quiet", role: "implementation", class: "worker-fixable", detail: "Quiet for 12 minutes.", count: 1 },
+  });
+  await appendFile(events, [recorded("s-dismiss", 60_000), recorded("s-cause", 10_000)].map((event) => `${JSON.stringify(event)}\n`).join(""));
+
+  const post = (route: string, body: Json, headers: Record<string, string> = {}) => get(url, `${route}?file=${factoryFile}`, {
+    method: "POST",
+    headers: { Origin: new URL(url).origin, "Content-Type": "application/json", ...headers },
+    body: JSON.stringify(body),
+  });
+  const log = async () => (await readFile(events, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+
+  const before = await get(url, path);
+  const beforeTag = before.headers.get("etag")!;
+  assert.deepEqual((await before.json()).stops.map(({ stop_id }: Json) => stop_id), ["s-cause", "s-dismiss"]);
+
+  const dismissed = await post("/api/stops/dismiss", { stop_id: "s-dismiss" });
+  assert.equal(dismissed.status, 200, await dismissed.clone().text());
+  assert.deepEqual(await dismissed.json(), { dismissed: true, recorded: true });
+  const afterDismiss = await get(url, path, { headers: { "If-None-Match": beforeTag } });
+  assert.equal(afterDismiss.status, 200, "Dismissing a stop changes the ETag.");
+  assert.deepEqual((await afterDismiss.json()).stops.map(({ stop_id }: Json) => stop_id), ["s-cause"]);
+
+  const repeatDismiss = await post("/api/stops/dismiss", { stop_id: "s-dismiss" });
+  assert.deepEqual(await repeatDismiss.json(), { dismissed: true, recorded: false });
+  assert.equal((await post("/api/stops/cause-task", { stop_id: "s-dismiss" })).status, 409);
+
+  const created = await post("/api/stops/cause-task", { stop_id: "s-cause" });
+  assert.equal(created.status, 200, await created.clone().text());
+  const createdBody = await created.json();
+  assert.equal(createdBody.created, true);
+  assert.match(createdBody.task, /^cause-[0-9a-f]{8}$/);
+
+  const repeatCause = await post("/api/stops/cause-task", { stop_id: "s-cause" });
+  assert.deepEqual(await repeatCause.json(), { created: false, task: createdBody.task });
+
+  const afterCause = await (await get(url, path)).json();
+  const causeTask = afterCause.tasks.find((item: Json) => item.id === createdBody.task);
+  assert.equal(causeTask.state, "initial");
+  assert.equal(causeTask.issue, null);
+  assert.deepEqual(causeTask.details, { stop_id: "s-cause", cause_of: "issue-5" });
+  assert.equal(afterCause.stops.find((item: Json) => item.stop_id === "s-cause").cause_task, createdBody.task);
+
+  const allEvents = await log();
+  assert.equal(allEvents.filter(({ type }) => type === "stop.dismissed").length, 1);
+  assert.ok(allEvents.some(({ type, task, source }) => type === "task.moved" && task === createdBody.task && source === "dashboard"));
+
+  for (const [route, body, status] of [
+    ["/api/stops/dismiss", { stop_id: "missing" }, 404],
+    ["/api/stops/cause-task", { stop_id: "missing" }, 404],
+    ["/api/stops/dismiss", { stop_id: "" }, 400],
+    ["/api/stops/dismiss", { stop_id: "s-cause", extra: 1 }, 400],
+    ["/api/stops/cause-task", {}, 400],
+  ] as [string, Json, number][]) {
+    assert.equal((await post(route, body)).status, status, `${route} ${JSON.stringify(body)}`);
+  }
+  assert.equal((await post("/api/stops/dismiss", { stop_id: "s-cause" }, { Origin: "http://evil.example" })).status, 403);
+  assert.equal((await post("/api/stops/cause-task", { stop_id: "s-cause" }, { Origin: "http://evil.example" })).status, 403);
 });
 
 test("the factory payload lists the stops of the last 30 days, newest first, at most 50, and its tag follows the log", async (t) => {

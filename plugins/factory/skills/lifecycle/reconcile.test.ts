@@ -421,6 +421,14 @@ test("records each stop once, reports it until a cause task holds its stop_id, a
   const cause = task(causeId, "initial", { details: { stop_id: first.stop_id, cause_of: "stuck" } });
   result = await f.run([work, stopped({ class: "user-decision" }), cause]);
   assert.deepEqual(stops(result).map(({ cause }) => cause), ["repeated-permission"]);
+
+  const dismissedId = stops(result)[0].stop_id;
+  await writeFile(eventsPath, `${await readFile(eventsPath, "utf8")}${JSON.stringify({
+    id: "d1", at: new Date().toISOString(), type: "stop.dismissed", task: null, source: "stops", data: { stop_id: dismissedId },
+  })}\n`);
+  result = await f.run([work, stopped({ class: "user-decision" }), cause]);
+  assert.deepEqual(stops(result), [], "A dismissed stop produces no stop finding.");
+  assert.equal((await recorded()).length, 2, "A dismissed stop is not recorded again.");
 });
 
 test("reports a running worker that ended its turn over 10 minutes ago and saved no new result", async (t) => {
