@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { after, test } from "node:test";
 import hooks from "../hooks.json" with { type: "json" };
 
@@ -202,4 +202,201 @@ test("hooks.json allows when the plugin root is unknown", () => {
   assert.equal(out.status, 0);
   assert.equal(out.stdout, "");
   assert.match(out.stderr, /plugin root not found/);
+});
+
+const worktree = join(home, "worktrees", "task-a");
+mkdirSync(join(worktree, "plugins/factory/skills/lifecycle"), { recursive: true });
+mkdirSync(join(worktree, "plugins/coding"), { recursive: true });
+
+function runWith(extraEnv: Record<string, string>, payload: unknown) {
+  const out = spawnSync("node", [factory, "hook", "guard"], {
+    input: JSON.stringify(payload),
+    encoding: "utf8",
+    env: { PATH: process.env.PATH, HOME: home, TMPDIR: scratch, ...extraEnv },
+  });
+  assert.equal(out.status, 0, out.stderr);
+  return out.stdout ? JSON.parse(out.stdout) : null;
+}
+
+function deniedWithPath(out: any, expectedPath: string) {
+  denied(out, "no-relative-escape");
+  assert.ok(
+    out.permissionDecisionReason.endsWith(`Use the absolute path ${expectedPath} instead.`),
+    `expected reason to end with absolute path ${expectedPath}, got: ${out.permissionDecisionReason}`,
+  );
+}
+
+test("no-relative-escape allows paths inside cwd and plain absolute paths", () => {
+  const workerEnv = { FACTORY_TASK: "task-a", FACTORY_ROLE: "implementation" };
+  const allowedTools = [
+    { toolName: "view", toolArgs: { path: "plugins/factory/../coding/README.md" } },
+    { toolName: "view", toolArgs: { path: `${worktree}/plugins/factory/../coding/README.md` } },
+    { toolName: "view", toolArgs: { path: "/etc/hosts" } },
+    { toolName: "view", toolArgs: { path: join(scratch, "out.diff") } },
+    { toolName: "view", toolArgs: { path: "$TMPDIR/out.diff" } },
+    { toolName: "view", toolArgs: { path: "$TMPDIR_OTHER/a/../b" } },
+    { toolName: "edit", toolArgs: { path: "plugins/factory/../coding/README.md" } },
+    { toolName: "create", toolArgs: { path: "a/b/../c.ts" } },
+    { toolName: "grep", toolArgs: { paths: ["plugins/factory/../coding", join(scratch, "logs")] } },
+    { toolName: "glob", toolArgs: { paths: "plugins/factory/../coding" } },
+    { toolName: "apply_patch", toolArgs: { input: "*** Update File: plugins/factory/../coding/a.ts\n" } },
+  ];
+  for (const call of allowedTools) {
+    assert.equal(runWith(workerEnv, { ...call, cwd: worktree }), null, JSON.stringify(call));
+  }
+
+  // When TMPDIR itself is inside cwd, $TMPDIR/a/../b stays inside cwd.
+  assert.equal(
+    runWith(
+      { ...workerEnv, TMPDIR: join(worktree, "tmp") },
+      { toolName: "view", toolArgs: { path: "$TMPDIR/a/../b" }, cwd: worktree },
+    ),
+    null,
+  );
+
+  const allowedBash = [
+    "cat plugins/factory/../coding/README.md",
+    "ls a/b/../c",
+    `cat ${join(scratch, "out.diff")}`,
+    'cat "$TMPDIR/out.diff"',
+    "git diff main..HEAD",
+    "git log origin/main...HEAD -- plugins/factory",
+    'git commit -s -m "fix(factory): stop ../../foo escapes"',
+    'gh pr create --title "Deny ../ escapes" --body "Stops ../../foo paths"',
+    "rg '../' plugins/factory",
+    "rg -e '../' plugins/factory",
+    "jq --arg msg '../foo' '.x = $msg' file.json",
+    'echo "Wrong: ../../../../$TMPDIR/out.diff"',
+    "git status # never use ../..",
+    `cat <<'EOF' > "$TMPDIR/brief.md"\nWrong: ../../../../$TMPDIR/out.diff\n$(cat ../outside)\nRight: /var/folders/xx/T/out.diff\nEOF`,
+    "cd plugins/factory && bun run build",
+  ];
+  for (const command of allowedBash) {
+    assert.equal(
+      runWith(workerEnv, { toolName: "bash", toolArgs: { command }, cwd: worktree }),
+      null,
+      command,
+    );
+  }
+});
+
+test("no-relative-escape denies escaping paths and names the absolute path", () => {
+  const workerEnv = { FACTORY_TASK: "task-a", FACTORY_ROLE: "implementation" };
+  const resolvedScratch = resolve(scratch);
+
+  const fileCases: Array<[unknown, string]> = [
+    [{ toolName: "view", toolArgs: { path: "../other/file.ts" } }, resolve(worktree, "../other/file.ts")],
+    [{ toolName: "view", toolArgs: { path: ".." } }, resolve(worktree, "..")],
+    [
+      { toolName: "view", toolArgs: { path: `${worktree}/../../../../../../var/folders` } },
+      resolve(worktree, "../../../../../../var/folders"),
+    ],
+    [
+      { toolName: "view", toolArgs: { path: "/Users/carlos/.copilot/session-state/abc/../../../../../..$TMPDIR/engine-settings.diff" } },
+      resolve(resolvedScratch, "engine-settings.diff"),
+    ],
+    [{ toolName: "edit", toolArgs: { path: "../other/file.ts" } }, resolve(worktree, "../other/file.ts")],
+    [{ toolName: "create", toolArgs: { path: "../../../../$TMPDIR/out.diff" } }, resolve(resolvedScratch, "out.diff")],
+    [{ toolName: "view", toolArgs: { path: "../../../../${TMPDIR}/out.diff" } }, resolve(resolvedScratch, "out.diff")],
+    [{ toolName: "view", toolArgs: { path: "..$TMPDIR/out.diff" } }, resolve(resolvedScratch, "out.diff")],
+    [{ toolName: "view", toolArgs: { path: "$TMPDIR/a/../b" } }, resolve(resolvedScratch, "b")],
+    [{ toolName: "view", toolArgs: { path: "$HOME/../shared/x" } }, resolve(home, "../shared/x")],
+    [{ toolName: "grep", toolArgs: { paths: ["plugins/factory", "../other"] } }, resolve(worktree, "../other")],
+    [{ toolName: "glob", toolArgs: { paths: "../other" } }, resolve(worktree, "../other")],
+    [
+      { toolName: "apply_patch", toolArgs: { input: "*** Update File: ../other/a.ts\n" } },
+      resolve(worktree, "../other/a.ts"),
+    ],
+    [
+      { toolName: "apply_patch", toolArgs: { input: "*** Update File: src/a.ts\n*** Move to: ../other/a.ts\n" } },
+      resolve(worktree, "../other/a.ts"),
+    ],
+  ];
+  for (const [call, expected] of fileCases) {
+    deniedWithPath(runWith(workerEnv, { ...(call as object), cwd: worktree }), expected);
+  }
+
+  const bashCases: Array<[string, string]> = [
+    ["cd ..", resolve(worktree, "..")],
+    ["(cd ..)", resolve(worktree, "..")],
+    ["(cd plugins); cat ../outside", resolve(worktree, "../outside")],
+    ["../other/check.sh", resolve(worktree, "../other/check.sh")],
+    ["cd plugins/factory/skills/lifecycle && cd ../../../..", worktree],
+    ['cd "$TMPDIR" && cd gt && cd ..', resolvedScratch],
+    ['cat "../../../../$TMPDIR/out.diff"', resolve(resolvedScratch, "out.diff")],
+    ["cat ../../../../${TMPDIR}/out.diff", resolve(resolvedScratch, "out.diff")],
+    ["git -C ../.. status", resolve(worktree, "../..")],
+    ["git -C../outside status", resolve(worktree, "../outside")],
+    ["cp -t ../out file", resolve(worktree, "../out")],
+    ["cp -p ../src dst", resolve(worktree, "../src")],
+    ["rg -q needle ../outside", resolve(worktree, "../outside")],
+    ["rg --files ../outside", resolve(worktree, "../outside")],
+    ["echo hi > ../out.txt", resolve(worktree, "../out.txt")],
+    ["echo hi >| ../out.txt", resolve(worktree, "../out.txt")],
+    ["cat < ../in.txt", resolve(worktree, "../in.txt")],
+    ["sh -c 'cat ../secret'", resolve(worktree, "../secret")],
+    ['echo "$(cat ../secret)"', resolve(worktree, "../secret")],
+    [`cat <<EOF\n$(cat ../outside)\nEOF`, resolve(worktree, "../outside")],
+  ];
+  for (const [command, expected] of bashCases) {
+    deniedWithPath(runWith(workerEnv, { toolName: "bash", toolArgs: { command }, cwd: worktree }), expected);
+  }
+
+  // Coordinator also gets no-relative-escape (before write-boundary for $TMPDIR via ..).
+  deniedWithPath(
+    run({ toolName: "create", toolArgs: { path: "../../../../$TMPDIR/note.txt" }, cwd: worktree }),
+    resolve(resolvedScratch, "note.txt"),
+  );
+  deniedWithPath(
+    run({ toolName: "bash", toolArgs: { command: "git -C ../../../.. rev-parse" }, cwd: worktree }),
+    resolve(worktree, "../../../.."),
+  );
+});
+
+test("guard applies only no-relative-escape to factory workers and skips unrelated sessions", () => {
+  const file = join(scratch, "worker-gate-factory.json");
+  writeFileSync(
+    file,
+    JSON.stringify({
+      tasks: [{ id: "t1", workers: { implementation: { session: "worker-session-1" } } }],
+      rules: [{ id: "r1", worker: { session: "rule-worker-session-1" } }],
+    }),
+  );
+  const baseEnv = { PLUGIN_ROOT: join(import.meta.dirname, ".."), FACTORY_FILE: file };
+  const callHook = (extra: Record<string, string>, payload: unknown) => {
+    const out = hook({ ...baseEnv, ...extra }, payload);
+    assert.equal(out.status, 0, out.stderr);
+    return out.stdout ? JSON.parse(out.stdout) : null;
+  };
+
+  const escapeBash = { toolName: "bash", toolArgs: { command: "cd .." }, cwd: worktree };
+  const workerMerge = { toolName: "bash", toolArgs: { command: "gh pr merge 1" }, cwd: worktree };
+  const workerSubagent = { toolName: "task", toolArgs: {}, cwd: worktree };
+  const workerEdit = { toolName: "edit", toolArgs: { path: "src/a.ts" }, cwd: worktree };
+
+  // Worker via FACTORY_TASK / FACTORY_ROLE: gets no-relative-escape only.
+  const workerEnvs: Record<string, string>[] = [{ FACTORY_TASK: "t1" }, { FACTORY_ROLE: "implementation" }];
+  for (const extra of workerEnvs) {
+    deniedWithPath(callHook(extra, escapeBash), resolve(worktree, ".."));
+    assert.equal(callHook(extra, workerMerge), null, "workers can run gh pr merge");
+    assert.equal(callHook(extra, workerSubagent), null, "workers can use subagents");
+    assert.equal(callHook(extra, workerEdit), null, "workers can edit product files");
+  }
+
+  // Worker via workers.*.session or rules[].worker.session (both sessionId and session_id).
+  for (const key of ["sessionId", "session_id"]) {
+    for (const sid of ["worker-session-1", "rule-worker-session-1"]) {
+      deniedWithPath(callHook({}, { ...escapeBash, [key]: sid }), resolve(worktree, ".."));
+      assert.equal(callHook({}, { ...workerMerge, [key]: sid }), null);
+      assert.equal(callHook({}, { ...workerEdit, [key]: sid }), null);
+    }
+  }
+
+  // FACTORY_COORDINATOR=0 disables guard for workers too; =1 enables coordinator rules.
+  assert.equal(callHook({ FACTORY_ROLE: "implementation", FACTORY_COORDINATOR: "0" }, escapeBash), null);
+  denied(callHook({ FACTORY_ROLE: "implementation", FACTORY_COORDINATOR: "1" }, workerMerge), "gh-pr-merge");
+
+  // Unrelated session outside factory is untouched.
+  assert.equal(callHook({}, { ...escapeBash, sessionId: "unrelated-session" }), null);
+  assert.equal(callHook({}, escapeBash), null);
 });

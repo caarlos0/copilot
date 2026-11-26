@@ -65,10 +65,13 @@ role (`models` and `efforts` in the factory file; see "Launch rules" in the
 lifecycle skill). With no value, add no flag, so the default of the user
 applies. Every implementation brief tells the worker to run
 `git rebase main` before it reports. For a task with a PR, the brief tells the
-worker to merge main in and never to rebase. Every brief also tells the worker
-to never use `git stash`. While your session is the session in the factory owner
-lock, a `preToolUse` guard denies the rule breaks that these rules name. A
-denial names its rule, so do not retry the call.
+worker to merge main in and never to rebase. Every brief also starts at the top
+with the path rule from the lifecycle skill ("Brief the workers") and tells the
+worker to never use `git stash`. While your session is the session in the
+factory owner lock, a `preToolUse` guard denies the coordinator rule breaks
+that these rules name; the guard also denies relative path escapes outside the
+cwd for both the coordinator and factory workers. A denial names its rule, so
+do not retry the call.
 
 Capacity is `budget.max_parallel_workers` from the factory file minus the
 workers with status `running`. The per-role `limits` also apply. Never exceed

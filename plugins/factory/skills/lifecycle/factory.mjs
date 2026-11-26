@@ -3583,6 +3583,24 @@ function isCoordinator(input, env = process.env) {
   const sessionId = hookSession(input);
   return sessionId !== null && ownsLock(factoryFile(input?.cwd ?? process.cwd(), env), sessionId);
 }
+function isWorker(input, env = process.env) {
+  if (env.FACTORY_COORDINATOR === "0")
+    return false;
+  if (env.FACTORY_TASK || env.FACTORY_ROLE)
+    return true;
+  const sessionId = hookSession(input);
+  if (typeof sessionId !== "string" || !sessionId)
+    return false;
+  const file = factoryFile(input?.cwd ?? process.cwd(), env);
+  if (!file)
+    return false;
+  try {
+    const factory = JSON.parse(read(file) ?? "null");
+    return (factory?.tasks ?? []).some((task) => Object.values(task?.workers ?? {}).some((worker) => worker?.session === sessionId)) || (factory?.rules ?? []).some((rule) => rule?.worker?.session === sessionId);
+  } catch {
+    return false;
+  }
+}
 function hooksInactive(file, env = process.env) {
   const lock = lockPath(file);
   if (!read(join6(lock, "owner.json")) && !read(join6(lock, "owner")))
@@ -6390,10 +6408,35 @@ __export(exports_guard, {
 });
 import { existsSync as existsSync4, readFileSync as readFileSync4, realpathSync as realpathSync2 } from "node:fs";
 import { homedir as homedir7, tmpdir as tmpdir2 } from "node:os";
-import { dirname as dirname9, join as join14, resolve as resolve11, sep } from "node:path";
+import { basename as basename8, dirname as dirname9, join as join14, resolve as resolve11, sep } from "node:path";
+function extractSubstitutions(text, subs) {
+  for (let i = 0;i < text.length; i++) {
+    const ch = text[i];
+    if (ch === "\\") {
+      i++;
+    } else if (ch === "`") {
+      const end = text.indexOf("`", i + 1);
+      const stop = end < 0 ? text.length : end;
+      subs.push(text.slice(i + 1, stop));
+      i = stop;
+    } else if (ch === "$" && text[i + 1] === "(") {
+      let depth = 0;
+      let j = i + 1;
+      for (;j < text.length; j++) {
+        if (text[j] === "(")
+          depth++;
+        else if (text[j] === ")" && --depth === 0)
+          break;
+      }
+      subs.push(text.slice(i + 2, j));
+      i = j;
+    }
+  }
+}
 function split(line) {
   const segs = [];
   const subs = [];
+  const heredocs = [];
   let cur = "";
   let quote = "";
   for (let i = 0;i < line.length; i++) {
@@ -6435,6 +6478,61 @@ function split(line) {
     } else if (ch === "'" || ch === '"') {
       quote = ch;
       cur += ch;
+    } else if (ch === "<" && line[i + 1] === "<" && line[i + 2] !== "<") {
+      cur += "<<";
+      let k = i + 2;
+      const stripTabs = line[k] === "-";
+      if (stripTabs)
+        k++;
+      while (k < line.length && (line[k] === " " || line[k] === "\t"))
+        k++;
+      let delim = "";
+      let dq = "";
+      let quoted = false;
+      for (;k < line.length; k++) {
+        const c = line[k];
+        if (dq) {
+          if (c === dq)
+            dq = "";
+          else
+            delim += c;
+        } else if (c === "'" || c === '"') {
+          dq = c;
+          quoted = true;
+        } else if (c === "\\" && k + 1 < line.length) {
+          quoted = true;
+          delim += line[++k];
+        } else if (/[\s;&|()<>]/.test(c)) {
+          break;
+        } else {
+          delim += c;
+        }
+      }
+      if (delim)
+        heredocs.push({ delim, stripTabs, quoted });
+      i++;
+    } else if (ch === "(") {
+      let depth = 0;
+      let j = i;
+      let sq = "";
+      for (;j < line.length; j++) {
+        const c = line[j];
+        if (c === "\\" && sq !== "'") {
+          j++;
+        } else if (sq) {
+          if (c === sq)
+            sq = "";
+        } else if (c === "'" || c === '"') {
+          sq = c;
+        } else if (c === "(") {
+          depth++;
+        } else if (c === ")" && --depth === 0) {
+          break;
+        }
+      }
+      subs.push(line.slice(i + 1, j));
+      cur += line.slice(i, j + 1);
+      i = j;
     } else if (ch === "&" && line[i + 1] === "&") {
       segs.push(cur);
       cur = "";
@@ -6444,7 +6542,28 @@ function split(line) {
     } else if (ch === "&") {
       segs.push(`${cur} &`);
       cur = "";
-    } else if ("\n;|(`".includes(ch)) {
+    } else if (ch === "|" && cur.endsWith(">")) {
+      cur += ch;
+    } else if (ch === `
+`) {
+      segs.push(cur);
+      cur = "";
+      for (let doc = heredocs.shift();doc && i + 1 < line.length; doc = heredocs.shift()) {
+        while (i + 1 < line.length) {
+          const nl = line.indexOf(`
+`, i + 1);
+          const end = nl < 0 ? line.length : nl;
+          let bodyLine = line.slice(i + 1, end).replace(/\r$/, "");
+          if (doc.stripTabs)
+            bodyLine = bodyLine.replace(/^\t+/, "");
+          i = end;
+          if (bodyLine === doc.delim)
+            break;
+          if (!doc.quoted)
+            extractSubstitutions(bodyLine, subs);
+        }
+      }
+    } else if (";|`".includes(ch)) {
       segs.push(cur);
       cur = "";
     } else {
@@ -6454,6 +6573,10 @@ function split(line) {
   segs.push(cur);
   return { segs, subs };
 }
+function unwrapInner(seg) {
+  const inner = seg.match(/^rex\b.*?\s--\s+(.+)$/)?.[1] ?? seg.match(/^(?:ba|z)?sh\s+(?:-\w+\s+)*-c\s+(.+)$/)?.[1];
+  return inner ? inner.replace(/^['"]|['"]$/g, "") : null;
+}
 function commands(line) {
   const out = [];
   const { segs, subs } = split(line);
@@ -6461,15 +6584,15 @@ function commands(line) {
     out.push(...commands(sub));
   for (let seg of segs) {
     const detached = /^(?:(?:\w+=\S*|sudo|env|command|exec|time)\s+)*(?:nohup|setsid)\s/.test(seg.trim());
-    seg = seg.trim().replace(/^(?:(?:\w+=\S*|sudo|env|command|exec|time|nohup|setsid)\s+)+/, "");
+    seg = seg.trim().replace(CMD_PREFIX, "");
     if (!seg)
       continue;
     if (detached && !seg.endsWith(" &"))
       seg += " &";
     out.push(seg);
-    const inner = seg.match(/^rex\b.*?\s--\s+(.+)$/)?.[1] ?? seg.match(/^(?:ba|z)?sh\s+(?:-\w+\s+)*-c\s+(.+)$/)?.[1];
+    const inner = unwrapInner(seg);
     if (inner)
-      out.push(...commands(inner.replace(/^['"]|['"]$/g, "")));
+      out.push(...commands(inner));
   }
   return out;
 }
@@ -6492,27 +6615,294 @@ function writeRoots() {
   ];
   return roots.flatMap((r) => [resolve11(r), real3(resolve11(r))]);
 }
-function targets(tool, args, cwd) {
-  const paths = typeof args.path === "string" ? [args.path] : [];
-  if (tool === "apply_patch") {
-    for (const m of JSON.stringify(args).matchAll(/\*\*\* (?:Add|Update|Delete) File: ([^\\"]+)/g))
-      paths.push(m[1]);
-  }
-  return paths.map((p) => resolve11(cwd, p.replace(/^~(?=$|\/)/, homedir7())));
+function varBase(name) {
+  return name === "TMPDIR" ? resolve11(process.env.TMPDIR || tmpdir2()) : resolve11(homedir7());
 }
-function decide({ toolName = "", toolArgs, cwd = process.cwd() }) {
-  if (DENIED_TOOLS.includes(toolName)) {
+function expandLeadingVar(p) {
+  if (/^~(?=$|\/)/.test(p))
+    return homedir7() + p.slice(1);
+  const m = p.match(LEADING_VAR);
+  if (!m)
+    return p;
+  const base = varBase(m[1] || m[2]);
+  const tail = p.slice(m[0].length);
+  return tail ? `${base}${tail}` : base;
+}
+function isInsideRoot(target, root, realRoot) {
+  return root === sep || target === root || target.startsWith(root + sep) || realRoot !== root && (target === realRoot || target.startsWith(realRoot + sep));
+}
+function denyEscape(raw, suggested) {
+  return {
+    name: "no-relative-escape",
+    reason: `${raw} leaves the working directory. Use the absolute path ${suggested} instead.`
+  };
+}
+function escapeDecision(raw, cwd, curDir = resolve11(cwd)) {
+  const parentMatch = raw.match(PARENT_SEG);
+  if (!parentMatch || parentMatch.index === undefined)
+    return null;
+  KNOWN_VAR.lastIndex = 0;
+  for (const m of raw.matchAll(KNOWN_VAR)) {
+    if (m.index !== undefined && m.index > parentMatch.index) {
+      const base = varBase(m[1] || m[2]);
+      const rest = raw.slice(m.index + m[0].length).replace(/^\/+/, "");
+      return denyEscape(raw, rest ? resolve11(base, rest) : base);
+    }
+  }
+  const root = resolve11(cwd);
+  const realRoot = real3(root);
+  const expanded = expandLeadingVar(raw);
+  const fromCwd = resolve11(root, expanded);
+  const fromCur = resolve11(curDir, expanded);
+  if (isInsideRoot(fromCwd, root, realRoot) && isInsideRoot(fromCur, root, realRoot))
+    return null;
+  return denyEscape(raw, fromCur);
+}
+function tokenize(cmd) {
+  const tokens = [];
+  let cur = "";
+  let inWord = false;
+  let nextRedirect = false;
+  let nextSkip = false;
+  let quote = "";
+  const flush = () => {
+    if (!inWord)
+      return;
+    tokens.push({ value: cur, redirect: nextRedirect, skip: nextSkip });
+    cur = "";
+    inWord = false;
+    nextRedirect = false;
+    nextSkip = false;
+  };
+  for (let i = 0;i < cmd.length; i++) {
+    const ch = cmd[i];
+    if (quote === "'") {
+      if (ch === "'")
+        quote = "";
+      else
+        cur += ch;
+      continue;
+    }
+    if (quote === '"') {
+      if (ch === '"')
+        quote = "";
+      else if (ch === "\\" && i + 1 < cmd.length && '"\\$`\n'.includes(cmd[i + 1]))
+        cur += cmd[++i];
+      else
+        cur += ch;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      inWord = true;
+      continue;
+    }
+    if (ch === "\\" && i + 1 < cmd.length) {
+      cur += cmd[++i];
+      inWord = true;
+      continue;
+    }
+    if (ch === "#" && !inWord)
+      break;
+    if (/\s/.test(ch) || ch === ")") {
+      flush();
+      continue;
+    }
+    if (!inWord) {
+      const redir = cmd.slice(i).match(/^(?:&>>|&>|(?:\d+)?(?:>>|<>|>\||>&|<<-?|<<<|>|<))/);
+      if (redir) {
+        const op = redir[0];
+        nextSkip = /(?:\d+)?(?:>&|<<-?|<<<)$/.test(op);
+        nextRedirect = !nextSkip;
+        i += op.length - 1;
+        continue;
+      }
+    } else if (ch === ">" || ch === "<") {
+      flush();
+      i--;
+      continue;
+    }
+    cur += ch;
+    inWord = true;
+  }
+  flush();
+  return tokens;
+}
+function checkSegment(seg, cwd, state) {
+  const tokens = tokenize(seg);
+  for (const tok of tokens) {
+    if (tok.redirect) {
+      const hit = escapeDecision(tok.value, cwd, state.curDir);
+      if (hit)
+        return hit;
+    }
+  }
+  const words = tokens.filter((t) => !t.redirect && !t.skip).map((t) => t.value);
+  if (words.length === 0)
+    return null;
+  const cmdHit = escapeDecision(words[0], cwd, state.curDir);
+  if (cmdHit)
+    return cmdHit;
+  const cmd = basename8(words[0]);
+  if (NON_PATH_CMDS.has(cmd))
+    return null;
+  if (cmd === "cd") {
+    let target;
+    let afterDash = false;
+    for (let i = 1;i < words.length; i++) {
+      const w = words[i];
+      if (!afterDash && w === "--") {
+        afterDash = true;
+        continue;
+      }
+      if (!afterDash && w.startsWith("-") && w !== "-")
+        continue;
+      target = w;
+      break;
+    }
+    if (!target) {
+      state.curDir = resolve11(homedir7());
+      return null;
+    }
+    if (target === "-")
+      return null;
+    const hit = escapeDecision(target, cwd, state.curDir);
+    if (hit)
+      return hit;
+    state.curDir = resolve11(state.curDir, expandLeadingVar(target));
+    return null;
+  }
+  const isFactoryCli = (cmd === "node" || cmd === "bun") && words.find((w, idx) => idx > 0 && !w.startsWith("-"))?.endsWith("factory.mjs");
+  const skipFlags = isFactoryCli ? FACTORY_TEXT_FLAGS : SKIP_VALUE_FLAGS[cmd];
+  const twoArgFlags = TWO_ARG_SKIP_FLAGS[cmd];
+  const isPatternCmd = PATTERN_CMDS.has(cmd);
+  let afterDash = false;
+  let patternGiven = false;
+  let positionalCount = 0;
+  for (let i = 1;i < words.length; i++) {
+    const w = words[i];
+    if (!afterDash && w === "--") {
+      if (cmd === "rex")
+        break;
+      afterDash = true;
+      continue;
+    }
+    if (!afterDash && w.startsWith("-") && w !== "-") {
+      if (twoArgFlags?.has(w)) {
+        i += 2;
+        continue;
+      }
+      if (isPatternCmd && PATTERN_GIVEN_FLAGS.has(w))
+        patternGiven = true;
+      if (skipFlags?.has(w)) {
+        i++;
+        continue;
+      }
+      const eq = w.indexOf("=");
+      if (eq > 0) {
+        const flag = w.slice(0, eq);
+        if (isPatternCmd && PATTERN_GIVEN_FLAGS.has(flag))
+          patternGiven = true;
+        if (skipFlags?.has(flag))
+          continue;
+        const hit = escapeDecision(w.slice(eq + 1), cwd, state.curDir);
+        if (hit)
+          return hit;
+        continue;
+      }
+      if (!w.startsWith("--") && w.length > 2) {
+        const shortFlag = w.slice(0, 2);
+        if (isPatternCmd && PATTERN_GIVEN_FLAGS.has(shortFlag))
+          patternGiven = true;
+        if (skipFlags?.has(shortFlag))
+          continue;
+        const hit = escapeDecision(w.slice(2), cwd, state.curDir);
+        if (hit)
+          return hit;
+      }
+      continue;
+    }
+    positionalCount++;
+    if (isPatternCmd && !patternGiven && positionalCount === 1)
+      continue;
+    const hit = escapeDecision(w, cwd, state.curDir);
+    if (hit)
+      return hit;
+  }
+  return null;
+}
+function bashEscape(script, cwd, startDir = resolve11(cwd)) {
+  const { segs, subs } = split(script);
+  for (const sub of subs) {
+    const hit = bashEscape(sub, cwd, startDir);
+    if (hit)
+      return hit;
+  }
+  const state = { curDir: startDir };
+  for (let seg of segs) {
+    seg = seg.trim().replace(CMD_PREFIX, "");
+    if (!seg)
+      continue;
+    const hit = checkSegment(seg, cwd, state);
+    if (hit)
+      return hit;
+    const inner = unwrapInner(seg);
+    if (inner) {
+      const innerHit = bashEscape(inner, cwd, state.curDir);
+      if (innerHit)
+        return innerHit;
+    }
+  }
+  return null;
+}
+function rawTargets(tool, args) {
+  const paths = [];
+  if (typeof args.path === "string")
+    paths.push(args.path);
+  if (typeof args.paths === "string")
+    paths.push(args.paths);
+  else if (Array.isArray(args.paths)) {
+    for (const p of args.paths) {
+      if (typeof p === "string")
+        paths.push(p);
+    }
+  }
+  if (tool === "apply_patch") {
+    for (const m of JSON.stringify(args).matchAll(/\*\*\* (?:(?:Add|Update|Delete) File|Move to): ([^\\"]+)/g)) {
+      paths.push(m[1]);
+    }
+  }
+  return paths;
+}
+function targets(tool, args, cwd) {
+  return rawTargets(tool, args).map((p) => resolve11(cwd, p.replace(/^~(?=$|\/)/, homedir7())));
+}
+function decide({ toolName = "", toolArgs, cwd = process.cwd() }, coordinator) {
+  if (coordinator && DENIED_TOOLS.includes(toolName)) {
     return { name: "no-subagents", reason: "The factory uses Rex workers. Never use subagents or workflows." };
   }
   const args = typeof toolArgs === "string" ? JSON.parse(toolArgs) : toolArgs ?? {};
   if (toolName === "bash") {
-    for (const command of commands(String(args.command ?? ""))) {
-      const rule = BASH_RULES.find((r) => r.deny(command));
-      if (rule)
-        return rule;
+    const script = String(args.command ?? "");
+    if (coordinator) {
+      for (const command of commands(script)) {
+        const rule = BASH_RULES.find((r) => r.deny(command));
+        if (rule)
+          return rule;
+      }
+    }
+    const hit = bashEscape(script, cwd);
+    if (hit)
+      return hit;
+  }
+  if (PATH_TOOLS.includes(toolName)) {
+    for (const raw of rawTargets(toolName, args)) {
+      const hit = escapeDecision(raw, cwd);
+      if (hit)
+        return hit;
     }
   }
-  if (WRITE_TOOLS.includes(toolName)) {
+  if (coordinator && WRITE_TOOLS.includes(toolName)) {
     const roots = writeRoots();
     for (const path of targets(toolName, args, cwd)) {
       const target = real3(path);
@@ -6529,7 +6919,8 @@ function decide({ toolName = "", toolArgs, cwd = process.cwd() }) {
 function main12(_argv) {
   try {
     const input = JSON.parse(readFileSync4(0, "utf8"));
-    const hit = isCoordinator(input) ? decide(input) : null;
+    const coordinator = isCoordinator(input);
+    const hit = coordinator || isWorker(input) ? decide(input, coordinator) : null;
     if (hit) {
       console.log(JSON.stringify({
         permissionDecision: "deny",
@@ -6538,11 +6929,59 @@ function main12(_argv) {
     }
   } catch {}
 }
-var DENIED_TOOLS, WRITE_TOOLS, isCopilot = (c) => /^copilot\s/.test(c), BASH_RULES;
+var DENIED_TOOLS, WRITE_TOOLS, PATH_TOOLS, isCopilot = (c) => /^copilot\s/.test(c), CMD_PREFIX, PARENT_SEG, KNOWN_VAR, LEADING_VAR, NON_PATH_CMDS, SKIP_VALUE_FLAGS, FACTORY_TEXT_FLAGS, TWO_ARG_SKIP_FLAGS, PATTERN_CMDS, PATTERN_GIVEN_FLAGS, BASH_RULES;
 var init_guard = __esm(() => {
   init_gate();
   DENIED_TOOLS = ["task", "read_agent", "write_agent", "run_dynamic_workflow"];
   WRITE_TOOLS = ["edit", "create", "str_replace_editor", "apply_patch"];
+  PATH_TOOLS = ["view", "edit", "create", "str_replace_editor", "apply_patch", "grep", "glob"];
+  CMD_PREFIX = /^(?:(?:\w+=\S*|sudo|env|command|exec|time|nohup|setsid)\s+)+/;
+  PARENT_SEG = /(?:^|\/)\.\.(?:$|\/|\$(?:(?:TMPDIR|HOME)(?![A-Za-z0-9_])|\{(?:TMPDIR|HOME)\}))/;
+  KNOWN_VAR = /\$(?:(TMPDIR|HOME)(?![A-Za-z0-9_])|\{(TMPDIR|HOME)\})/g;
+  LEADING_VAR = /^\$(?:(TMPDIR|HOME)(?![A-Za-z0-9_])|\{(TMPDIR|HOME)\})(?=$|\/)/;
+  NON_PATH_CMDS = new Set(["echo", "printf", "true", "false", ":"]);
+  SKIP_VALUE_FLAGS = {
+    git: new Set(["-m", "--message", "--grep", "--format", "--pretty", "-S", "-G", "--author", "--committer"]),
+    gh: new Set([
+      "-t",
+      "--title",
+      "-b",
+      "--body",
+      "-m",
+      "--message",
+      "-q",
+      "--jq",
+      "-S",
+      "--search",
+      "--template",
+      "-l",
+      "--label",
+      "-a",
+      "--assignee"
+    ]),
+    grep: new Set(["-e", "--regexp", "-m", "--max-count", "-A", "-B", "-C"]),
+    egrep: new Set(["-e", "--regexp", "-m", "--max-count", "-A", "-B", "-C"]),
+    fgrep: new Set(["-e", "--regexp", "-m", "--max-count", "-A", "-B", "-C"]),
+    rg: new Set(["-e", "--regexp", "-g", "--glob", "-t", "--type", "-T", "--type-not", "-A", "-B", "-C", "-m", "--max-count"]),
+    ag: new Set(["-G", "-A", "-B", "-C", "-m", "--max-count"]),
+    sed: new Set(["-e", "--expression"]),
+    awk: new Set(["-v", "-F"]),
+    node: new Set(["-e", "--eval", "-p", "--print"]),
+    bun: new Set(["-e", "--eval", "-p", "--print"]),
+    python: new Set(["-c"]),
+    python3: new Set(["-c"]),
+    ruby: new Set(["-e"]),
+    perl: new Set(["-e", "-E"]),
+    sh: new Set(["-c"]),
+    bash: new Set(["-c"]),
+    zsh: new Set(["-c"])
+  };
+  FACTORY_TEXT_FLAGS = new Set(["--note", "--comment", "--reason", "--summary", "--prompt", "--title", "--detail", "--message"]);
+  TWO_ARG_SKIP_FLAGS = {
+    jq: new Set(["--arg", "--argjson"])
+  };
+  PATTERN_CMDS = new Set(["grep", "egrep", "fgrep", "rg", "ag", "sed", "awk", "jq"]);
+  PATTERN_GIVEN_FLAGS = new Set(["-e", "--regexp", "--expression", "-f", "--file", "--from-file", "--files"]);
   BASH_RULES = [
     {
       name: "gh-pr-merge",
@@ -6722,7 +7161,7 @@ import { spawnSync as spawnSync3 } from "node:child_process";
 import { createHash as createHash5 } from "node:crypto";
 import { readFileSync as readFileSync6, statSync as statSync3 } from "node:fs";
 import { rm as rm5 } from "node:fs/promises";
-import { basename as basename8, dirname as dirname10, extname as extname5, join as join16 } from "node:path";
+import { basename as basename9, dirname as dirname10, extname as extname5, join as join16 } from "node:path";
 import { fileURLToPath as fileURLToPath4 } from "node:url";
 function block(reason) {
   process.stdout.write(`${JSON.stringify({ decision: "block", reason: reason.slice(0, maxReason) })}
@@ -6815,7 +7254,7 @@ async function main14(_argv) {
     await run5();
   } catch {}
 }
-var import_write_file_atomic4, lifecycle, maxReason = 4000, informationalKinds, skippedStopClasses, hashFile = (file) => join16(dirname10(file), `${basename8(file, extname5(file))}-stop-hook.hash`);
+var import_write_file_atomic4, lifecycle, maxReason = 4000, informationalKinds, skippedStopClasses, hashFile = (file) => join16(dirname10(file), `${basename9(file, extname5(file))}-stop-hook.hash`);
 var init_stop_hook = __esm(() => {
   init_broker();
   init_gate();

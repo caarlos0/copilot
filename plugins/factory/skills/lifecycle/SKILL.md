@@ -180,8 +180,8 @@ Allow one factory agent for each project. Claim it with an atomic `mkdir` of
 `<project>-factory.lock` in the state directory. Before your first turn ends,
 write `owner.json` inside it with `copilot_session` (your session ID, from
 `$COPILOT_AGENT_SESSION_ID`), `rex_session`, `pane`, `claimed_at` and
-`purpose`. The coordinator hooks (stop and guard) activate only for the session
-recorded there. A lock without `copilot_session` leaves them off, and
+`purpose`. The stop hook and coordinator guard rules activate only for the session
+recorded there; the guard's relative-path escape rule also runs for factory workers. A lock without `copilot_session` leaves the coordinator hooks off, and
 `factory.mjs reconcile` reports `hooks-inactive`. If the lock exists, verify its owner
 and send new work to that factory. Do not start a second writer. Reclaim a lock
 only after you verify that the owner stopped. If you are not sure, stop and
@@ -899,8 +899,19 @@ stop. The cause task adds spend. The budget and the limits still apply to it.
 
 ## Brief the workers
 
-Every brief is self-contained. Workers do not see your conversation. Include
-these items: goal, issue and PR URLs, acceptance criteria, scope, constraints,
+Every brief is self-contained. Workers do not see your conversation.
+
+Put this path rule first, at the top of every worker brief (never bury it in a
+shared file):
+
+```text
+Path rule:
+Never use a relative path that leaves the working directory. Never use `..` to reach `$TMPDIR`, the state directory, or another worktree. Use the absolute path. Expand `$TMPDIR` first.
+- Wrong: `../../../../$TMPDIR/out.diff`
+- Right: `/var/folders/xx/T/out.diff`
+```
+
+Include these items: goal, issue and PR URLs, acceptance criteria, scope, constraints,
 the authorized actions, mode, monitoring duty, result path, and the stop
 condition.
 Include the exact factory file path, the task ID, the current feedback ID (null
@@ -1290,7 +1301,17 @@ The factory runs no GitHub watcher.
 Before every launch, put an `AGENTS.md` in a private, task-specific
 instructions directory under the state directory. Name the directory
 `<project>-<task>-<role>-instructions`, so that `factory.mjs archive clean` can remove
-it. The file points to the exact brief. It states both Rex rules above in its
+it. Start that `AGENTS.md` at the top with the exact path rule block from
+"Brief the workers":
+
+```text
+Path rule:
+Never use a relative path that leaves the working directory. Never use `..` to reach `$TMPDIR`, the state directory, or another worktree. Use the absolute path. Expand `$TMPDIR` first.
+- Wrong: `../../../../$TMPDIR/out.diff`
+- Right: `/var/folders/xx/T/out.diff`
+```
+
+The file also points to the exact brief. It states both Rex rules above in its
 own text: never rename the session, and never create, close, or type into Rex
 windows, tabs, splits, or panes. Add the directory to
 `COPILOT_CUSTOM_INSTRUCTIONS_DIRS` for that worker only. Keep the existing
@@ -1355,14 +1376,24 @@ notification once with an exclusive lock file in `$TMPDIR` before it reads the n
 or emits, so duplicate hook runs append one event. The hook runs for every session of the
 user, so it does nothing without them.
 
-The plugin's `preToolUse` hook (`factory.mjs hook guard`) runs for the session
-recorded in the owner lock; no launcher variable is needed. `FACTORY_COORDINATOR=1`
-forces it on and `FACTORY_COORDINATOR=0` forces it off. The hook denies the subagent and workflow tools, edits outside the state
+The plugin's `preToolUse` hook (`factory.mjs hook guard`) runs for both the
+coordinator (the session recorded in the owner lock; no launcher variable is
+needed) and factory workers (`FACTORY_TASK` or `FACTORY_ROLE`, or a worker session
+recorded in the factory file). `FACTORY_COORDINATOR=1` forces coordinator
+mode on and `FACTORY_COORDINATOR=0` turns the guard off. For the coordinator,
+the hook denies the subagent and workflow tools, edits outside the state
 directories, the session directory, and `$TMPDIR`, and these commands: `gh pr
 merge`, `git merge` without `--ff-only`, `rex new` and `rex session
-new|create|rename`, a `copilot` launch with `--autopilot`. The hook sees only the command line,
-so a launcher script hides what it runs: the script must enforce the same
-flags itself.
+new|create|rename`, `factory.mjs broker wait` with `&`/redirect/`nohup`/`setsid`,
+and a `copilot` launch with `--autopilot`. For both the coordinator and factory
+workers, the hook also denies rule `no-relative-escape`: any shell command
+(including `cd ..`) or file tool call (`view`, `edit`, `create`,
+`str_replace_editor`, `apply_patch`, `grep`, `glob`) whose path contains `..`
+segments that resolve outside the cwd or reach `$TMPDIR`/`$HOME` via `..`, and
+names the absolute path to use. Paths whose `..` segments stay inside the cwd
+and plain absolute paths are allowed. Sessions outside the factory are untouched.
+The hook sees only the command line, so a launcher script hides what it runs:
+the script must enforce the same flags itself.
 
 Name every worker `<Verb> <ref>: <short summary>`. Do not write it by hand;
 run `factory.mjs worker-name --role ROLE --ref REF --summary TEXT` and pass its output

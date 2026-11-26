@@ -51,6 +51,29 @@ export function isCoordinator(input: HookInput, env: NodeJS.ProcessEnv = process
   return sessionId !== null && ownsLock(factoryFile(input?.cwd ?? process.cwd(), env), sessionId);
 }
 
+// True when the session belongs to a factory worker: launcher env vars (which
+// stay set for worker subagents too) or a session recorded in workers.*.session.
+// FACTORY_COORDINATOR=0 disables the guard for workers as well, matching hooks.json.
+export function isWorker(input: HookInput, env: NodeJS.ProcessEnv = process.env) {
+  if (env.FACTORY_COORDINATOR === "0") return false;
+  if (env.FACTORY_TASK || env.FACTORY_ROLE) return true;
+  const sessionId = hookSession(input);
+  if (typeof sessionId !== "string" || !sessionId) return false;
+  const file = factoryFile(input?.cwd ?? process.cwd(), env);
+  if (!file) return false;
+  try {
+    const factory = JSON.parse(read(file) ?? "null");
+    return (
+      (factory?.tasks ?? []).some((task: { workers?: Record<string, { session?: unknown }> }) =>
+        Object.values(task?.workers ?? {}).some((worker) => worker?.session === sessionId),
+      ) ||
+      (factory?.rules ?? []).some((rule: { worker?: { session?: unknown } }) => rule?.worker?.session === sessionId)
+    );
+  } catch {
+    return false;
+  }
+}
+
 // Why the hooks would not run for the session that runs the caller, or null.
 // Only a factory with an owner lock can report this. COPILOT_AGENT_SESSION_ID is
 // the caller's session in the agent's shell.

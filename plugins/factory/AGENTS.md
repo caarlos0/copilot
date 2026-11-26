@@ -215,20 +215,41 @@ so it can read the `events.jsonl` of other sessions. No worker gets
 settings, the permission config, the session database and all sessions.
 
 `hooks.json` also ships a `preToolUse` guard (`factory.mjs hook guard`) for the
-coordinator. It uses the same gate as the stop hook (owner lock session, with
-the `FACTORY_COORDINATOR` override). It does nothing for any other session.
-The hook denies the following calls, with a reason that names the
-rule: the `task`, `read_agent`, `write_agent` and `run_dynamic_workflow` tools;
-`edit`, `create` and `apply_patch` outside `~/.local/state/copilot-coordinator`,
-`~/.local/state/copilot-factory`, the session directory and `$TMPDIR`; and bash
-commands `gh pr merge`, `git merge` without `--ff-only`, `rex new`, `rex session
-new|create|rename`, and a `copilot` launch with `--autopilot`. The guard holds the rules in one table.
-`hooks/guard.test.ts` tests them. A `copilot` launch with any model, or with no
-`--model`, is allowed. The hook matches the command text only, so it
+coordinator and factory workers. Coordinator sessions use the same gate as the
+stop hook (owner lock session, with the `FACTORY_COORDINATOR` override). Worker
+sessions are identified by `FACTORY_TASK` or `FACTORY_ROLE`, or by a worker
+session recorded in the factory file (`tasks[].workers.*.session` or
+`rules[].worker.session`; `FACTORY_COORDINATOR=0` turns the guard off for
+workers too). It does nothing for any other session.
+For the coordinator, the hook denies the following calls, with a reason that
+names the rule: the `task`, `read_agent`, `write_agent` and
+`run_dynamic_workflow` tools; `edit`, `create` and `apply_patch` outside
+`~/.local/state/copilot-coordinator`, `~/.local/state/copilot-factory`, the
+session directory and `$TMPDIR`; and bash commands `gh pr merge`, `git merge`
+without `--ff-only`, `rex new`, `rex session new|create|rename`, `factory.mjs
+broker wait` with `&`/redirect/`nohup`/`setsid`, and a `copilot` launch with
+`--autopilot`. For both the coordinator and factory workers, the hook also
+denies `no-relative-escape`: any bash command (including `cd ..`) or file tool
+call (`view`, `edit`, `create`, `str_replace_editor`, `apply_patch`, `grep`,
+`glob`) whose path contains `..` segments that resolve outside the cwd or reach
+`$TMPDIR`/`$HOME` via `..`, naming the absolute path to use. Paths whose `..`
+segments stay inside the cwd and plain absolute paths stay allowed.
+`hooks/guard.test.ts` tests all guard rules. A `copilot` launch with any model,
+or with no `--model`, is allowed. The hook matches the command text only, so it
 catches slips, not a deliberate bypass (the hook unwraps `sh -c`; it does
 not unwrap a launcher script). It allows every other call and any call it cannot
 parse. The script path comes from `PLUGIN_ROOT`. If no root variable is set, the
 hook allows the call and prints a warning on stderr.
+
+Every worker brief and every per-worker `AGENTS.md` starts at the top with this
+literal path rule (never buried in a shared file):
+
+```text
+Path rule:
+Never use a relative path that leaves the working directory. Never use `..` to reach `$TMPDIR`, the state directory, or another worktree. Use the absolute path. Expand `$TMPDIR` first.
+- Wrong: `../../../../$TMPDIR/out.diff`
+- Right: `/var/folders/xx/T/out.diff`
+```
 
 Every brief sets a write boundary. The worker's assigned worktree is the only
 writable root. The result path and `$TMPDIR` are the only other writable
