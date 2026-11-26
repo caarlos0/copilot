@@ -421,7 +421,10 @@ leave work undone. Treat each finding as unfinished work:
   relaunch the worker in its worktree.
 - `stop`: a task or worker stopped, and no cause task holds its `stop_id` yet
   and no `stop.dismissed` event exists for it.
-  The sweep records each stop once as a `stop.recorded` event. The finding
+  The sweep records each stop once as a `stop.recorded` event. For
+  `repeated-permission`, it ignores an `attention.requested` event with the same
+  key within 2000 ms of the previous one, so duplicate hook runs do not create a
+  false stop. The finding
   names `stop_id`, `cause` (`blocked`, `worker-blocked`, `worker-quiet`,
   `repeated-permission`, `repeated-conflict`), `class`, `task`, `role`,
   `detail` and the exact `command` that creates the cause task. It stays until
@@ -1328,7 +1331,11 @@ Every worker launch also sets `FACTORY_TASK` (the task ID; a rule worker has non
 `env FACTORY_TASK=fix-login FACTORY_ROLE=implementation FACTORY_FILE=/abs/owner.repo-factory.json copilot ...`.
 The plugin's attention hook (`factory.mjs hook attention`) uses them to know that the
 session belongs to the factory; a session with none of them and no match in the
-factory file or the owner lock is untouched. The hook runs for every session of the
+factory file or the owner lock is untouched. When `FACTORY_TASK` and `FACTORY_ROLE`
+are set and the factory file already records a different session for that task and
+role, the hook ignores the session (a nested subprocess). The hook also claims each
+notification once with an exclusive lock file in `$TMPDIR` before it reads the note
+or emits, so duplicate hook runs append one event. The hook runs for every session of the
 user, so it does nothing without them.
 
 The plugin's `preToolUse` hook (`factory.mjs hook guard`) runs for the session

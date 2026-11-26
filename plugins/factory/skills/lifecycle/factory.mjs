@@ -1383,7 +1383,12 @@ function detectStops(factory, events, quiet = []) {
     if (event.type !== "attention.requested" || !promptKinds.includes(kind) || typeof session !== "string" || typeof text !== "string")
       continue;
     const key = [session, kind, text.slice(0, 120)].join("\x00");
-    prompts.set(key, [...prompts.get(key) ?? [], event]);
+    const list = prompts.get(key) ?? [];
+    const prev = list.at(-1);
+    if (prev && Math.abs(Date.parse(event.at) - Date.parse(prev.at)) <= duplicatePromptWindowMs)
+      continue;
+    list.push(event);
+    prompts.set(key, list);
   }
   for (const [key, group] of prompts) {
     if (group.length < repeatedPrompts)
@@ -1424,7 +1429,7 @@ function detectStops(factory, events, quiet = []) {
   }
   return [...found.values()];
 }
-var stopId = (cause, task, role, key) => `${cause}:${task ?? "-"}:${role ?? "-"}:${key}`, causeTaskId = (id) => `cause-${createHash("sha256").update(id).digest("hex").slice(0, 8)}`, causeTaskNextAction = "Find the root cause. Then propose a prevention, not only a retry.", maxDetail = 300, repeatedPrompts = 2, repeatedConflicts = 2, promptKinds, short = (text) => createHash("sha256").update(text).digest("hex").slice(0, 8), clip = (text) => text.length > maxDetail ? `${text.slice(0, maxDetail - 3)}...` : text;
+var stopId = (cause, task, role, key) => `${cause}:${task ?? "-"}:${role ?? "-"}:${key}`, causeTaskId = (id) => `cause-${createHash("sha256").update(id).digest("hex").slice(0, 8)}`, causeTaskNextAction = "Find the root cause. Then propose a prevention, not only a retry.", maxDetail = 300, repeatedPrompts = 2, duplicatePromptWindowMs = 2000, repeatedConflicts = 2, promptKinds, short = (text) => createHash("sha256").update(text).digest("hex").slice(0, 8), clip = (text) => text.length > maxDetail ? `${text.slice(0, maxDetail - 3)}...` : text;
 var init_stops = __esm(() => {
   init_broker();
   promptKinds = ["permission", "sandbox-bypass"];
@@ -6541,9 +6546,23 @@ var exports_attention = {};
 __export(exports_attention, {
   main: () => main13
 });
+import { createHash as createHash4 } from "node:crypto";
 import { readFileSync as readFileSync5, rmSync as rmSync2, writeFileSync } from "node:fs";
 import { tmpdir as tmpdir3 } from "node:os";
 import { join as join15 } from "node:path";
+function hasTimestamp(value) {
+  return typeof value === "number" && Number.isFinite(value) || typeof value === "string" && value.length > 0;
+}
+function claimNotification(session, input) {
+  try {
+    writeFileSync(seenFile(session, input), "", { flag: "wx", mode: 384 });
+    return true;
+  } catch (error) {
+    if (error.code === "EEXIST")
+      return false;
+    throw error;
+  }
+}
 function identify(input, env = process.env) {
   const session = hookSession(input);
   if (typeof session !== "string" || !session)
@@ -6552,8 +6571,19 @@ function identify(input, env = process.env) {
   if (!file)
     return null;
   const found = { file, session, role: env.FACTORY_ROLE || undefined, pane: env.REX_BLOCK || undefined };
-  if (env.FACTORY_TASK || env.FACTORY_ROLE)
+  if (env.FACTORY_TASK || env.FACTORY_ROLE) {
+    if (env.FACTORY_TASK && env.FACTORY_ROLE) {
+      try {
+        const factory = JSON.parse(readFileSync5(file, "utf8"));
+        const task = (factory.tasks ?? []).find((candidate) => candidate?.id === env.FACTORY_TASK);
+        const workers = task?.workers;
+        const recorded = workers && Object.hasOwn(workers, env.FACTORY_ROLE) ? workers[env.FACTORY_ROLE]?.session : undefined;
+        if (typeof recorded === "string" && recorded && recorded !== session)
+          return null;
+      } catch {}
+    }
     return found;
+  }
   if (isCoordinator(input, env))
     return { ...found, role: "coordinator" };
   try {
@@ -6625,6 +6655,8 @@ async function run4() {
   }
   if (!PROMPTS.has(input.notification_type))
     return;
+  if (hasTimestamp(input.timestamp) && !claimNotification(who.session, input))
+    return;
   const { kind, text, options } = describe(input, takeNote(who.session, now));
   const data = { session: who.session, kind, text: clip2(text, MAX_TEXT) };
   if (who.role)
@@ -6641,7 +6673,10 @@ async function main13(_argv) {
     await run4();
   } catch {}
 }
-var MAX_TEXT = 2000, MAX_OPTIONS = 20, MAX_OPTION = 200, NOTE_TTL_MS = 30000, clip2 = (value, max) => String(value).slice(0, max), noteFile = (session) => join15(process.env.TMPDIR || tmpdir3(), `factory-attention-${session.replace(/[^\w-]/g, "_")}.json`), PROMPTS;
+var MAX_TEXT = 2000, MAX_OPTIONS = 20, MAX_OPTION = 200, NOTE_TTL_MS = 30000, clip2 = (value, max) => String(value).slice(0, max), noteFile = (session) => join15(process.env.TMPDIR || tmpdir3(), `factory-attention-${session.replace(/[^\w-]/g, "_")}.json`), seenFile = (session, input) => {
+  const digest = createHash4("sha256").update([session, String(input.notification_type ?? ""), String(input.timestamp ?? ""), String(input.message ?? "")].join("\x00")).digest("hex").slice(0, 16);
+  return join15(process.env.TMPDIR || tmpdir3(), `factory-attention-seen-${digest}.lock`);
+}, PROMPTS;
 var init_attention2 = __esm(() => {
   init_gate();
   PROMPTS = new Set(["permission_prompt", "elicitation_dialog"]);
@@ -6653,7 +6688,7 @@ __export(exports_stop_hook, {
   main: () => main14
 });
 import { spawnSync as spawnSync3 } from "node:child_process";
-import { createHash as createHash4 } from "node:crypto";
+import { createHash as createHash5 } from "node:crypto";
 import { readFileSync as readFileSync6, statSync as statSync3 } from "node:fs";
 import { rm as rm5 } from "node:fs/promises";
 import { basename as basename8, dirname as dirname10, extname as extname5, join as join16 } from "node:path";
@@ -6703,7 +6738,7 @@ function findingKey(finding, factory) {
 function findingsHash(session, findings, factory) {
   const canonical = [session ?? "", ...findings.map((finding) => findingKey(finding, factory)).sort()].join(`
 `);
-  return createHash4("sha256").update(canonical).digest("hex");
+  return createHash5("sha256").update(canonical).digest("hex");
 }
 async function run5() {
   let input;

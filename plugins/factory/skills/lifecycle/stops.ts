@@ -107,6 +107,7 @@ export async function scanStops(file: string, factory: Factory): Promise<Scanned
 
 const maxDetail = 300;
 const repeatedPrompts = 2;
+const duplicatePromptWindowMs = 2000;
 const repeatedConflicts = 2;
 const promptKinds = ["permission", "sandbox-bypass"];
 const short = (text: string) => createHash("sha256").update(text).digest("hex").slice(0, 8);
@@ -169,7 +170,11 @@ export function detectStops(factory: Factory, events: BrokerEvent[], quiet: Quie
     const { session, kind, text } = event.data;
     if (event.type !== "attention.requested" || !promptKinds.includes(kind) || typeof session !== "string" || typeof text !== "string") continue;
     const key = [session, kind, text.slice(0, 120)].join("\0");
-    prompts.set(key, [...(prompts.get(key) ?? []), event]);
+    const list = prompts.get(key) ?? [];
+    const prev = list.at(-1);
+    if (prev && Math.abs(Date.parse(event.at) - Date.parse(prev.at)) <= duplicatePromptWindowMs) continue;
+    list.push(event);
+    prompts.set(key, list);
   }
   for (const [key, group] of prompts) {
     if (group.length < repeatedPrompts) continue;

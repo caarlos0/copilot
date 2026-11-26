@@ -390,12 +390,13 @@ esac
 
 test("records each stop once, reports it until a cause task holds its stop_id, and keeps other findings", async (t) => {
   const f = await fixture(t, fakeRex);
-  const prompt = (id: string) => ({
-    id, at: new Date().toISOString(), type: "attention.requested", task: null, source: "attention",
+  const now = Date.now();
+  const prompt = (id: string, offsetMs: number) => ({
+    id, at: new Date(now + offsetMs).toISOString(), type: "attention.requested", task: null, source: "attention",
     data: { session: "s-work", kind: "permission", text: "Run ls.", role: "implementation" },
   });
   const eventsPath = join(f.directory, "owner.repo-factory-events.jsonl");
-  await writeFile(eventsPath, [prompt("p1"), prompt("p2")].map((line) => `${JSON.stringify(line)}\n`).join(""));
+  await writeFile(eventsPath, [prompt("p1", -10_000), prompt("p2", 0)].map((line) => `${JSON.stringify(line)}\n`).join(""));
   const stopped = (blocker: object) => task("stuck", "blocked", { blocker: { from: "implementation", reason: "Needs a decision.", since: "2026-05-01T10:00:00Z", ...blocker } });
   const work = task("busy", "implementation", { workers: { implementation: { status: "closed", session: "s-work" } } });
   const stops = (result: { findings: any[] }) => result.findings.filter(({ kind }) => kind === "stop");

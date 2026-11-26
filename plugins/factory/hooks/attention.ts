@@ -8,6 +8,7 @@
 //   log, with that note when it is fresh.
 //
 // It always exits 0, prints nothing, and makes no network call.
+import { createHash } from "node:crypto";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -27,16 +28,51 @@ type Who = { file: string; session: string; role?: string; pane?: string };
 const clip = (value: unknown, max: number) => String(value).slice(0, max);
 const noteFile = (session: string) =>
   join(process.env.TMPDIR || tmpdir(), `factory-attention-${session.replace(/[^\w-]/g, "_")}.json`);
+const seenFile = (session: string, input: Input) => {
+  const digest = createHash("sha256")
+    .update([session, String(input.notification_type ?? ""), String(input.timestamp ?? ""), String(input.message ?? "")].join("\0"))
+    .digest("hex")
+    .slice(0, 16);
+  return join(process.env.TMPDIR || tmpdir(), `factory-attention-seen-${digest}.lock`);
+};
+
+function hasTimestamp(value: unknown): boolean {
+  return (typeof value === "number" && Number.isFinite(value)) || (typeof value === "string" && value.length > 0);
+}
+
+// Claims one notification payload atomically so duplicate hook runs emit once.
+function claimNotification(session: string, input: Input): boolean {
+  try {
+    writeFileSync(seenFile(session, input), "", { flag: "wx", mode: 0o600 });
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
+    throw error;
+  }
+}
 
 // The role and pane of a factory worker or the coordinator, with the factory file;
-// null for any other session. Env set by the launch command wins over the file.
+// null for any other session. Env set by the launch command wins over the file,
+// unless the file already records a different session for that task and role
+// (a nested subprocess that inherited the env).
 function identify(input: Input, env = process.env): Who | null {
   const session = hookSession(input);
   if (typeof session !== "string" || !session) return null;
   const file = factoryFile(input.cwd ?? process.cwd(), env);
   if (!file) return null;
   const found: Who = { file, session, role: env.FACTORY_ROLE || undefined, pane: env.REX_BLOCK || undefined };
-  if (env.FACTORY_TASK || env.FACTORY_ROLE) return found;
+  if (env.FACTORY_TASK || env.FACTORY_ROLE) {
+    if (env.FACTORY_TASK && env.FACTORY_ROLE) {
+      try {
+        const factory = JSON.parse(readFileSync(file, "utf8"));
+        const task = (factory.tasks ?? []).find((candidate: any) => candidate?.id === env.FACTORY_TASK);
+        const workers = task?.workers;
+        const recorded = workers && Object.hasOwn(workers, env.FACTORY_ROLE) ? workers[env.FACTORY_ROLE]?.session : undefined;
+        if (typeof recorded === "string" && recorded && recorded !== session) return null;
+      } catch {}
+    }
+    return found;
+  }
   if (isCoordinator(input, env)) return { ...found, role: "coordinator" };
   try {
     const factory = JSON.parse(readFileSync(file, "utf8"));
@@ -113,6 +149,7 @@ async function run() {
     return;
   }
   if (!PROMPTS.has(input.notification_type)) return;
+  if (hasTimestamp(input.timestamp) && !claimNotification(who.session, input)) return;
   const { kind, text, options } = describe(input, takeNote(who.session, now));
   const data: Record<string, unknown> = { session: who.session, kind, text: clip(text, MAX_TEXT) };
   if (who.role) data.role = who.role;

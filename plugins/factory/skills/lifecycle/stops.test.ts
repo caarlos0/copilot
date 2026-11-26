@@ -72,10 +72,12 @@ test("scanStops links a stop to the task whose details.stop_id equals it", async
   assert.equal(open.task, null);
 });
 
-const event = (type: string, task: string | null, data: Record<string, unknown>, id = `${type}-${Math.random()}`) =>
-  ({ id, at: "2026-05-01T12:00:00Z", type, task, source: "test", data });
-const prompt = (session: string, text: string, extra: Record<string, unknown> = {}) =>
-  event("attention.requested", null, { session, kind: "permission", text, ...extra });
+const baseTime = Date.parse("2026-05-01T12:00:00Z");
+const atOffset = (ms: number) => new Date(baseTime + ms).toISOString();
+const event = (type: string, task: string | null, data: Record<string, unknown>, id = `${type}-${Math.random()}`, at = atOffset(0)) =>
+  ({ id, at, type, task, source: "test", data });
+const prompt = (session: string, text: string, extra: Record<string, unknown> = {}, offsetMs = 0) =>
+  event("attention.requested", null, { session, kind: "permission", text, ...extra }, undefined, atOffset(offsetMs));
 const world = (tasks: object[]) => ({ tasks } as unknown as Factory);
 const open = (id: string, extra: object = {}) => ({ id, state: "implementation", workers: {}, ...extra });
 
@@ -116,11 +118,11 @@ test("detectStops turns quiet minutes into a worker-quiet stop keyed by the laun
 test("detectStops reports the same prompt in one session 2 or more times, not different ones", () => {
   const text = "x".repeat(150);
   const stops = detectStops(world([]), [
-    prompt("s1", text + "a"), prompt("s1", text + "b"),
-    prompt("s2", "Run ls."), prompt("s2", "Run pwd."),
-    prompt("s3", "Run ls."), prompt("s4", "Run ls."),
-    prompt("s5", "Run ls.", { kind: "sandbox-bypass" }), prompt("s5", "Run ls."),
-    prompt("s6", "Ask.", { kind: "ask-user" }), prompt("s6", "Ask.", { kind: "ask-user" }),
+    prompt("s1", text + "a", {}, 0), prompt("s1", text + "b", {}, 5000),
+    prompt("s2", "Run ls.", {}, 0), prompt("s2", "Run pwd.", {}, 5000),
+    prompt("s3", "Run ls.", {}, 0), prompt("s4", "Run ls.", {}, 5000),
+    prompt("s5", "Run ls.", { kind: "sandbox-bypass" }, 0), prompt("s5", "Run ls.", {}, 5000),
+    prompt("s6", "Ask.", { kind: "ask-user" }, 0), prompt("s6", "Ask.", { kind: "ask-user" }, 5000),
   ]);
   assert.equal(stops.length, 1);
   assert.equal(stops[0].cause, "repeated-permission");
@@ -128,11 +130,37 @@ test("detectStops reports the same prompt in one session 2 or more times, not di
   assert.equal(stops[0].task, null);
 });
 
+test("detectStops ignores duplicate prompts within 2000 ms and keeps real repeats", () => {
+  assert.deepEqual(detectStops(world([]), [
+    prompt("s1", "Run ls.", {}, 0),
+    prompt("s1", "Run ls.", {}, 350),
+    prompt("s2", "Run ls.", {}, 0),
+    prompt("s2", "Run ls.", {}, 2000),
+  ]), []);
+
+  const [boundary] = detectStops(world([]), [
+    prompt("s3", "Run ls.", {}, 0),
+    prompt("s3", "Run ls.", {}, 2001),
+  ]);
+  assert.equal(boundary.cause, "repeated-permission");
+  assert.equal(boundary.count, 2);
+
+  // Two real prompts that each emitted a duplicate pair count as 2, not 4.
+  const [paired] = detectStops(world([]), [
+    prompt("s4", "Run ls.", {}, 0),
+    prompt("s4", "Run ls.", {}, 400),
+    prompt("s4", "Run ls.", {}, 10_000),
+    prompt("s4", "Run ls.", {}, 10_350),
+  ]);
+  assert.equal(paired.cause, "repeated-permission");
+  assert.equal(paired.count, 2);
+});
+
 test("detectStops maps the session of a prompt to a task, else keeps the event role", () => {
   const owned = open("t1", { workers: { review: { status: "running", session: "s1" } } });
   const [mapped, unmapped] = detectStops(world([owned]), [
-    prompt("s1", "Run ls.", { role: "implementation" }), prompt("s1", "Run ls.", { role: "implementation" }),
-    prompt("s9", "Run ls.", { role: "implementation" }), prompt("s9", "Run ls.", { role: "implementation" }),
+    prompt("s1", "Run ls.", { role: "implementation" }, 0), prompt("s1", "Run ls.", { role: "implementation" }, 5000),
+    prompt("s9", "Run ls.", { role: "implementation" }, 0), prompt("s9", "Run ls.", { role: "implementation" }, 5000),
   ]);
   assert.deepEqual([mapped.task, mapped.role], ["t1", "review"]);
   assert.deepEqual([unmapped.task, unmapped.role], [null, "implementation"]);

@@ -106,16 +106,17 @@ test("an ask_user question carries its message and options", async (t) => {
 test("a form with several fields or a non-enum field carries no options", async (t) => {
   const { run, events, worker } = await setup(t);
   const payload = await load("pre-tool-use-ask-user.json");
+  const notification = await load("notification-elicitation.json");
   const color = payload.toolArgs.requestedSchema.properties.color;
   const forms = [
     { color, size: { type: "string", enum: ["s", "m"] } },
     { count: { type: "integer" } },
     { color: { ...color, enum: ["red", 3] } },
   ];
-  for (const properties of forms) {
+  for (const [index, properties] of forms.entries()) {
     const form = { ...payload, toolArgs: { ...payload.toolArgs, requestedSchema: { properties } } };
     assert.equal(run(form, worker).status, 0);
-    assert.equal(run(await load("notification-elicitation.json"), worker).status, 0);
+    assert.equal(run({ ...notification, timestamp: notification.timestamp + index }, worker).status, 0);
   }
   assert.deepEqual((await events()).map((event) => event.data.options), [undefined, undefined, undefined]);
 });
@@ -216,4 +217,59 @@ test("the preToolUse entry runs the hook only for ask_user", async (t) => {
   assert.equal(ask.status, 0, ask.stderr);
   assert.equal(ask.stdout + ask.stderr, "");
   assert.equal((await readdir(scratch)).length, 1);
+});
+
+test("duplicate runs for one notification emit once and keep the sandbox-bypass kind", async (t) => {
+  const { run, events, worker } = await setup(t);
+  const bypass = await load("permission-request-sandbox-bypass.json");
+  const notification = await load("notification-permission.json");
+  assert.equal(run(bypass, worker).status, 0);
+  assert.equal(run(bypass, worker).status, 0);
+  assert.equal(run(notification, worker).status, 0);
+  assert.equal(run(notification, worker).status, 0);
+  const emitted = await events();
+  assert.equal(emitted.length, 1);
+  assert.equal(emitted[0].data.kind, "sandbox-bypass");
+  assert.match(emitted[0].data.text, /Sandbox bypass:/);
+
+  // A later prompt with a different timestamp still emits.
+  assert.equal(run({ ...notification, timestamp: notification.timestamp + 5000 }, worker).status, 0);
+  assert.equal((await events()).length, 2);
+});
+
+test("duplicate runs for one ask_user notification emit once with options", async (t) => {
+  const { run, events, worker } = await setup(t);
+  const ask = await load("pre-tool-use-ask-user.json");
+  const notification = await load("notification-elicitation.json");
+  assert.equal(run(ask, worker).status, 0);
+  assert.equal(run(notification, worker).status, 0);
+  assert.equal(run(notification, worker).status, 0);
+  const emitted = await events();
+  assert.equal(emitted.length, 1);
+  assert.equal(emitted[0].data.kind, "ask-user");
+  assert.deepEqual(emitted[0].data.options, ["red", "green", "blue"]);
+});
+
+test("ignores a nested subprocess when the factory file records a different worker session", async (t) => {
+  const { run, events, file, scratch, worker } = await setup(t);
+  const setSession = (session: string | null) =>
+    writeFile(file, JSON.stringify({ tasks: [{ id: "t1", workers: { implementation: { status: "running", session } } }] }));
+  const bypass = await load("permission-request-sandbox-bypass.json");
+  const notification = await load("notification-permission.json");
+
+  await setSession("00000000-0000-4000-8000-999999999999");
+  assert.equal(run(bypass, worker).status, 0);
+  assert.equal(run(notification, worker).status, 0);
+  assert.deepEqual(await events(), []);
+  assert.deepEqual(await readdir(scratch), []);
+
+  // Matching session emits.
+  await setSession(PERMISSION_SESSION);
+  assert.equal(run(notification, worker).status, 0);
+  assert.equal((await events()).length, 1);
+
+  // Unrecorded session (fresh launch) also emits.
+  await setSession(null);
+  assert.equal(run({ ...notification, timestamp: notification.timestamp + 5000 }, worker).status, 0);
+  assert.equal((await events()).length, 2);
 });

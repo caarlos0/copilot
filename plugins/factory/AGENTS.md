@@ -166,11 +166,18 @@ reads them (see below).
 the script only when the payload mentions `ask_user` (a shell `case`, so other
 tool calls cost no Node start). The script does nothing, silently, and exits 0
 on any error, unless the session belongs to the factory. A session belongs to the
-factory when `FACTORY_TASK` or `FACTORY_ROLE` is set. Otherwise, the
+factory when `FACTORY_TASK` or `FACTORY_ROLE` is set, unless both are set and the
+factory file already records a different session for that task and role (a nested
+subprocess). Otherwise, the
 payload `sessionId` must be the owner lock's session (the coordinator) or a
 `workers.*.session` in the factory file. The factory file comes from
 `FACTORY_FILE`. Otherwise it comes from the `origin` remote, like `gate.ts`. A `notification`
-(`permission_prompt` or `elicitation_dialog`) appends one `attention.requested`
+(`permission_prompt` or `elicitation_dialog`) claims the payload once with an
+exclusive lock file in `$TMPDIR` (hash of session, notification type, timestamp,
+and message) before it reads the note or emits. A second run for the same
+notification does nothing, so duplicate hook runs emit one event and do not
+consume the sandbox-bypass or `ask-user` note for a second run. The first run
+appends one `attention.requested`
 event (source `attention`) with `factory.mjs broker emit`. In the event, `kind` is
 `permission`, `sandbox-bypass` or `ask-user`. The `kind` is `sandbox-bypass` when
 the message says sandbox, or when a fresh `permissionRequest` for
@@ -502,7 +509,10 @@ has `data` with `stop_id` (unique; a repeat is ignored by readers), `cause`
 (`blocked`, `worker-blocked`, `worker-quiet`, `emit-refused`, `repeated-permission`,
 `repeated-conflict`), `class` (a blocker class, `worker-fixable` or `none`), and optional
 `role`, `detail` (at most 300 characters), `count` and `head`. `factory.mjs reconcile`
-records each detected stop once (`stops.ts`, `detectStops`). `factory.mjs broker emit`
+records each detected stop once (`stops.ts`, `detectStops`). For
+`repeated-permission`, `detectStops` ignores an `attention.requested` event with
+the same key within 2000 ms of the previous one, so duplicate pairs in the log do
+not create a stop. `factory.mjs broker emit`
 records an `emit-refused` stop when it refuses a worker event. `stop.dismissed`
 (source `stops`, `data.stop_id`) marks a stop as dismissed. Dismissed stops leave
 `scanStops`, so the dashboard Stops panel, `reconcile` `stop` findings, and `stop-hook`
