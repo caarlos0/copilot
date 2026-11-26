@@ -1276,15 +1276,16 @@ async function readStopEvents(file) {
     text = await readFile3(eventsFile(file), "utf8");
   } catch (error) {
     if (error.code === "ENOENT") {
-      return { stops: new Map, dismissed: new Set };
+      return { stops: new Map, dismissed: new Set, resolved: new Set };
     }
     throw error;
   }
   const stops = new Map;
   const dismissed = new Set;
+  const resolved = new Set;
   for (const line of text.split(`
 `)) {
-    if (!line.includes('"stop.'))
+    if (!line.includes('"stop.') && !line.includes('"worker.result"'))
       continue;
     let event;
     try {
@@ -1292,19 +1293,38 @@ async function readStopEvents(file) {
     } catch {
       continue;
     }
+    if (event?.type === "worker.result") {
+      const role = typeof event.data?.role === "string" ? event.data.role : null;
+      if (!event.task || !role)
+        continue;
+      for (const [id, stop] of stops) {
+        if (stop.data.cause === "emit-refused" && stop.task === event.task && stop.data.role === role) {
+          resolved.add(id);
+        }
+      }
+      continue;
+    }
     const id = event?.data?.stop_id;
     if (typeof id !== "string" || !id)
       continue;
-    if (event.type === "stop.recorded" && !stops.has(id))
-      stops.set(id, event);
-    else if (event.type === "stop.dismissed")
+    if (event.type === "stop.recorded") {
+      if (!stops.has(id)) {
+        stops.set(id, event);
+      } else if (event.data.cause === "emit-refused" && resolved.has(id) && !dismissed.has(id)) {
+        stops.set(id, event);
+        resolved.delete(id);
+      }
+    } else if (event.type === "stop.dismissed") {
       dismissed.add(id);
+    }
   }
-  return { stops, dismissed };
+  return { stops, dismissed, resolved };
 }
 async function recordStop(file, stop) {
   const factory = await resolveFactory(file);
-  if ((await readStopEvents(factory)).stops.has(stop.stop_id))
+  const { stops, dismissed, resolved } = await readStopEvents(factory);
+  const reopen = stop.cause === "emit-refused" && resolved.has(stop.stop_id) && !dismissed.has(stop.stop_id);
+  if (stops.has(stop.stop_id) && !reopen)
     return { recorded: false };
   const { task, ...data } = stop;
   await emit(factory, { type: "stop.recorded", task, source: "stops", data });
@@ -1324,8 +1344,8 @@ async function isStopDismissed(file, id) {
   return (await readStopEvents(await resolveFactory(file))).dismissed.has(id);
 }
 async function scanStops(file, factory) {
-  const { stops, dismissed } = await readStopEvents(await resolveFactory(file));
-  return [...stops.values()].filter(({ data }) => !dismissed.has(data.stop_id)).map(({ at, task, data }) => {
+  const { stops, dismissed, resolved } = await readStopEvents(await resolveFactory(file));
+  return [...stops.values()].filter(({ data }) => !dismissed.has(data.stop_id) && !resolved.has(data.stop_id)).map(({ at, task, data }) => {
     const cause = factory.tasks.find((candidate) => candidate.details?.stop_id === data.stop_id);
     return { ...data, task, at, cause_task: cause?.id ?? null, cause_state: cause?.state ?? null };
   });
@@ -1615,10 +1635,17 @@ async function checkResult(factory, { type, task, data }) {
   } catch (error) {
     throw new RefusedError("bad-result", `Result file ${name} is not readable JSON in the state directory: ${error.message}`);
   }
+  if (!isObject(saved)) {
+    throw new RefusedError("bad-result", `Result file ${name} must be a JSON object.`);
+  }
   const outcome = type === "worker.blocked" ? "blocked" : data.outcome;
   for (const [key, want] of [["task", task], ["role", data.role], ["outcome", outcome]]) {
-    if (saved?.[key] !== want)
-      throw new RefusedError("bad-result", `Result file ${name} has ${key} ${JSON.stringify(saved?.[key])}, but the event has ${JSON.stringify(want)}.`);
+    if (saved[key] === undefined) {
+      throw new RefusedError("bad-result", `Result file ${name} is missing the "${key}" key.`);
+    }
+    if (saved[key] !== want) {
+      throw new RefusedError("bad-result", `Result file ${name} has ${key} ${JSON.stringify(saved[key])}, but the event has ${JSON.stringify(want)}.`);
+    }
   }
 }
 async function checkHead(factory, task, head) {
@@ -1921,22 +1948,24 @@ Run with --help for usage.`);
     console.error(error.message);
     process.exitCode = error instanceof UsageError ? 2 : 1;
     if (error instanceof RefusedError)
-      await recordRefusal(factory, event, error.kind);
+      await recordRefusal(factory, event, error);
   }
 }
-async function recordRefusal(factory, { type, task, data }, kind) {
+async function recordRefusal(factory, { task, data }, error) {
   try {
     await Promise.resolve().then(() => init_stops());
     const role = typeof data?.role === "string" ? data.role : null;
+    const head = error.kind === "not-rebased" && typeof data?.head === "string" ? data.head : undefined;
+    const key = head ? `${error.kind}:${head.slice(0, 12)}` : error.kind;
     await recordStop(factory, {
-      stop_id: stopId("emit-refused", task ?? null, role, randomUUID()),
+      stop_id: stopId("emit-refused", task ?? null, role, key),
       cause: "emit-refused",
       task: task ?? null,
       role,
       class: "worker-fixable",
-      detail: `The emit of ${type} was refused: ${kind}.`,
+      detail: clip(error.message),
       count: 1,
-      ...kind === "not-rebased" && typeof data?.head === "string" && { head: data.head }
+      ...head && { head }
     });
   } catch {}
 }
@@ -2019,8 +2048,10 @@ emit    Appends one event and prints it. Types: ${Object.keys(eventTypes).join("
         task has no worktree record.
         pr.merged needs a full merge_commit SHA.
         When emit refuses a worker.result or a worker.blocked for one of these reasons, it also
-        appends one stop.recorded (--source stops, cause emit-refused) that names the reason
-        kind: not-rebased, dirty-worktree, head-mismatch or bad-result.
+        appends one stop.recorded (--source stops, cause emit-refused) with a stable key
+        (not-rebased:<head>, dirty-worktree, head-mismatch, or bad-result) and the refusal
+        message (at most ${maxStopDetail} characters) in detail. A later accepted worker.result
+        for the same task and role auto-resolves the stop.
         stop.recorded (--source stops, no --task needed) records one stop of a worker. data:
         stop_id (unique; a second event with the same stop_id is ignored by readers), cause
         (${stopCauses.join(", ")}), class (${stopClasses.join(", ")}), and optional

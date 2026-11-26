@@ -426,10 +426,13 @@ leave work undone. Treat each finding as unfinished work:
   key within 2000 ms of the previous one, so duplicate hook runs do not create a
   false stop. The finding
   names `stop_id`, `cause` (`blocked`, `worker-blocked`, `worker-quiet`,
-  `repeated-permission`, `repeated-conflict`), `class`, `task`, `role`,
-  `detail` and the exact `command` that creates the cause task. It stays until
-  a task has that `stop_id` in its `details` or the user dismisses the stop in
-  the dashboard Stops panel. Follow "Root cause, not retry".
+  `emit-refused`, `repeated-permission`, `repeated-conflict`), `class`, `task`,
+  `role`, `detail` and the exact `command` that creates the cause task. An
+  `emit-refused` stop uses a stable key and clears automatically when a later
+  accepted `worker.result` for that task and role exists. A stop stays until a
+  task has that `stop_id` in its `details`, the user dismisses it in the
+  dashboard Stops panel, or an `emit-refused` stop clears automatically. Follow
+  "Root cause, not retry".
 - `improve-decided-unapplied`: the user decided an `improve` proposal in the
   dashboard (an `improve.decided` event exists), but the result file has a
   `change` and no `decision`. The wake was lost or the change was not applied.

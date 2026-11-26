@@ -518,12 +518,17 @@ records each detected stop once (`stops.ts`, `detectStops`). For
 `repeated-permission`, `detectStops` ignores an `attention.requested` event with
 the same key within 2000 ms of the previous one, so duplicate pairs in the log do
 not create a stop. `factory.mjs broker emit`
-records an `emit-refused` stop when it refuses a worker event. `stop.dismissed`
+records an `emit-refused` stop with a stable key (`not-rebased:<head>`,
+`dirty-worktree`, `head-mismatch`, or `bad-result`) and the refusal error
+message (cut to 300 characters) in `detail` when it refuses a worker event.
+A later accepted `worker.result` for the same task and role auto-resolves that
+`emit-refused` stop: it leaves `scanStops` so `reconcile`, `stop-hook`, and the
+dashboard Stops panel ignore it. `stop.dismissed`
 (source `stops`, `data.stop_id`) marks a stop as dismissed. Dismissed stops leave
 `scanStops`, so the dashboard Stops panel, `reconcile` `stop` findings, and `stop-hook`
 ignore them, and `reconcile` does not record the same `stop_id` again. The `stop` finding
-stays until a task has that `stop_id` in its `details` (the cause task) or a
-`stop.dismissed` event exists for it. The dashboard Stops panel reads `stops` in
+stays until a task has that `stop_id` in its `details` (the cause task), a
+`stop.dismissed` event exists for it, or an `emit-refused` stop auto-resolves. The dashboard Stops panel reads `stops` in
 `/api/factory` and shows one card per open stop with actions: Open task, Unblock task
 (for `user-decision` stops or blocked tasks), Create cause task (`POST /api/stops/cause-task?file=`
 with `{stop_id}`, reusing `causeTaskValues` and the shared `update` writer with source

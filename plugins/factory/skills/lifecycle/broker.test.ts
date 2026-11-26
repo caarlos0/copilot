@@ -174,7 +174,12 @@ test("worker.result is refused unless its result file exists and matches the eve
   refuse(data, /not readable JSON/);
   writeFileSync(join(f.directory, "t1-result.json"), "{");
   refuse(data, /not readable JSON/);
+  writeFileSync(join(f.directory, "t1-result.json"), "null");
+  refuse(data, /Result file t1-result\.json must be a JSON object\./);
   for (const [saved, pattern] of [
+    [{ role: "implementation", outcome: "complete" }, /Result file t1-result\.json is missing the "task" key\./],
+    [{ task: "t1", outcome: "complete" }, /Result file t1-result\.json is missing the "role" key\./],
+    [{ task: "t1", role: "implementation" }, /Result file t1-result\.json is missing the "outcome" key\./],
     [{ task: "t2", role: "implementation", outcome: "complete" }, /task "t2"/],
     [{ task: "t1", role: "review", outcome: "complete" }, /role "review"/],
     [{ task: "t1", role: "implementation", outcome: "working" }, /outcome "working"/],
@@ -183,13 +188,15 @@ test("worker.result is refused unless its result file exists and matches the eve
     refuse(data, pattern);
   }
   const logged = (await readFile(f.log, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
-  assert.ok(logged.length > 0 && logged.every(({ type }) => type === "stop.recorded"));
+  assert.equal(logged.length, 1);
+  assert.equal(logged[0].type, "stop.recorded");
+  assert.equal(logged[0].data.stop_id, "emit-refused:t1:implementation:bad-result");
   writeFileSync(join(f.directory, "t1-result.json"), JSON.stringify({ task: "t1", role: "implementation", outcome: "complete" }));
   const out = f.run("emit", f.factory, "worker.result", "--task", "t1", "--data", JSON.stringify(data));
   assert.equal(out.status, 0, out.stderr);
 });
 
-test("a refused worker emit records one stop and keeps its exit code and message", async (t) => {
+test("a refused worker emit records one stop with the error message and a stable key, and keeps its exit code", async (t) => {
   const f = await fixture(t);
   const lines = async () => (await readFile(f.log, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
   const data = JSON.stringify({ role: "implementation", outcome: "complete", result: "t1-result.json" });
@@ -203,15 +210,25 @@ test("a refused worker emit records one stop and keeps its exit code and message
   assert.equal(stop.task, "t1");
   assert.equal(stop.data.cause, "emit-refused");
   assert.equal(stop.data.role, "implementation");
-  assert.equal(stop.data.detail, "The emit of worker.result was refused: bad-result.");
-  assert.match(stop.data.stop_id, /^emit-refused:t1:implementation:[0-9a-f-]{36}$/);
+  assert.equal(stop.data.stop_id, "emit-refused:t1:implementation:bad-result");
+  assert.equal(stop.data.detail, refused.stderr.trim());
 
+  // A repeat refusal with the same (task, role, kind) while open does not append another stop.
   const again = f.run("emit", f.factory, "worker.blocked", "--task", "t1", "--data", JSON.stringify({ role: "implementation", reason: "r", result: "t1-result.json" }));
   assert.equal(again.status, 1);
+  assert.equal((await lines()).length, 1);
+
+  // A refusal on another role records its own stop, and a long error message is cut to 300 characters.
+  const longName = `${"a".repeat(290)}.json`;
+  const longRefused = f.run("emit", f.factory, "worker.result", "--task", "t1", "--data", JSON.stringify({ role: "review", outcome: "complete", result: longName }));
+  assert.equal(longRefused.status, 1);
+  assert.ok(longRefused.stderr.trim().length > 300);
   const stops = await lines();
   assert.equal(stops.length, 2);
-  assert.notEqual(stops[1].data.stop_id, stop.data.stop_id);
-  assert.equal(stops[1].data.detail, "The emit of worker.blocked was refused: bad-result.");
+  assert.equal(stops[1].data.stop_id, "emit-refused:t1:review:bad-result");
+  assert.equal(stops[1].data.detail.length, 300);
+  assert.ok(stops[1].data.detail.endsWith("..."));
+  assert.equal(stops[1].data.detail, `${longRefused.stderr.trim().slice(0, 297)}...`);
 
   // A usage error and a refused pr.merged record nothing.
   assert.equal(f.run("emit", f.factory, "worker.result", "--task", "t1", "--data", "{}").status, 2);
@@ -291,6 +308,12 @@ test("a complete implementation result must report the worktree head, rebased on
   const behind = emit(head);
   assert.equal(behind.status, 1);
   assert.match(behind.stderr, /does not descend from main/);
+  assert.equal(emit(head).status, 1);
+  const logged = (await readFile(f.log, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+  const notRebased = logged.filter(({ type, data }) => type === "stop.recorded" && data.head === head);
+  assert.equal(notRebased.length, 1);
+  assert.equal(notRebased[0].data.stop_id, `emit-refused:t1:implementation:not-rebased:${head.slice(0, 12)}`);
+  assert.equal(notRebased[0].data.detail, behind.stderr.trim());
 
   tasks({ path: tree, created_by_run: true }, "https://github.com/owner/repo/pull/1");
   assert.equal(emit(head).status, 0);

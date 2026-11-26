@@ -67,7 +67,7 @@ const waiterFile = (file: string) =>
 
 class UsageError extends Error {}
 
-// A refused worker event. The kind names the reason without a path, SHA or command argument.
+// A refused worker event.
 class RefusedError extends Error {
   kind: "not-rebased" | "dirty-worktree" | "head-mismatch" | "bad-result";
   constructor(kind: RefusedError["kind"], message: string) {
@@ -230,9 +230,17 @@ async function checkResult(factory: string, { type, task, data }: { type: string
   } catch (error) {
     throw new RefusedError("bad-result", `Result file ${name} is not readable JSON in the state directory: ${(error as Error).message}`);
   }
+  if (!isObject(saved)) {
+    throw new RefusedError("bad-result", `Result file ${name} must be a JSON object.`);
+  }
   const outcome = type === "worker.blocked" ? "blocked" : data.outcome;
   for (const [key, want] of [["task", task], ["role", data.role], ["outcome", outcome]]) {
-    if (saved?.[key] !== want) throw new RefusedError("bad-result", `Result file ${name} has ${key} ${JSON.stringify(saved?.[key])}, but the event has ${JSON.stringify(want)}.`);
+    if (saved[key] === undefined) {
+      throw new RefusedError("bad-result", `Result file ${name} is missing the "${key}" key.`);
+    }
+    if (saved[key] !== want) {
+      throw new RefusedError("bad-result", `Result file ${name} has ${key} ${JSON.stringify(saved[key])}, but the event has ${JSON.stringify(want)}.`);
+    }
   }
 }
 
@@ -482,8 +490,10 @@ emit    Appends one event and prints it. Types: ${Object.keys(eventTypes).join("
         task has no worktree record.
         pr.merged needs a full merge_commit SHA.
         When emit refuses a worker.result or a worker.blocked for one of these reasons, it also
-        appends one stop.recorded (--source stops, cause emit-refused) that names the reason
-        kind: not-rebased, dirty-worktree, head-mismatch or bad-result.
+        appends one stop.recorded (--source stops, cause emit-refused) with a stable key
+        (not-rebased:<head>, dirty-worktree, head-mismatch, or bad-result) and the refusal
+        message (at most ${maxStopDetail} characters) in detail. A later accepted worker.result
+        for the same task and role auto-resolves the stop.
         stop.recorded (--source stops, no --task needed) records one stop of a worker. data:
         stop_id (unique; a second event with the same stop_id is ignored by readers), cause
         (${stopCauses.join(", ")}), class (${stopClasses.join(", ")}), and optional
@@ -598,24 +608,26 @@ export async function main(argv: string[]) {
   } catch (error) {
     console.error((error as Error).message);
     process.exitCode = error instanceof UsageError ? 2 : 1;
-    if (error instanceof RefusedError) await recordRefusal(factory, event, error.kind);
+    if (error instanceof RefusedError) await recordRefusal(factory, event, error);
   }
 }
 
 // The refusal is already reported, so a failure here must not change the exit code or the message.
-async function recordRefusal(factory: string, { type, task, data }: NewEvent, kind: RefusedError["kind"]) {
+async function recordRefusal(factory: string, { task, data }: NewEvent, error: RefusedError) {
   try {
-    const { recordStop, stopId } = await import("./stops.ts");
+    const { clip, recordStop, stopId } = await import("./stops.ts");
     const role = typeof data?.role === "string" ? data.role : null;
+    const head = error.kind === "not-rebased" && typeof data?.head === "string" ? data.head : undefined;
+    const key = head ? `${error.kind}:${head.slice(0, 12)}` : error.kind;
     await recordStop(factory, {
-      stop_id: stopId("emit-refused", task ?? null, role, randomUUID()),
+      stop_id: stopId("emit-refused", task ?? null, role, key),
       cause: "emit-refused",
       task: task ?? null,
       role,
       class: "worker-fixable",
-      detail: `The emit of ${type} was refused: ${kind}.`,
+      detail: clip(error.message),
       count: 1,
-      ...(kind === "not-rebased" && typeof data?.head === "string" && { head: data.head }),
+      ...(head && { head }),
     });
   } catch {
     // Recording is best effort.

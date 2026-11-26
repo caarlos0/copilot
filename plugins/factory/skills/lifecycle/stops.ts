@@ -42,39 +42,60 @@ export function causeTaskValues(stop: Pick<Stop, "stop_id" | "cause" | "task">) 
 
 type StopEvent = { at: string; task: string | null; data: Omit<Stop, "task"> };
 
-// Reads the first stop.recorded event of each stop_id (oldest first) and every dismissed stop_id.
+// Reads recorded stops (oldest first), dismissed stop_ids, and emit-refused stops auto-resolved by a later accepted worker.result for the same task and role.
 async function readStopEvents(file: string) {
   let text: string;
   try {
     text = await readFile(eventsFile(file), "utf8");
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return { stops: new Map<string, StopEvent>(), dismissed: new Set<string>() };
+      return { stops: new Map<string, StopEvent>(), dismissed: new Set<string>(), resolved: new Set<string>() };
     }
     throw error;
   }
   const stops = new Map<string, StopEvent>();
   const dismissed = new Set<string>();
+  const resolved = new Set<string>();
   for (const line of text.split("\n")) {
-    if (!line.includes('"stop.')) continue;
+    if (!line.includes('"stop.') && !line.includes('"worker.result"')) continue;
     let event;
     try {
       event = JSON.parse(line);
     } catch {
       continue;
     }
+    if (event?.type === "worker.result") {
+      const role = typeof event.data?.role === "string" ? event.data.role : null;
+      if (!event.task || !role) continue;
+      for (const [id, stop] of stops) {
+        if (stop.data.cause === "emit-refused" && stop.task === event.task && stop.data.role === role) {
+          resolved.add(id);
+        }
+      }
+      continue;
+    }
     const id = event?.data?.stop_id;
     if (typeof id !== "string" || !id) continue;
-    if (event.type === "stop.recorded" && !stops.has(id)) stops.set(id, event);
-    else if (event.type === "stop.dismissed") dismissed.add(id);
+    if (event.type === "stop.recorded") {
+      if (!stops.has(id)) {
+        stops.set(id, event);
+      } else if (event.data.cause === "emit-refused" && resolved.has(id) && !dismissed.has(id)) {
+        stops.set(id, event);
+        resolved.delete(id);
+      }
+    } else if (event.type === "stop.dismissed") {
+      dismissed.add(id);
+    }
   }
-  return { stops, dismissed };
+  return { stops, dismissed, resolved };
 }
 
-// Appends one stop.recorded event (source stops). A stop_id that is already in the log records nothing.
+// Appends one stop.recorded event (source stops). A stop_id that is already open or dismissed records nothing.
 export async function recordStop(file: string, stop: Stop) {
   const factory = await resolveFactory(file);
-  if ((await readStopEvents(factory)).stops.has(stop.stop_id)) return { recorded: false };
+  const { stops, dismissed, resolved } = await readStopEvents(factory);
+  const reopen = stop.cause === "emit-refused" && resolved.has(stop.stop_id) && !dismissed.has(stop.stop_id);
+  if (stops.has(stop.stop_id) && !reopen) return { recorded: false };
   const { task, ...data } = stop;
   await emit(factory, { type: "stop.recorded", task, source: "stops", data });
   return { recorded: true };
@@ -94,11 +115,11 @@ export async function isStopDismissed(file: string, id: string) {
   return (await readStopEvents(await resolveFactory(file))).dismissed.has(id);
 }
 
-// Pairs each non-dismissed recorded stop with its cause task: the task whose details.stop_id equals the stop_id.
+// Pairs each open (not dismissed and not auto-resolved) recorded stop with its cause task: the task whose details.stop_id equals the stop_id.
 export async function scanStops(file: string, factory: Factory): Promise<ScannedStop[]> {
-  const { stops, dismissed } = await readStopEvents(await resolveFactory(file));
+  const { stops, dismissed, resolved } = await readStopEvents(await resolveFactory(file));
   return [...stops.values()]
-    .filter(({ data }) => !dismissed.has(data.stop_id))
+    .filter(({ data }) => !dismissed.has(data.stop_id) && !resolved.has(data.stop_id))
     .map(({ at, task, data }) => {
       const cause = factory.tasks.find((candidate) => candidate.details?.stop_id === data.stop_id);
       return { ...data, task, at, cause_task: cause?.id ?? null, cause_state: cause?.state ?? null };
@@ -111,7 +132,7 @@ const duplicatePromptWindowMs = 2000;
 const repeatedConflicts = 2;
 const promptKinds = ["permission", "sandbox-bypass"];
 const short = (text: string) => createHash("sha256").update(text).digest("hex").slice(0, 8);
-const clip = (text: string) => (text.length > maxDetail ? `${text.slice(0, maxDetail - 3)}...` : text);
+export const clip = (text: string) => (text.length > maxDetail ? `${text.slice(0, maxDetail - 3)}...` : text);
 
 export type QuietWorker = { task: string; role: string; minutes: number };
 

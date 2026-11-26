@@ -432,6 +432,32 @@ test("records each stop once, reports it until a cause task holds its stop_id, a
   assert.equal((await recorded()).length, 2, "A dismissed stop is not recorded again.");
 });
 
+test("reconcile hides an emit-refused stop fixed by a later worker.result and keeps an unfixed one", async (t) => {
+  const f = await fixture(t, fakeRex);
+  const eventsPath = join(f.directory, "owner.repo-factory-events.jsonl");
+  const lines = [
+    {
+      id: "s1", at: "2026-05-01T12:00:00Z", type: "stop.recorded", task: "fixed", source: "stops",
+      data: { stop_id: "emit-refused:fixed:implementation:bad-result", cause: "emit-refused", role: "implementation", class: "worker-fixable", detail: 'Result file fixed-result.json is missing the "task" key.', count: 1 },
+    },
+    {
+      id: "r1", at: "2026-05-01T12:00:08Z", type: "worker.result", task: "fixed", source: "worker",
+      data: { role: "implementation", outcome: "complete" },
+    },
+    {
+      id: "s2", at: "2026-05-01T12:01:00Z", type: "stop.recorded", task: "stuck", source: "stops",
+      data: { stop_id: "emit-refused:stuck:implementation:bad-result", cause: "emit-refused", role: "implementation", class: "worker-fixable", detail: 'Result file stuck-result.json is missing the "task" key.', count: 1 },
+    },
+  ];
+  await writeFile(eventsPath, `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`);
+  const { findings, errors } = await f.run([task("fixed", "implementation"), task("stuck", "implementation")]);
+  assert.deepEqual(errors, []);
+  const stops = findings.filter(({ kind }) => kind === "stop");
+  assert.equal(stops.length, 1);
+  assert.equal(stops[0].stop_id, "emit-refused:stuck:implementation:bad-result");
+  assert.equal(stops[0].detail, 'Result file stuck-result.json is missing the "task" key.');
+});
+
 test("reports a running worker that ended its turn over 10 minutes ago and saved no new result", async (t) => {
   const f = await fixture(t, fakeRex);
   const state = join(f.directory, "session-state");

@@ -3069,6 +3069,28 @@ test("the factory payload lists the stops of the last 30 days, newest first, at 
   assert.equal((await (await read()).json()).stops.length, 50);
 });
 
+test("the factory payload hides an emit-refused stop once a later worker.result arrives for that task and role", async (t) => {
+  const { url, directory } = await server(t);
+  const path = `/api/factory?file=${factoryFile}`;
+  const events = join(directory, "owner.repo-factory-events.jsonl");
+  const read = (tag?: string) => get(url, path, tag ? { headers: { "If-None-Match": tag } } : undefined);
+  await appendFile(events, `${JSON.stringify({
+    id: "er1", at: new Date().toISOString(), type: "stop.recorded", task: "issue-5", source: "stops",
+    data: { stop_id: "emit-refused:issue-5:implementation:bad-result", cause: "emit-refused", role: "implementation", class: "worker-fixable", detail: 'Result file issue-5-result.json is missing the "task" key.', count: 1 },
+  })}\n`);
+  const open = await read();
+  const openTag = open.headers.get("etag")!;
+  assert.deepEqual((await open.json()).stops.map(({ stop_id }: Json) => stop_id), ["emit-refused:issue-5:implementation:bad-result"]);
+
+  await appendFile(events, `${JSON.stringify({
+    id: "wr1", at: new Date().toISOString(), type: "worker.result", task: "issue-5", source: "worker",
+    data: { role: "implementation", outcome: "complete" },
+  })}\n`);
+  const closed = await read(openTag);
+  assert.equal(closed.status, 200, "Auto-resolving an emit-refused stop changes the ETag.");
+  assert.deepEqual((await closed.json()).stops, []);
+});
+
 test("an improve proposal shows in the payload, and deciding it records improve.decided once", async (t) => {
   const { url, directory } = await server(t);
   const path = `/api/factory?file=${factoryFile}`;

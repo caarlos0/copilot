@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { appendFile, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { eventsFile } from "./broker.ts";
 import type { Factory } from "./factory-data.ts";
-import { causeTaskId, causeTaskValues, causes, classes, detectStops, dismissStop, isStopDismissed, recordStop, scanStops, stopId } from "./stops.ts";
+import { causeTaskId, causeTaskValues, causes, classes, clip, detectStops, dismissStop, isStopDismissed, recordStop, scanStops, stopId } from "./stops.ts";
 import type { Stop } from "./stops.ts";
 
 async function fixture(t: TestContext) {
@@ -215,4 +215,56 @@ test("dismissStop records stop.dismissed once, hides the stop from scanStops, an
     "next-action": "Find the root cause. Then propose a prevention, not only a retry.",
     details: JSON.stringify({ stop_id: second.stop_id, cause_of: null }),
   });
+});
+
+test("emit-refused stops auto-resolve on a later accepted worker.result for the same task and role", async (t) => {
+  const file = await fixture(t);
+  const appendResult = (task: string, role: string) => appendFile(
+    eventsFile(file),
+    `${JSON.stringify({ id: `r-${Math.random()}`, at: new Date().toISOString(), type: "worker.result", task, source: "worker", data: { role, outcome: "complete" } })}\n`,
+  );
+  const refused = (task: string, role: string, key = "bad-result", detail = 'Result file t1-result.json is missing the "task" key.'): Stop => ({
+    stop_id: stopId("emit-refused", task, role, key),
+    cause: "emit-refused",
+    task,
+    role,
+    class: "worker-fixable",
+    detail,
+    count: 1,
+  });
+
+  // An earlier worker.result does not resolve a later refusal.
+  await appendResult("t1", "implementation");
+  await recordStop(file, refused("t1", "implementation"));
+  await recordStop(file, refused("t1", "review"));
+  await recordStop(file, refused("t2", "implementation"));
+  await recordStop(file, stop("k1"));
+
+  assert.deepEqual((await scanStops(file, world([]))).map(({ stop_id }) => stop_id), [
+    "emit-refused:t1:implementation:bad-result",
+    "emit-refused:t1:review:bad-result",
+    "emit-refused:t2:implementation:bad-result",
+    "worker-quiet:t1:implementation:k1",
+  ]);
+
+  // A later worker.result for (t1, implementation) hides only that emit-refused stop, not other roles, tasks, or causes.
+  await appendResult("t1", "implementation");
+  assert.deepEqual((await scanStops(file, world([]))).map(({ stop_id }) => stop_id), [
+    "emit-refused:t1:review:bad-result",
+    "emit-refused:t2:implementation:bad-result",
+    "worker-quiet:t1:implementation:k1",
+  ]);
+
+  // A new unfixed refusal for (t1, implementation) after auto-resolve records again with the new detail.
+  const second = refused("t1", "implementation", "bad-result", 'Result file t1-result.json has outcome "working", but the event has "complete".');
+  assert.deepEqual(await recordStop(file, second), { recorded: true });
+  const reopened = (await scanStops(file, world([]))).find(({ stop_id }) => stop_id === second.stop_id);
+  assert.equal(reopened?.detail, second.detail);
+
+  // A dismissed emit-refused stop stays dismissed even if refused again after a worker.result.
+  await dismissStop(file, second.stop_id);
+  await appendResult("t1", "implementation");
+  assert.deepEqual(await recordStop(file, second), { recorded: false });
+  assert.equal((await scanStops(file, world([]))).find(({ stop_id }) => stop_id === second.stop_id), undefined);
+  assert.equal(clip("x".repeat(310)).length, 300);
 });
