@@ -110,8 +110,10 @@ ceilings: `spend` (`standard`, `high`, `max`) and `autonomy_cap` (`L0` to
 the ceiling, and record the effective values in `details.lever`. They never
 raise authority. Absent or `null` means no ceiling. Reread them after every
 dashboard `lever.updated` event. Resolve them again on recovery or a policy
-change. If a required skill or policy cannot be loaded, report the exact
-blocker. Never silently use a fallback.
+change. Only this rule enforces the ceilings. No code reads them. A change does
+not alter a recorded `details.lever` level or stop a running worker. It applies
+to the next dispatch, brief, or landing check. If a required skill or policy
+cannot be loaded, report the exact blocker. Never silently use a fallback.
 
 Use the brief template to prepare the existing task. Do not use the filing and
 runner flow of the full `brief` skill. Do not start `autonomous-delivery`, a

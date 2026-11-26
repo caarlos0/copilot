@@ -192,6 +192,7 @@
       .settings-form input { display: block; width: 100%; margin-top: 4px; padding: 5px 12px; background: var(--bg); font-weight: 400; }
       .settings-form label { margin-top: 12px; }
       .settings-form p.muted { margin: 4px 0 12px; }
+      #limits-note { margin: 8px 24px 0; }
       .settings-form .controls { margin-top: 24px; }
       #rule-list, #improve-list, #ignored-list { list-style: none; margin: 0; padding: 0; }
       #producers-note { margin: 16px 24px 0; }
@@ -473,6 +474,7 @@
         <ul id="skipped-files"></ul>
       </details>
       <p id="error" role="alert" hidden></p>
+      <p id="limits-note" class="muted" hidden></p>
       <div id="flow-wrap">
         <svg id="flow" viewBox="0 0 1160 720" role="group" aria-label="Factory flow: number of tasks in each state"></svg>
       </div>
@@ -995,6 +997,7 @@
         drawSource(enabled);
         drawAttention();
         drawStops();
+        drawLimits();
         renderDetail(chosen);
       }
 
@@ -1370,12 +1373,28 @@
       }
 
       // One section per stored object. Each field is saved only when its value changed.
+      // The text of each level follows docs/autonomy.md and docs/spend.md of Lever.
+      const autonomyLevels = {
+        L0: ["Propose", "Agents write comments, issues and reports. They do not push."],
+        L1: ["Draft", "Agents push branches and open draft PRs."],
+        L2: ["Ready, human lands", "Agents mark PRs ready, fix CI and answer review threads. A person merges."],
+        L3: ["Merge on grant", "Agents merge only the PRs that a recorded grant covers."],
+        L4: ["Self-merge behind gates", "Agents merge or enqueue a PR when all checks and rules pass."],
+        L5: ["Land, release, observe", "Agents also release and watch the health signals. They roll back on a failure."],
+      };
+      const spendTiers = {
+        standard: ["Standard", "Standard models. Review only on request."],
+        high: ["High", "A premium model only for judgment. One reviewer for each PR."],
+        max: ["Max", "Premium models by default. A review panel for risky diffs."],
+      };
       const settingFields = [
         { section: "budget", label: "Maximum workers that run at the same time", blank: "No limit", min: 1, max: maxParallelWorkers },
         { section: "limits", key: "investigation", label: "Investigation workers", min: 1, max: maxRoleLimit },
         { section: "limits", key: "implementation", label: "Implementation workers", min: 1, max: maxRoleLimit },
-        { section: "lever", key: "spend", label: "Spend limit", choices: leverSpends },
-        { section: "lever", key: "autonomy_cap", label: "Autonomy limit", choices: leverAutonomyCaps },
+        { section: "lever", key: "spend", label: "Spend limit", choices: leverSpends, levels: spendTiers,
+          none: "No limit. Lever selects the tier." },
+        { section: "lever", key: "autonomy_cap", label: "Autonomy limit", choices: leverAutonomyCaps, levels: autonomyLevels,
+          none: "No limit. Lever selects the level." },
       ];
       const settingHeadings = {
         budget: ["Workers", "The factory reads these values at its next check. The factory does not start a worker above a limit. A lower limit does not stop a running worker."],
@@ -1392,12 +1411,29 @@
 
       const settingValue = (seen, field) => (field.key ? seen[field.section][field.key] : seen[field.section]);
 
+      const levelHint = (field, value) => (value ? `${value}: ${field.levels[value][1]}` : field.none);
+
       function leverNow(data) {
         const recorded = data.tasks.filter((task) => task.details?.lever?.effective_level)
           .sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at))[0];
-        return recorded
-          ? `Latest recorded autonomy level: ${recorded.details.lever.effective_level} (${recorded.id}). You cannot change it here.`
-          : "No task has an autonomy level yet.";
+        if (!recorded) return "No task has an autonomy level yet.";
+        const level = recorded.details.lever.effective_level;
+        const cap = data.lever?.autonomy_cap;
+        const text = `Latest recorded autonomy level: ${level} (${recorded.id}). You cannot change it here.`;
+        return cap && leverAutonomyCaps.indexOf(level) > leverAutonomyCaps.indexOf(cap)
+          ? `${text} It is above the limit ${cap}. A limit does not change a recorded level. The factory applies the limit when it resolves the next dispatch.`
+          : text;
+      }
+
+      // The project view shows the saved limits, so a save has a visible result.
+      function drawLimits() {
+        const note = document.getElementById("limits-note");
+        const lever = snapshot?.lever ?? {};
+        const parts = [];
+        if (lever.autonomy_cap) parts.push(`autonomy ${lever.autonomy_cap} (${autonomyLevels[lever.autonomy_cap][0]})`);
+        if (lever.spend) parts.push(`spend ${lever.spend}`);
+        note.textContent = parts.length ? `Limits: ${parts.join(", ")}. Change them in Settings.` : "";
+        note.hidden = !parts.length;
       }
 
       function settingsForm() {
@@ -1418,7 +1454,8 @@
           control.name = field.key ?? field.section;
           if (field.choices) {
             control.append(...["", ...field.choices].map((value) => {
-              const option = element("option", value || "No limit");
+              const name = field.levels[value]?.[0];
+              const option = element("option", value ? (field.key === "autonomy_cap" ? `${value} - ${name}` : name) : "No limit");
               option.value = value;
               return option;
             }));
@@ -1434,6 +1471,11 @@
           initial.set(field, control.value);
           label.append(control);
           fields.append(label);
+          if (field.levels) {
+            const hint = element("p", levelHint(field, control.value), "muted level-hint");
+            control.addEventListener("change", () => { hint.textContent = levelHint(field, control.value); });
+            fields.append(hint);
+          }
         }
         const error = element("p", null, "save-error");
         error.setAttribute("role", "alert");

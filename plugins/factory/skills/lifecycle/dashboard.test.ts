@@ -1884,6 +1884,42 @@ test("the Settings item at the bottom of the sidebar opens one settings dialog",
   assert.equal(ui.get("detail").hidden, false, "Escape must not close the task panel behind the dialog.");
 });
 
+test("each autonomy and spend choice has a short hint, and a saved limit shows in the project view and the file", async (t) => {
+  const ui = await dashboard(t);
+  const file = join(ui.directory, factoryFile);
+  assert.equal(ui.get("limits-note").hidden, true, "No limit, no note.");
+  await ui.get("open-settings").fire("click");
+  const form = ui.get("settings-body").querySelector("form");
+  const [spend, cap] = form.querySelectorAll("select");
+  const hints = () => form.querySelectorAll(".level-hint").map((hint: Json) => hint.textContent);
+  assert.deepEqual(hints(), ["No limit. Lever selects the tier.", "No limit. Lever selects the level."]);
+  assert.deepEqual(cap.options.map((option: Json) => option.textContent), ["No limit", "L0 - Propose", "L1 - Draft",
+    "L2 - Ready, human lands", "L3 - Merge on grant", "L4 - Self-merge behind gates", "L5 - Land, release, observe"]);
+  for (const level of ["L0", "L1", "L2", "L3", "L4", "L5"]) {
+    cap.value = level;
+    await cap.fire("change");
+    assert.match(hints()[1], new RegExp(`^${level}: \\S`));
+  }
+  spend.value = "max";
+  await spend.fire("change");
+  assert.match(hints()[0], /^max: Premium models by default/);
+  cap.value = "L2";
+  await cap.fire("change");
+  await form.fire("submit");
+  assert.deepEqual(JSON.parse(await readFile(file, "utf8")).lever, { spend: "max", autonomy_cap: "L2" });
+  assert.equal(ui.get("settings-dialog").open, false);
+  assert.equal(ui.get("limits-note").hidden, false);
+  assert.equal(ui.get("limits-note").textContent, "Limits: autonomy L2 (Ready, human lands), spend max. Change them in Settings.");
+  await ui.get("open-settings").fire("click");
+  const reopened = ui.get("settings-body").querySelector("form");
+  assert.deepEqual(reopened.querySelectorAll("select").map((select: Json) => select.value), ["max", "L2"]);
+  assert.match(reopened.textContent, /Latest recorded autonomy level: L4 \(issue-3\)\. You cannot change it here\. It is above the limit L2\./);
+  const events = (await readFile(join(ui.directory, "owner.repo-factory-events.jsonl"), "utf8")).trim().split("\n")
+    .map((line) => JSON.parse(line));
+  assert.deepEqual(events.map(({ type, source, data }) => [type, source, data]),
+    [["lever.updated", "dashboard", { spend: "max", autonomy_cap: "L2" }]]);
+});
+
 test("the settings dialog keeps its draft across refresh, reports a conflict, and sends only changed fields", async (t) => {
   const confirms = [];
   const ui = await dashboard(t, { confirm: (message) => { confirms.push(message); return false; } });

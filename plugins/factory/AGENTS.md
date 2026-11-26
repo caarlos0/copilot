@@ -364,7 +364,12 @@ carries the value that the browser saw (`--expected-budget`,
 `--expected-limits`, `--expected-lever`). A different current value is a
 conflict for that field. It emits `budget.updated`, `limits.updated`, and
 `lever.updated` with source `dashboard`. The coordinator reads these from the
-file and never exceeds the budget or a ceiling. A lower value stops no worker. Lever values are
+file and never exceeds the budget or a ceiling. A lower value stops no worker. Only the
+coordinator's skill rules enforce the Lever ceilings; no code reads them. The dialog shows a
+short hint under each Lever select (`autonomyLevels` and `spendTiers` in `dashboard.html`, from
+Lever's `docs/autonomy.md` and `docs/spend.md`). The hint follows the chosen value. A
+`#limits-note` line in the project view shows the saved ceilings, and the dialog warns when
+the latest recorded level is above the ceiling. Lever values are
 ceilings only. They narrow the resolved dials and never raise them. `null`
 means no ceiling. The dashboard never writes grants or Lever's dials files.
 
