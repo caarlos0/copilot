@@ -109,10 +109,19 @@ the context appears twice when you install both. Remove one.
 `hooks.json` also ships one `agentStop` hook, `factory.mjs hook stop`.
 It blocks the end of a coordinator turn when the run is not `finished` and either no
 waiter is armed (the same check as `factory.mjs broker armed`) or `factory.mjs reconcile`
-reports findings. The block is `decision: "block"` with a `reason`. The model
+reports new actionable findings. The block is `decision: "block"` with a `reason`. The model
 reads the `reason` as its next prompt. A missing waiter blocks every time.
-Findings block once per turn (`stop_hook_active` allows the next stop), because
-some findings need the user. Copilot ends the turn after 8 consecutive blocks.
+When a waiter is armed, the hook ignores informational findings (`attention-stale`,
+`rex-session-missing`, skipped `blocked` stops of class `user-decision` or `approval`,
+`merged-worktree` with `created_by_run: false`, and `branch-ahead` while an
+implementation or review worker runs). Actionable findings block once per turn
+(`stop_hook_active` or `stopHookActive` allows the next stop) and once per unchanged
+set for the same coordinator session. The hook hashes the session ID and normalized
+actionable findings (without `worker-quiet` `idle_minutes`, with the worker's
+`launched_at` and `session`), stores the hash in `<owner.repo>-factory-stop-hook.hash`
+beside the factory file (mode 0600), and removes that file when no actionable findings
+remain or when the run is `finished`. This prevents repeated turn ends while a waiter
+runs from queueing duplicate block messages. Copilot ends the turn after 8 consecutive blocks.
 The hook cannot arm the waiter or wake an idle agent. It only forces the model to
 do these actions. The hook runs in every session of every user, so a gate
 (`gate.ts`) controls it. It does nothing

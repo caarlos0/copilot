@@ -6239,12 +6239,57 @@ __export(exports_stop_hook, {
   main: () => main14
 });
 import { spawnSync as spawnSync3 } from "node:child_process";
+import { createHash as createHash4 } from "node:crypto";
 import { readFileSync as readFileSync6, statSync as statSync3 } from "node:fs";
-import { dirname as dirname10, join as join16 } from "node:path";
+import { rm as rm5 } from "node:fs/promises";
+import { basename as basename8, dirname as dirname10, extname as extname5, join as join16 } from "node:path";
 import { fileURLToPath as fileURLToPath4 } from "node:url";
 function block(reason) {
   process.stdout.write(`${JSON.stringify({ decision: "block", reason: reason.slice(0, maxReason) })}
 `);
+}
+function readHash(path) {
+  try {
+    return readFileSync6(path, "utf8").trim() || null;
+  } catch {
+    return null;
+  }
+}
+function isActionable(finding, factory) {
+  const kind = finding.kind;
+  if (typeof kind === "string" && informationalKinds.has(kind))
+    return false;
+  if (kind === "stop" && finding.cause === "blocked" && typeof finding.class === "string" && skippedStopClasses.has(finding.class)) {
+    return false;
+  }
+  if (kind === "merged-worktree" && finding.created_by_run === false)
+    return false;
+  if (kind === "branch-ahead") {
+    const task = factory.tasks?.find((item) => item.id === finding.task);
+    if (task?.workers?.implementation?.status === "running" || task?.workers?.review?.status === "running")
+      return false;
+  }
+  return true;
+}
+function findingKey(finding, factory) {
+  const copy = {};
+  for (const key of Object.keys(finding).sort()) {
+    if (finding.kind === "worker-quiet" && key === "idle_minutes")
+      continue;
+    copy[key] = finding[key];
+  }
+  if (finding.kind === "worker-quiet") {
+    const task = factory.tasks?.find((item) => item.id === finding.task);
+    const worker = task?.workers?.[finding.role];
+    copy._launched_at = worker?.launched_at ?? null;
+    copy._session = worker?.session ?? null;
+  }
+  return JSON.stringify(copy);
+}
+function findingsHash(session, findings, factory) {
+  const canonical = [session ?? "", ...findings.map((finding) => findingKey(finding, factory)).sort()].join(`
+`);
+  return createHash4("sha256").update(canonical).digest("hex");
 }
 async function run5() {
   let input;
@@ -6257,9 +6302,13 @@ async function run5() {
   if (!file || !isCoordinator(input) || !statSync3(file, { throwIfNoEntry: false }))
     return;
   const factory = JSON.parse(readFileSync6(file, "utf8"));
-  if (factory.status === "finished")
+  const resolved = await resolveFactory(file);
+  const statePath = hashFile(resolved);
+  if (factory.status === "finished") {
+    await rm5(statePath, { force: true }).catch(() => {});
     return;
-  if (await waiterPid(await resolveFactory(file)) === null) {
+  }
+  if (await waiterPid(resolved) === null) {
     block(`No broker waiter is armed and the run is not finished. Arm the waiter now. Run \`node ${join16(lifecycle, "factory.mjs")} broker wait ${file} --since CURSOR --exclude-source coordinator --exclude-source attention --exclude-source improve --exclude-source stops --due\` as async bash with the latest cursor. If you have no cursor, run \`factory.mjs broker cursor\`. Then end the turn.`);
     return;
   }
@@ -6269,20 +6318,31 @@ async function run5() {
   if (sweep.status !== 0)
     return;
   const { findings } = JSON.parse(sweep.stdout);
-  if (findings?.length) {
-    block(`factory.mjs reconcile reports ${findings.length} finding(s). Act on each finding with factory.mjs write. Keep the waiter armed. Then end the turn. If a finding needs the user, report it. Do not act on it. Findings: ${JSON.stringify(findings)}`);
+  const actionable = Array.isArray(findings) ? findings.filter((finding) => isActionable(finding, factory)) : [];
+  if (!actionable.length) {
+    await rm5(statePath, { force: true }).catch(() => {});
+    return;
   }
+  const hash = findingsHash(hookSession(input), actionable, factory);
+  if (readHash(statePath) === hash)
+    return;
+  await import_write_file_atomic4.default(statePath, `${hash}
+`, { mode: 384 });
+  block(`factory.mjs reconcile reports ${actionable.length} finding(s). Act on each finding with factory.mjs write. Keep the waiter armed. Then end the turn. If a finding needs the user, report it. Do not act on it. Findings: ${JSON.stringify(actionable)}`);
 }
 async function main14(_argv) {
   try {
     await run5();
   } catch {}
 }
-var lifecycle, maxReason = 4000;
+var import_write_file_atomic4, lifecycle, maxReason = 4000, informationalKinds, skippedStopClasses, hashFile = (file) => join16(dirname10(file), `${basename8(file, extname5(file))}-stop-hook.hash`);
 var init_stop_hook = __esm(() => {
   init_broker();
   init_gate();
+  import_write_file_atomic4 = __toESM(require_lib(), 1);
   lifecycle = dirname10(fileURLToPath4(import.meta.url));
+  informationalKinds = new Set(["attention-stale", "rex-session-missing"]);
+  skippedStopClasses = new Set(["user-decision", "approval"]);
 });
 
 // plugins/factory/skills/lifecycle/factory.ts
