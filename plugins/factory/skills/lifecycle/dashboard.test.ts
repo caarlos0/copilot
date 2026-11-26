@@ -2040,6 +2040,64 @@ test("the settings dialog saves a model and an effort, and an empty field clears
   assert.equal(improve.value, "");
 });
 
+test("the settings dialog shows one tab at a time, supports keyboard navigation, and keeps the active tab across refresh", async (t) => {
+  const ui = await dashboard(t);
+  await ui.get("open-settings").fire("click");
+  const form = ui.get("settings-body").querySelector("form");
+  const tablist = form.querySelector(".settings-tabs");
+  const tabs = form.querySelectorAll(".settings-tab");
+  const panels = form.querySelectorAll(".settings-panel");
+  assert.equal(tablist.role, "tablist");
+  assert.deepEqual(tabs.map((tab: Json) => tab.textContent), ["Workers", "Lever", "Models", "Effort"]);
+  assert.equal(panels.length, 4);
+  for (const [index, tab] of tabs.entries()) {
+    assert.equal(tab.role, "tab");
+    assert.equal(panels[index].role, "tabpanel");
+    assert.equal(tab["aria-controls"], panels[index].id);
+    assert.equal(panels[index]["aria-labelledby"], tab.id);
+  }
+  const controlsInPanels = panels.flatMap((panel: Json) => [...panel.querySelectorAll("input"), ...panel.querySelectorAll("select")]);
+  const allControls = [...form.querySelectorAll("input"), ...form.querySelectorAll("select")];
+  assert.equal(controlsInPanels.length, allControls.length, "Every setting belongs to exactly one tab panel.");
+  assert.equal(new Set(controlsInPanels).size, allControls.length);
+  const checkActive = (expected: number) => {
+    assert.deepEqual(tabs.map((tab: Json) => tab["aria-selected"]), tabs.map((_: Json, i: number) => String(i === expected)));
+    assert.deepEqual(tabs.map((tab: Json) => tab.tabindex), tabs.map((_: Json, i: number) => (i === expected ? "0" : "-1")));
+    assert.deepEqual(panels.map((panel: Json) => panel.hidden), panels.map((_: Json, i: number) => i !== expected));
+  };
+  checkActive(0);
+  await tabs[0].fire("keydown", { key: "ArrowRight" });
+  checkActive(1);
+  assert.equal(ui.document.activeElement, tabs[1]);
+  await tabs[1].fire("keydown", { key: "End" });
+  checkActive(3);
+  assert.equal(ui.document.activeElement, tabs[3]);
+  await tabs[3].fire("keydown", { key: "ArrowRight" });
+  checkActive(0);
+  await tabs[0].fire("keydown", { key: "ArrowLeft" });
+  checkActive(3);
+  await tabs[3].fire("keydown", { key: "Home" });
+  checkActive(0);
+  await tabs[2].fire("click");
+  checkActive(2);
+  await ui.run("refresh()");
+  checkActive(2);
+  await ui.get("close-settings").fire("click");
+  await ui.get("open-settings").fire("click");
+  const reopened = ui.get("settings-body").querySelector("form");
+  const reopenedTabs = reopened.querySelectorAll(".settings-tab");
+  const reopenedPanels = reopened.querySelectorAll(".settings-panel");
+  assert.equal(reopenedTabs[2]["aria-selected"], "true", "Reopening Settings keeps the active tab.");
+  assert.equal(reopenedPanels[2].hidden, false);
+  assert.equal(ui.document.activeElement, reopenedPanels[2].querySelector("input"));
+  const budget = reopenedPanels[0].querySelector("input");
+  budget.value = "0";
+  await reopened.fire("submit");
+  assert.equal(reopenedTabs[0]["aria-selected"], "true", "A validation error switches to the tab of the invalid field.");
+  assert.equal(reopenedPanels[0].hidden, false);
+  assert.equal(ui.document.activeElement, budget);
+});
+
 test("the delegate-always rule is present in the agent, skill, and plugin rules", () => {
   const plugin = join(import.meta.dirname, "..", "..");
   for (const file of [

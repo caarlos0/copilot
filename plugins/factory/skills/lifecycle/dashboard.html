@@ -187,8 +187,16 @@
       .icon-button { display: inline-flex; flex: none; align-items: center; justify-content: center;
         width: 32px; height: 32px; padding: 0; line-height: 1; }
       .icon-button svg { display: block; }
-      .settings-form h3 { margin: 24px 0 4px; padding-top: 16px; border-top: 1px solid var(--border); font-size: 14px; }
-      .settings-form h3:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+      .settings-tabs { display: flex; gap: 4px; margin: 0 0 16px; box-shadow: inset 0 -1px 0 var(--border); overflow-x: auto; }
+      .settings-tab { flex: none; padding: 8px 12px; border: 0; border-bottom: 2px solid transparent;
+        border-radius: 6px 6px 0 0; background: transparent; color: var(--fg-muted); font-weight: 500; white-space: nowrap; }
+      .settings-tab:hover:not(:disabled) { color: var(--fg); background: var(--btn-hover); }
+      .settings-tab:active:not(:disabled) { transform: none; }
+      .settings-tab[aria-selected="true"] { color: var(--fg); font-weight: 600; border-bottom-color: var(--accent);
+        background: transparent; }
+      .settings-tab:focus-visible { outline-offset: -2px; }
+      .settings-panel[hidden] { display: none; }
+      .settings-panel > p.muted:first-child { margin-top: 0; }
       .settings-form input { display: block; width: 100%; margin-top: 4px; padding: 5px 12px; background: var(--bg); font-weight: 400; }
       .settings-form label { margin-top: 12px; }
       .settings-form p.muted { margin: 4px 0 12px; }
@@ -1248,7 +1256,7 @@
         const form = settingsForm();
         document.getElementById("settings-body").replaceChildren(form);
         settingsDialog.showModal();
-        form.querySelector("input").focus();
+        form.focusActive();
       }
 
       const paletteInput = document.getElementById("palette-input");
@@ -1391,28 +1399,33 @@
         investigation: "Investigation", implementation: "Implementation", review: "Review", backlog: "Find work", improve: "Improve",
       };
       const modelSuggestions = ["claude-sonnet-5.5", "claude-opus-5.5", "claude-haiku-5.5", "gpt-6.2-sol", "gemini-4-neon"];
+      const settingTabs = [
+        { id: "workers", label: "Workers",
+          note: "The factory reads these values at its next check. The factory does not start a worker above a limit. A lower limit does not stop a running worker." },
+        { id: "lever", label: "Lever",
+          note: "These values are limits only. They can lower the level that Lever selects. They cannot raise it. They give no permission." },
+        { id: "models", label: "Models",
+          note: "The factory starts a worker with copilot --model MODEL when you set a model. If a model is empty, the worker uses your default model. A new value does not change a running worker." },
+        { id: "efforts", label: "Effort",
+          note: "The factory starts a worker with copilot --reasoning-effort LEVEL when you set a level. If a level is empty, the worker uses your default. A new value does not change a running worker." },
+      ];
+      let settingsTab = settingTabs[0].id;
       const settingFields = [
-        { section: "budget", heading: true, label: "Maximum workers that run at the same time", blank: "No limit", min: 1, max: maxParallelWorkers },
-        { section: "limits", key: "investigation", label: "Investigation workers", min: 1, max: maxRoleLimit },
-        { section: "limits", key: "implementation", label: "Implementation workers", min: 1, max: maxRoleLimit },
-        { section: "lever", key: "spend", heading: true, label: "Spend limit", choices: leverSpends, levels: spendTiers,
+        { tab: "workers", section: "budget", label: "Maximum workers that run at the same time", blank: "No limit", min: 1, max: maxParallelWorkers },
+        { tab: "workers", section: "limits", key: "investigation", label: "Investigation workers", min: 1, max: maxRoleLimit },
+        { tab: "workers", section: "limits", key: "implementation", label: "Implementation workers", min: 1, max: maxRoleLimit },
+        { tab: "lever", section: "lever", key: "spend", label: "Spend limit", choices: leverSpends, levels: spendTiers,
           none: "No limit. Lever selects the tier." },
-        { section: "lever", key: "autonomy_cap", label: "Autonomy limit", choices: leverAutonomyCaps, levels: autonomyLevels,
+        { tab: "lever", section: "lever", key: "autonomy_cap", label: "Autonomy limit", choices: leverAutonomyCaps, levels: autonomyLevels,
           none: "No limit. Lever selects the level." },
-        ...modelRoles.map((role, index) => ({
-          section: "models", key: role, heading: index === 0, label: `${roleNames[role]} worker model`, text: true,
+        ...modelRoles.map((role) => ({
+          tab: "models", section: "models", key: role, label: `${roleNames[role]} worker model`, text: true,
         })),
-        ...modelRoles.map((role, index) => ({
-          section: "efforts", key: role, heading: index === 0, label: `${roleNames[role]} worker reasoning effort`,
+        ...modelRoles.map((role) => ({
+          tab: "efforts", section: "efforts", key: role, label: `${roleNames[role]} worker reasoning effort`,
           choices: reasoningEfforts, empty: "User default",
         })),
       ];
-      const settingHeadings = {
-        budget: ["Workers", "The factory reads these values at its next check. The factory does not start a worker above a limit. A lower limit does not stop a running worker."],
-        lever: ["Lever", "These values are limits only. They can lower the level that Lever selects. They cannot raise it. They give no permission."],
-        models: ["Worker models", "The factory starts a worker with copilot --model MODEL when you set a model. If a model is empty, the worker uses your default model. A new value does not change a running worker."],
-        efforts: ["Reasoning effort", "The factory starts a worker with copilot --reasoning-effort LEVEL when you set a level. If a level is empty, the worker uses your default. A new value does not change a running worker."],
-      };
 
       function seenSettings(data) {
         const perRole = (values) => Object.fromEntries(modelRoles.map((role) => [role, values?.[role] ?? null]));
@@ -1456,6 +1469,51 @@
         const file = selection;
         let expected = seenSettings(snapshot);
         const form = element("form", null, "settings-form move-form");
+        form.noValidate = true;
+        const tablist = element("div", null, "settings-tabs");
+        tablist.setAttribute("role", "tablist");
+        tablist.setAttribute("aria-label", "Settings");
+        const tabButtons = new Map();
+        const panels = new Map();
+        const selectTab = (id, { focus = false } = {}) => {
+          settingsTab = panels.has(id) ? id : settingTabs[0].id;
+          for (const tab of settingTabs) {
+            const active = tab.id === settingsTab;
+            const button = tabButtons.get(tab.id);
+            button.setAttribute("aria-selected", String(active));
+            button.setAttribute("tabindex", active ? "0" : "-1");
+            panels.get(tab.id).hidden = !active;
+            if (active && focus) button.focus();
+          }
+        };
+        for (const [index, tab] of settingTabs.entries()) {
+          const button = element("button", tab.label, "settings-tab");
+          button.type = "button";
+          button.id = `settings-tab-${tab.id}`;
+          button.setAttribute("role", "tab");
+          button.setAttribute("aria-controls", `settings-panel-${tab.id}`);
+          button.addEventListener("click", () => selectTab(tab.id));
+          button.addEventListener("keydown", (event) => {
+            const next = {
+              ArrowRight: (index + 1) % settingTabs.length,
+              ArrowLeft: (index - 1 + settingTabs.length) % settingTabs.length,
+              Home: 0,
+              End: settingTabs.length - 1,
+            }[event.key];
+            if (next === undefined) return;
+            event.preventDefault();
+            selectTab(settingTabs[next].id, { focus: true });
+          });
+          tablist.append(button);
+          tabButtons.set(tab.id, button);
+          const tabpanel = element("div", null, "settings-panel");
+          tabpanel.id = `settings-panel-${tab.id}`;
+          tabpanel.setAttribute("role", "tabpanel");
+          tabpanel.setAttribute("aria-labelledby", button.id);
+          tabpanel.append(element("p", tab.note, "muted"));
+          if (tab.id === "lever") tabpanel.append(element("p", leverNow(snapshot), "muted"));
+          panels.set(tab.id, tabpanel);
+        }
         const suggestions = element("datalist");
         suggestions.id = "model-suggestions";
         suggestions.append(...modelSuggestions.map((name) => {
@@ -1464,15 +1522,11 @@
           return option;
         }));
         const fields = element("fieldset");
-        fields.append(suggestions);
+        fields.append(suggestions, ...panels.values());
         const controls = new Map();
         const initial = new Map();
         for (const field of settingFields) {
-          if (settingHeadings[field.section] && field.heading) {
-            const [title, note] = settingHeadings[field.section];
-            fields.append(element("h3", title), element("p", note, "muted"));
-            if (field.section === "lever") fields.append(element("p", leverNow(snapshot), "muted"));
-          }
+          const tabpanel = panels.get(field.tab);
           const label = element("label", field.label);
           const control = element(field.choices ? "select" : "input");
           control.name = field.key ?? field.section;
@@ -1500,11 +1554,11 @@
           controls.set(field, control);
           initial.set(field, control.value);
           label.append(control);
-          fields.append(label);
+          tabpanel.append(label);
           if (field.levels) {
             const hint = element("p", levelHint(field, control.value), "muted level-hint");
             control.addEventListener("change", () => { hint.textContent = levelHint(field, control.value); });
-            fields.append(hint);
+            tabpanel.append(hint);
           }
         }
         const error = element("p", null, "save-error");
@@ -1521,7 +1575,12 @@
         const actions = element("div", null, "controls");
         actions.append(reload, save);
         fields.append(status, error, actions);
-        form.append(fields);
+        form.append(tablist, fields);
+        selectTab(settingsTab);
+        form.focusActive = () => {
+          const active = panels.get(settingsTab);
+          (active.querySelector("input") ?? active.querySelector("select") ?? tabButtons.get(settingsTab)).focus();
+        };
         const changed = () => settingFields.filter((field) => controls.get(field).value !== initial.get(field));
         form.dirty = () => changed().length > 0;
         const failed = (cause, canReload = true) => {
@@ -1562,11 +1621,15 @@
             if (field.text) {
               value = raw.trim() || null;
               if (value && (/\s/.test(value) || value.length > maxModelLength)) {
+                selectTab(field.tab);
+                controls.get(field).focus();
                 return failed(new Error(`${field.label} must be a model name without spaces, at most ${maxModelLength} characters.`), false);
               }
             } else if (!field.choices) {
               value = raw === "" ? null : Number(raw);
               if (!Number.isInteger(value) || value < field.min || value > field.max) {
+                selectTab(field.tab);
+                controls.get(field).focus();
                 return failed(new Error(`${field.label} must be a whole number from ${field.min} to ${field.max}.`), false);
               }
             }
