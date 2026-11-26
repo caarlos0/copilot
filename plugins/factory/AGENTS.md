@@ -580,30 +580,39 @@ item, never types into its pane, never wakes on it, and reports `attention-stale
 once. Only the user answers, in the pane or with a click in the dashboard.
 
 `/api/factory` adds `attention`
-(oldest first; `id` (the request event), `session`, `kind`, `text`, `options`, `role`, `pane`, `task`, `at`)
+(oldest first; `id` (the request event), `session`, `kind`, `text`, `options`, `role`, `pane`, `task`, `title`, `worker`, `at`)
 from `openAttention`. The ETag covers it, so an item that appears or closes
 refreshes the browser even when the factory file does not change. The header has a
 badge with the count (hidden at 0). The page title gets a `(N) ` prefix. The badge
 opens the "Waiting for you" panel (`#attention`) in the right dock. The panel lists the oldest 20
-rows: age, kind, text, options, task and role. It does not show the pane ID or any Rex command, and
-there is no copy button. Rex registers a `rex` URL
+rows: age, kind, text, options, and one label line that says which session asks:
+`Task ID: title · Role ROLE · Worker NAME · Pane BLOCK`. `worker` is the `name` of the
+worker record that holds the session (else the label shows the session ID), and the label
+leaves out a task or pane that the item lacks. Every kind has this label. The panel shows no Rex
+command, and there is no copy button. Rex registers a `rex` URL
 scheme, but the app documents no pane-focus URL, so there is no `rex://` link.
 All text is data, set with `textContent`. The dashboard makes no sound or notification.
 
-Only an `ask-user` item with options gets one button per option. Every other item
-lists its options as text. The hook records `options`
+An `ask-user` item with options gets one button per option, and so does a `sandbox-bypass` item.
+Any other item lists its options as text. The hook records `options`
 only for an `ask_user` form with one enum field, so the index of a button is the row
-of the form. A click sends `POST /api/attention/answer?file=` with `{id, index}`
+of the form. No hook payload and no session log holds the rows of a permission prompt, because
+the CLI draws them from runtime state. So the hook always wrote `options: []` for
+`sandbox-bypass`, and the panel showed no buttons. `scanAttention` now gives every
+`sandbox-bypass` item the one option "Yes, run it outside the sandbox this once". The first
+row of a bypass prompt (command, read, or URL) is always "approve once", so Enter alone
+picks it. The rows after it (disable the sandbox for the session, grant the path, reject) depend on
+the host. A wrong key could grant a wider approval, so the panel offers none of them. The user answers
+those in the pane. A click sends `POST /api/attention/answer?file=` with `{id, index}`
 (same-origin JSON like the other writes). The server looks the item up among the
 pending items by `id`, so it refuses a prompt that closed or was replaced (409). It
 also refuses an item without options or without a plain block `pane`,
 a pane that no Rex session lists, and an index outside the options. Then it runs
 `rex --autostart=false send-key -s SESSION -b PANE down... enter` (`index` times Down, then
 Enter) with an argument array, never a shell. An `ask_user` form has no number keys. Down
-moves the highlight from the first row, and Enter submits it. Permission and sandbox-bypass
-prompts get no buttons. Their rows (for example "approve for the rest of the session")
-depend on runtime state that the hook cannot see, and a wrong digit could grant a wider approval.
-The row stays until the session log, the pane, or the clock resolves it. Its buttons stay
+moves the highlight from the first row, and Enter submits it. A bypass item has index 0 only,
+so it sends `enter`. A plain `permission` prompt gets no buttons: its second row can be
+"approve for the rest of the session". The row stays until the session log, the pane, or the clock resolves it. Its buttons stay
 disabled meanwhile, so one click sends one answer. The coordinator still never answers.
 
 The same panel lists proposed `improve` changes, oldest first, before the attention

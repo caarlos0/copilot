@@ -532,7 +532,7 @@
         <p id="ignored-empty" class="muted" hidden>The factory skipped nothing.</p>
       </div>
       <div id="attention-view" hidden>
-        <p id="attention-note" class="muted">Select an option to send it to the pane. Answer other prompts in their own pane.</p>
+        <p id="attention-note" class="muted">Select an option to send it to the pane. For any other choice, answer in the pane.</p>
         <ul id="attention-list"></ul>
         <p id="attention-empty" class="muted" hidden>No item waits for you.</p>
       </div>
@@ -2075,7 +2075,7 @@
 
       const attentionKinds = { permission: "Permission", "sandbox-bypass": "Sandbox bypass", "ask-user": "Question", other: "Other" };
       const attentionLimit = 20;
-      const attentionHelp = "Select an option to send it to the pane. Answer other prompts in their own pane.";
+      const attentionHelp = "Select an option to send it to the pane. For any other choice, answer in the pane.";
 
       // The async clipboard API needs a secure context; the LAN mode is plain HTTP.
       async function writeClipboard(value) {
@@ -2165,11 +2165,20 @@
         heading.append(element("h3", attentionKinds[item.kind] ?? item.kind), chips);
         node.append(heading, element("p", item.text, "attention-text"));
         if (item.options?.length) {
-          node.append(item.id && item.kind === "ask-user" ? answerButtons(item) : optionList(item.options));
+          node.append(item.id && (item.kind === "ask-user" || item.kind === "sandbox-bypass") ? answerButtons(item) : optionList(item.options));
         }
-        const meta = [item.task && `Task ${item.task}`, item.role].filter(Boolean).join(", ");
-        if (meta) node.append(element("p", meta, "muted"));
+        node.append(element("p", attentionLabel(item), "muted"));
         return node;
+      }
+
+      // Which session asks: the task, the role, the worker (its name, else the session ID) and the pane.
+      function attentionLabel(item) {
+        return [
+          item.task && `Task ${item.task}${item.title ? `: ${item.title}` : ""}`,
+          item.role && `Role ${item.role}`,
+          `Worker ${item.worker ?? item.session}`,
+          item.pane && `Pane ${item.pane}`,
+        ].filter(Boolean).join(" · ");
       }
 
       // One proposed change of an improve rule. The server records the click as improve.decided; the

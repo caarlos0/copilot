@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { emit, eventsFile, resolveFactory } from "./broker.ts";
+import type { Task } from "./factory-data.ts";
 import { readJSON } from "./state-dir.ts";
 
 type LogEvent = { type?: string; timestamp: string; data?: { toolName?: string; toolCallId?: string } };
@@ -33,6 +34,7 @@ export type AttentionItem = {
   options: string[];
   pane: string | null;
   title: string | null;
+  worker: string | null;
   rex_session?: string;
 };
 type ScanOptions = { now?: number; panes?: string[] | null };
@@ -45,6 +47,11 @@ const tailBytes = 256 * 1024;
 const maxTailBytes = 64 * 1024 * 1024;
 const lookBackMs = 60_000;
 const expireMs = 24 * 3_600_000;
+
+// No hook payload and no session log holds the rows of a sandbox-bypass prompt: the CLI draws
+// them from runtime state. Its first row is always "approve once" (the sole choice that a click
+// can send without a guess), so a bypass item has this one option.
+const bypassOptions = ["Yes, run it outside the sandbox this once"];
 
 // Rex may record short IDs; a short ID is the tail of the full one.
 const bare = (id: string) => id.replace(/^\w+:/, "");
@@ -184,7 +191,14 @@ export async function scanAttention(
   }
   if (requests.size === 0) return { open: [], resolved: [] };
 
-  const titles = new Map<string | null, string>((await readJSON(file))?.tasks?.map((task: { id: string; title: string }) => [task.id, task.title]));
+  const tasks: Task[] = (await readJSON(file))?.tasks ?? [];
+  const titles = new Map<string | null, string>(tasks.map((task) => [task.id, task.title]));
+  const workerNames = new Map<string, string>();
+  for (const task of tasks) {
+    for (const worker of Object.values(task.workers ?? {})) {
+      if (worker?.session && worker.name) workerNames.set(worker.session, worker.name);
+    }
+  }
   const firstAsked = new Map<string, number>();
   for (const { at, data } of requests.values()) {
     firstAsked.set(data.session, Math.min(firstAsked.get(data.session) ?? Infinity, Date.parse(at)));
@@ -196,7 +210,12 @@ export async function scanAttention(
   for (const event of requests.values()) {
     const { session, kind, text: message, role = null, pane = null, options = [] } = event.data;
     const task = event.task ?? event.data.task ?? null;
-    const item: AttentionItem = { id: event.id, at: event.at, session, task, role, kind, text: message, options, pane, title: titles.get(task) ?? null };
+    const item: AttentionItem = {
+      id: event.id, at: event.at, session, task, role, kind, text: message, pane,
+      options: kind === "sandbox-bypass" ? bypassOptions : options,
+      title: titles.get(task) ?? null,
+      worker: workerNames.get(session) ?? null,
+    };
     const at = Date.parse(event.at);
     if (!answers.has(session)) answers.set(session, await answerTimes(session, firstAsked.get(session)!));
 
@@ -236,15 +255,16 @@ export async function resolveAttention(file: string, { source, ...options }: Sca
 
 const fail = (status: number, message: string) => Object.assign(new Error(message), { status });
 
-// The keys that pick option `index` of an ask_user form with one enum field. It has no number
-// keys: Down moves the highlight from the first option and Enter submits the form.
+// The keys that pick option `index`. An ask_user form with one enum field has no number keys:
+// Down moves the highlight from the first option and Enter submits the form. A sandbox-bypass
+// item has one option, its first row, so Enter alone picks it.
 const answerKeys = (index: number) => [...Array(index).fill("down"), "enter"];
 
 // Types the user's click into the item's pane. The caller has checked that the item is pending.
 // Rex gets an argument array and no shell; the pane must be a plain block ID that Rex still lists.
-// Permission prompts name no options, so nothing is sent to them.
+// Only ask-user and sandbox-bypass items have options. Other permission prompts get nothing.
 export async function sendAnswer(item: { kind?: string; options?: string[]; pane?: unknown }, index: number) {
-  if (item.kind !== "ask-user" || !item.options?.length) {
+  if ((item.kind !== "ask-user" && item.kind !== "sandbox-bypass") || !item.options?.length) {
     throw fail(409, "This prompt has no options to pick here. Answer it in its pane.");
   }
   if (!Number.isSafeInteger(index) || index < 0 || index >= item.options.length) {

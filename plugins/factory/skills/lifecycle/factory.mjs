@@ -3023,7 +3023,15 @@ async function scanAttention(file, { now = Date.now(), panes } = {}) {
   }
   if (requests.size === 0)
     return { open: [], resolved: [] };
-  const titles = new Map((await readJSON(file))?.tasks?.map((task) => [task.id, task.title]));
+  const tasks = (await readJSON(file))?.tasks ?? [];
+  const titles = new Map(tasks.map((task) => [task.id, task.title]));
+  const workerNames = new Map;
+  for (const task of tasks) {
+    for (const worker of Object.values(task.workers ?? {})) {
+      if (worker?.session && worker.name)
+        workerNames.set(worker.session, worker.name);
+    }
+  }
   const firstAsked = new Map;
   for (const { at, data } of requests.values()) {
     firstAsked.set(data.session, Math.min(firstAsked.get(data.session) ?? Infinity, Date.parse(at)));
@@ -3035,7 +3043,19 @@ async function scanAttention(file, { now = Date.now(), panes } = {}) {
   for (const event of requests.values()) {
     const { session, kind, text: message, role = null, pane = null, options = [] } = event.data;
     const task = event.task ?? event.data.task ?? null;
-    const item = { id: event.id, at: event.at, session, task, role, kind, text: message, options, pane, title: titles.get(task) ?? null };
+    const item = {
+      id: event.id,
+      at: event.at,
+      session,
+      task,
+      role,
+      kind,
+      text: message,
+      pane,
+      options: kind === "sandbox-bypass" ? bypassOptions : options,
+      title: titles.get(task) ?? null,
+      worker: workerNames.get(session) ?? null
+    };
     const at = Date.parse(event.at);
     if (!answers.has(session))
       answers.set(session, await answerTimes(session, firstAsked.get(session)));
@@ -3073,7 +3093,7 @@ async function resolveAttention(file, { source, ...options }) {
   return scan;
 }
 async function sendAnswer(item, index) {
-  if (item.kind !== "ask-user" || !item.options?.length) {
+  if (item.kind !== "ask-user" && item.kind !== "sandbox-bypass" || !item.options?.length) {
     throw fail(409, "This prompt has no options to pick here. Answer it in its pane.");
   }
   if (!Number.isSafeInteger(index) || index < 0 || index >= item.options.length) {
@@ -3098,7 +3118,7 @@ async function sendAnswer(item, index) {
     throw fail(502, `Rex could not send the answer: ${reason}`);
   }
 }
-var errorCode2 = (error) => error.code, run, tailBytes, maxTailBytes, lookBackMs = 60000, expireMs, bare = (id) => id.replace(/^\w+:/, ""), sameId = (a, b) => bare(a).endsWith(bare(b)) || bare(b).endsWith(bare(a)), sessionState = () => process.env.FACTORY_SESSION_STATE ?? join5(homedir3(), ".copilot", "session-state"), rexLines = async (prefix, args) => {
+var errorCode2 = (error) => error.code, run, tailBytes, maxTailBytes, lookBackMs = 60000, expireMs, bypassOptions, bare = (id) => id.replace(/^\w+:/, ""), sameId = (a, b) => bare(a).endsWith(bare(b)) || bare(b).endsWith(bare(a)), sessionState = () => process.env.FACTORY_SESSION_STATE ?? join5(homedir3(), ".copilot", "session-state"), rexLines = async (prefix, args) => {
   const { stdout } = await run("rex", ["--autostart=false", ...args], { timeout: 1e4 });
   return stdout.split(`
 `).map((line) => line.trim()).filter((line) => line.startsWith(prefix));
@@ -3110,6 +3130,7 @@ var init_attention = __esm(() => {
   tailBytes = 256 * 1024;
   maxTailBytes = 64 * 1024 * 1024;
   expireMs = 24 * 3600000;
+  bypassOptions = ["Yes, run it outside the sandbox this once"];
 });
 
 // plugins/factory/skills/lifecycle/gate.ts
@@ -4141,7 +4162,7 @@ An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
     return briefs;
   }
   async function factoryView(entry) {
-    const attention = (await pendingAttention(entry.target)).map(({ id, session, kind, text, options, role, pane, rex_session, task, at }) => ({ id, session, kind, text, options, role, pane, rex_session: rex_session ?? null, task, at })).sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+    const attention = (await pendingAttention(entry.target)).map(({ id, session, kind, text, options, role, pane, rex_session, task, title, worker, at }) => ({ id, session, kind, text, options, role, pane, rex_session: rex_session ?? null, task, title, worker, at })).sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
     const proposals = await openProposals(entry.target);
     const data = await readFactory(entry);
     const stops = await recentStops(entry.target, data);

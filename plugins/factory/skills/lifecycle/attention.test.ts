@@ -18,7 +18,9 @@ async function setup(t: TestContext) {
   process.env.FACTORY_SESSION_STATE = state;
   t.after(() => delete process.env.FACTORY_SESSION_STATE);
   const file = join(directory, "owner.repo-factory.json");
-  await writeFile(file, JSON.stringify({ tasks: [{ id: "fix-it", title: "Fix the thing" }] }));
+  await writeFile(file, JSON.stringify({
+    tasks: [{ id: "fix-it", title: "Fix the thing", workers: { implementation: { status: "running", session: "s1", name: "Implement fix-it: the thing" } } }],
+  }));
   const { scanAttention, openAttention, resolveAttention } = await import("./attention.ts");
 
   let n = 0;
@@ -47,7 +49,7 @@ async function setup(t: TestContext) {
 
 test("lists a request with no resolved event after it, with the task title", async (t) => {
   const f = await setup(t);
-  await f.request("s1", { options: ["a", "b"] });
+  await f.request("s1", { kind: "ask-user", options: ["a", "b"] });
   await f.request("s2");
   await f.log("attention.resolved", { session: "s2" }, after);
   await f.request("s2", { text: "second" }, after);
@@ -57,9 +59,33 @@ test("lists a request with no resolved event after it, with the task title", asy
   const open = await f.openAttention(f.file, { now, panes: null });
   assert.deepEqual(open.map((item) => [item.session, item.text]), [["s1", "Run command: ls"], ["s2", "second"]]);
   assert.deepEqual(open[0], {
-    id: "e1", at: requestedAt, session: "s1", task: "fix-it", role: "implementation", kind: "sandbox-bypass",
-    text: "Run command: ls", options: ["a", "b"], pane: "block:aaaa", title: "Fix the thing",
+    id: "e1", at: requestedAt, session: "s1", task: "fix-it", role: "implementation", kind: "ask-user",
+    text: "Run command: ls", options: ["a", "b"], pane: "block:aaaa", title: "Fix the thing", worker: "Implement fix-it: the thing",
   });
+  assert.equal(open[1].worker, null, "A session that no worker record names has no worker name.");
+});
+
+test("a sandbox-bypass item has the approve-once option, and a click sends Enter only", async (t) => {
+  const f = await setup(t);
+  await f.request("s1", { kind: "sandbox-bypass", options: [] });
+  await f.request("s2", { kind: "permission" });
+  const [bypass, permission] = await f.openAttention(f.file, { now, panes: null });
+  assert.deepEqual(bypass.options, ["Yes, run it outside the sandbox this once"]);
+  assert.deepEqual(permission.options, []);
+
+  const { sendAnswer } = await import("./attention.ts");
+  const log = join(f.directory, "args");
+  await f.fakeRex(`case "$*" in
+  "ls -q --short=false") printf 'session:one\\n' ;;
+  "block ls -s session:one -q --short=false") printf 'block:01a1f4e8-4bb0-72d2-bff2-25420482aad9\\n' ;;
+  send-key*) echo "$*" >> "${log}" ;;
+  *) echo "Error: unexpected arguments: $*" >&2; exit 1 ;;
+esac`);
+  const pane = "block:01a1f4e8-4bb0-72d2-bff2-25420482aad9";
+  await sendAnswer({ ...bypass, pane }, 0);
+  assert.equal(await readFile(log, "utf8"), `send-key -s session:one -b ${pane} enter\n`);
+  await assert.rejects(sendAnswer({ ...bypass, pane }, 1), { status: 400 });
+  await assert.rejects(sendAnswer({ ...permission, pane }, 0), { status: 409, message: /no options/ });
 });
 
 test("task events, blank lines and broken lines between attention events change nothing", async (t) => {

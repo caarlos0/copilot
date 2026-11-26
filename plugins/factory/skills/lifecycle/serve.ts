@@ -284,8 +284,8 @@ An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
   // clear without waiting for a reconcile run. Open improve proposals ride along as `proposals`, recorded stops as `stops`, and per task usage from the session logs as `usage`, and the existing worker briefs as `briefs`.
   async function factoryView(entry: Entry) {
     const attention = (await pendingAttention(entry.target))
-      .map(({ id, session, kind, text, options, role, pane, rex_session, task, at }) =>
-        ({ id, session, kind, text, options, role, pane, rex_session: rex_session ?? null, task, at }))
+      .map(({ id, session, kind, text, options, role, pane, rex_session, task, title, worker, at }) =>
+        ({ id, session, kind, text, options, role, pane, rex_session: rex_session ?? null, task, title, worker, at }))
       .sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
     const proposals = await openProposals(entry.target);
     const data = await readFactory(entry);

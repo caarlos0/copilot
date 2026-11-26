@@ -2455,7 +2455,7 @@ test("the factory payload lists pending attention oldest first, and its tag foll
   assert.deepEqual(attention.map((item: Json) => item.session), ["s-old", "s-new"]);
   assert.deepEqual(attention[1], {
     id: "e1", session: "s-new", kind: "ask-user", text: "Pick one", options: ["a", "b"], role: "implementation",
-    pane: null, rex_session: null, task: "issue-5", at: attention[1].at,
+    pane: null, rex_session: null, task: "issue-5", title: "Docs build fails on a clean checkout", worker: null, at: attention[1].at,
   });
   assert.equal((await read(tag)).status, 304);
 
@@ -2603,7 +2603,7 @@ esac
   assert.equal(await keys(), `send-key -s session:two -b ${live} down down enter\n`, "A refused request sends no key.");
 });
 
-test("an ask_user prompt shows its options as buttons that post the pick, and the others stay copy-only", async (t) => {
+test("ask_user and sandbox-bypass prompts show their options as buttons that post the pick, and permission stays copy-only", async (t) => {
   const posts: Json[] = [];
   let reply: Json = { status: 409, body: { error: "That prompt is no longer waiting." } };
   const ui = await dashboard(t, {
@@ -2613,18 +2613,18 @@ test("an ask_user prompt shows its options as buttons that post the pick, and th
       return new Response(JSON.stringify(reply.body), { status: reply.status });
     },
   });
-  const base = { role: "implementation", pane: "block:p1", task: null, at: "2026-05-01T12:00:00Z" };
+  const base = { role: "implementation", pane: "block:p1", task: null, title: null, worker: null, at: "2026-05-01T12:00:00Z" };
   const items = [
     { ...base, id: "e1", session: "s1", kind: "ask-user", text: "Pick one", options: ["red", "green"] },
-    { ...base, id: "e2", session: "s2", kind: "sandbox-bypass", text: "Run ls", options: ["yes", "no"] },
+    { ...base, id: "e2", session: "s2", kind: "sandbox-bypass", text: "Run ls", options: ["Yes, once"] },
     { ...base, id: "e3", session: "s3", kind: "permission", text: "Run rm", options: [] },
   ];
   ui.run(`load({ ...snapshot, attention: ${JSON.stringify(items)} }, lastSource)`);
   await ui.get("attention-badge").fire("click");
   const [ask, bypass, permission] = ui.get("attention-list").children;
-  assert.equal(bypass.querySelectorAll(".attention-answer").length, 0, "Sandbox bypass options are text.");
   assert.equal(permission.querySelectorAll(".attention-answer").length, 0);
-  assert.match(bypass.textContent, /yes.*no/);
+  const [once] = bypass.querySelectorAll(".attention-answer");
+  assert.equal(once.textContent, "Yes, once");
   const [red, green] = ask.querySelectorAll(".attention-answer");
   assert.deepEqual([red.textContent, green.textContent], ["red", "green"]);
   assert.equal(red.type, "button");
@@ -2639,6 +2639,24 @@ test("an ask_user prompt shows its options as buttons that post the pick, and th
   assert.deepEqual(posts.at(-1)!.body, { id: "e1", index: 0 });
   assert.match(ask.textContent, /The page sent "red"\. Wait for the prompt to close\./);
   assert.equal(red.disabled && green.disabled, true, "A sent answer is not sent twice.");
+
+  await once.fire("click");
+  assert.deepEqual(posts.at(-1)!.body, { id: "e2", index: 0 });
+});
+
+test("every attention row says which session asks: task, role, worker or session ID, and pane", async (t) => {
+  const ui = await dashboard(t);
+  const base = { role: "implementation", at: "2026-05-01T12:00:00Z", options: [], text: "x" };
+  const items = ["permission", "sandbox-bypass", "ask-user"].map((kind, n) => ({
+    ...base, id: `e${n}`, kind, session: `session-${n}`, task: "issue-5", title: "Fix it", worker: "Implement issue-5: fix it", pane: `block:p${n}`,
+  })).concat({ ...base, id: "e9", kind: "permission", session: "11111111-2222", task: null as any, title: null as any, worker: null as any, role: "coordinator", pane: null as any });
+  ui.run(`load({ ...snapshot, attention: ${JSON.stringify(items)} }, lastSource)`);
+  await ui.get("attention-badge").fire("click");
+  const rows = ui.get("attention-list").children;
+  for (const [n, row] of rows.slice(0, 3).entries()) {
+    assert.match(row.textContent, new RegExp(`Task issue-5: Fix it · Role implementation · Worker Implement issue-5: fix it · Pane block:p${n}`));
+  }
+  assert.match(rows[3].textContent, /Role coordinator · Worker 11111111-2222$/);
 });
 
 test("the badge, the page title and the waiting list show pending attention as data", async (t) => {
@@ -2654,7 +2672,7 @@ test("the badge, the page title and the waiting list show pending attention as d
     pane: `block:p${n}`, rex_session: n === 0 ? "session:s0" : null, task: "issue-5", at: `2026-05-01T12:0${n % 10}:00Z`, ...extra,
   });
   const show = (items: Json[]) => ui.run(`load({ ...snapshot, attention: ${JSON.stringify(items)} }, lastSource)`);
-  show([item(0, { options: ["yes", "no"] }), item(1, { pane: "block:x; rm -rf ~" })]);
+  show([item(0, { options: ["Yes, once"] }), item(1, { pane: "block:x; rm -rf ~" })]);
   assert.equal(badge.hidden, false);
   assert.equal(ui.get("attention-count").textContent, "2");
   assert.equal(ui.document.title, "(2) owner/repo - Factory");
@@ -2665,12 +2683,11 @@ test("the badge, the page title and the waiting list show pending attention as d
   assert.equal(ui.get("task-view").hidden, true);
   assert.equal(ui.get("detail-title").textContent, "Waiting for you2");
   const [first, second] = ui.get("attention-list").children;
-  assert.match(first.textContent, /Sandbox bypass.*10m.*Run command: <b>rm<\/b> 0.*yes.*no.*issue-5, implementation/);
+  assert.match(first.textContent, /Sandbox bypass.*10m.*Run command: <b>rm<\/b> 0.*Yes, once.*Task issue-5 · Role implementation · Worker s0 · Pane block:p0/);
+  assert.match(second.textContent, /Pane block:x; rm -rf ~/, "The pane ID is text.");
   for (const row of [first, second]) {
     assert.equal(row.querySelector("code"), null, "No Rex command is shown.");
-    assert.equal(row.querySelector("button"), null, "No copy button.");
     assert.equal(row.textContent.includes("rex focus"), false);
-    assert.equal(row.textContent.includes("Pane:"), false);
   }
 
   show(Array.from({ length: 23 }, (_, n) => item(n, { pane: null })));
