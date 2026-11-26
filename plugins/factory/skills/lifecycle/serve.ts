@@ -16,7 +16,7 @@ import { ConflictError } from "./conflict.ts";
 import { update } from "./tasks.ts";
 import { decideProposal, scanProposals } from "./proposals.ts";
 import type { Proposal } from "./proposals.ts";
-import { sessionStateDirectory } from "./sessions.ts";
+import { registryFile, sessionStateDirectory } from "./sessions.ts";
 import { causeTaskId, causeTaskValues, dismissStop, isStopDismissed, scanStops } from "./stops.ts";
 import { factoryUsage } from "./usage.ts";
 import { candidates, stateDirectories } from "./state-dir.ts";
@@ -290,7 +290,10 @@ An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
     const proposals = await openProposals(entry.target);
     const data = await readFactory(entry);
     const stops = await recentStops(entry.target, data);
-    const usage = await factoryUsage(data, sessionStateDirectory());
+    const usage = await factoryUsage(data, sessionStateDirectory(), {
+      registry: registryFile(entry.target),
+      scanCacheMs: 5_000,
+    });
     const briefs = await taskBriefs(entry.file, data);
     const digest = createHash("sha1").update(JSON.stringify([attention, proposals, stops, usage, briefs])).digest("base64url");
     return {

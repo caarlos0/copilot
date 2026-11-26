@@ -11,10 +11,10 @@ import {
   modelRoles, operatorOutcomes, outcomes, parseBlocker, resourceId, sharesWork, sortReferences, validate, validateEfforts,
   validateModels,
 } from "./factory-data.ts";
-import { findSessions, recordSessions, registryFile, sessionID, sessionStateDirectory } from "./sessions.ts";
+import { readSessions, recordSessions, registryFile, resolveSessions, sessionID, sessionStateDirectory, workerCwds, workerUpperBound } from "./sessions.ts";
 import { alive } from "./state-dir.ts";
 import type { Factory, Rule, Task, Worker } from "./factory-data.ts";
-import type { SessionEntry } from "./sessions.ts";
+import type { SessionEntry, SessionTarget } from "./sessions.ts";
 
 // Command-line values are strings, booleans, or missing; the writer checks each one where it uses it.
 type Values = Record<string, any>;
@@ -226,12 +226,13 @@ function taskPatch(task: Task, values: Values) {
 }
 
 // A running write with a new pane or window is a relaunch: the stored session and summary belong to the old worker.
-function dropRelaunched(task: Task, patch: Record<string, any>) {
+function dropRelaunched(task: Task, patch: Record<string, any>, track: Track) {
   for (const [role, worker] of Object.entries<any>(patch.workers ?? {})) {
     const stored: any = (task.workers as Record<string, Worker | null>)?.[role];
     if (worker?.status !== "running" || !isObject(stored)) continue;
     if (["pane", "window"].some((key) => stored[key] != null && worker[key] !== undefined && worker[key] !== stored[key])) {
-      for (const key of ["session", "summary", "summary_at"]) delete stored[key];
+      track(stored.session, role, { task: task.id });
+      for (const key of ["session", "summary", "summary_at", "launched_at", "closed_at", "session_scan"]) delete stored[key];
     }
   }
 }
@@ -481,7 +482,7 @@ async function writeFactory(file: string, values: Values, operator: boolean, sou
     }
     const patch = taskPatch(task, values);
     checkInvestigation(patch, task.state);
-    dropRelaunched(task, patch);
+    dropRelaunched(task, patch, track);
     task = merge(task, { ...patch, updated_at: at, revision: revision + 1 });
     if (before.state !== "resolved" && task.state === "resolved") {
       for (const [role, worker] of Object.entries(task.workers ?? {})) {
@@ -519,7 +520,7 @@ async function writeFactory(file: string, values: Values, operator: boolean, sou
   }
   current.tasks = tasks;
   validate(current);
-  await locateSessions(current, previous, launches, now, track);
+  await locateSessions(file, current, previous, launches, rootPatch.updated_at, sessions, operator, track);
   if (values.budget !== undefined) {
     events.push({ type: "budget.updated", data: { max_parallel_workers: current.budget!.max_parallel_workers } });
   }
@@ -552,9 +553,10 @@ async function writeFactory(file: string, values: Values, operator: boolean, sou
     throw new ConflictError("The factory changed during the update. Read it again and reconcile. Then try again.");
   }
   // Archive first: a retry upserts by ID, so a failure never loses a task.
+  // Write the factory before appending to the registry so a failed write never leaks orphan IDs.
   if (stale.length) await saveArchive(directory, current.project, stale);
-  await recordSessions(registryFile(file), sessions);
   await writeFileAtomic(file, `${JSON.stringify(current, null, 2)}\n`, { mode: 0o600 });
+  await recordSessions(registryFile(file), sessions);
   await announce(file, source, events);
   if (archived) {
     try {
@@ -566,38 +568,138 @@ async function writeFactory(file: string, values: Values, operator: boolean, sou
   return current;
 }
 
-// A running worker without a session gets the ID of the one session started
-// in its worktree (or in the repo for one-shot workers) since it launched.
-// Sessions only accumulate, so two or more matches stay ambiguous: the scan is
-// recorded in `session_scan` and skipped until the next launch clears it.
-async function locateSessions(current: Factory, previous: Factory, launches: Set<string>, now: string, track: Track) {
+const launchLookbackMs = 10 * 60 * 1000;
+
+// Compatibility lookback so a session started moments before `write` is caught,
+// without pulling in hours or days of idle history as the launch anchor.
+function launchAnchor(beforeAt: string | undefined, now: string) {
+  const nowMs = Date.parse(now);
+  const beforeMs = beforeAt ? Date.parse(beforeAt) : Number.NaN;
+  if (!Number.isFinite(beforeMs) || beforeMs > nowMs) return now;
+  return new Date(Math.max(beforeMs, nowMs - launchLookbackMs)).toISOString();
+}
+
+// An anchored worker without a valid session gets the single matching Copilot
+// session started since its launch. Matching runs for running and closed workers,
+// checks name, project, and role-appropriate directories, and skips claimed IDs.
+// Ambiguous unnamed launches set `session_scan: "ambiguous"` until relaunched.
+async function locateSessions(
+  file: string,
+  current: Factory,
+  previous: Factory,
+  launches: Set<string>,
+  now: string,
+  pending: readonly SessionEntry[],
+  operator: boolean,
+  track: Track,
+) {
   const directory = sessionStateDirectory();
-  const find = async (worker: Worker | null | undefined, key: string, anchor: string, cwd: string, role: string, owner: Owner) => {
-    if (worker?.status !== "running" || worker.session) return;
-    if (launches.has(key)) {
-      worker.launched_at = anchor;
-      delete worker.session_scan;
+  const fallbackCwd = operator ? undefined : process.cwd();
+  const claimed = new Set<string>();
+  const collectClaimed = (factory: Factory) => {
+    for (const task of factory.tasks ?? []) {
+      for (const worker of Object.values(task.workers ?? {})) {
+        const id = sessionID(worker?.session);
+        if (id) claimed.add(id);
+      }
     }
-    if (!worker.launched_at || worker.session_scan) return;
-    const found = await findSessions(directory, cwd, worker.launched_at);
-    if (found.length === 1) {
-      worker.session = found[0];
-      track(found[0], role, owner);
-    } else if (found.length > 1) {
-      worker.session_scan = "ambiguous";
+    for (const rule of factory.rules ?? []) {
+      const id = sessionID(rule.worker?.session);
+      if (id) claimed.add(id);
     }
   };
+  collectClaimed(current);
+  collectClaimed(previous);
+  for (const item of pending) claimed.add(item.id);
+
+  type Entry = { worker: Worker; role: string; owner: Owner; target: SessionTarget };
+  const entries: Entry[] = [];
+  const consider = (
+    worker: Worker | null | undefined,
+    beforeWorker: Worker | null | undefined,
+    key: string,
+    anchor: string,
+    cwds: string[],
+    role: string,
+    owner: Owner,
+    history: readonly { state?: string; at: string }[],
+  ) => {
+    if (!worker || sessionID(worker.session) !== null) return;
+    if (launches.has(key)) {
+      if (!worker.launched_at || beforeWorker?.status !== "running") {
+        worker.launched_at = anchor;
+      }
+      delete worker.closed_at;
+      delete worker.session_scan;
+    }
+    if (!worker.launched_at) return;
+    if (worker.status === "closed") {
+      if (!worker.closed_at && beforeWorker?.status !== "closed") worker.closed_at = now;
+    } else {
+      delete worker.closed_at;
+    }
+    const since = Date.parse(worker.launched_at);
+    if (Number.isNaN(since)) return;
+    const until = workerUpperBound(worker.status, worker.closed_at, role, history, since);
+    if (until === null) return;
+    const frozen = worker.session_scan === "ambiguous" && !worker.name;
+    entries.push({
+      worker,
+      role,
+      owner,
+      target: { key, role, owner, cwds, project: current.project, name: worker.name ?? undefined, since, until, frozen },
+    });
+  };
+
   for (const task of current.tasks) {
     const before = previous.tasks?.find((item) => item.id === task.id);
+    const anchor = launchAnchor(before?.updated_at, now);
     for (const [role, worker] of Object.entries(task.workers ?? {})) {
-      await find(worker, `${task.id}:${role}`, before?.updated_at ?? now,
-        task.worktree?.path ?? process.cwd(), role, { task: task.id });
+      consider(
+        worker,
+        before?.workers?.[role as keyof Task["workers"]],
+        `${task.id}:${role}`,
+        anchor,
+        workerCwds(role, task.worktree?.path, fallbackCwd),
+        role,
+        { task: task.id },
+        task.history,
+      );
     }
   }
   for (const rule of current.rules ?? []) {
     const before = previous.rules?.find((item) => item.id === rule.id);
-    await find(rule.worker, `rule:${rule.id}`, before?.last_run_at ?? previous.updated_at ?? now,
-      process.cwd(), rule.kind === "improve" ? "improver" : "producer", { rule: rule.id });
+    const anchor = launchAnchor(before?.last_run_at ?? previous.updated_at, now);
+    consider(
+      rule.worker,
+      before?.worker,
+      `rule:${rule.id}`,
+      anchor,
+      fallbackCwd ? [fallbackCwd] : [],
+      rule.kind === "improve" ? "improver" : "producer",
+      { rule: rule.id },
+      [],
+    );
+  }
+  if (!entries.some((item) => !item.target.frozen)) return;
+
+  let registry: SessionEntry[];
+  try {
+    registry = await readSessions(registryFile(file));
+  } catch {
+    return;
+  }
+  const matches = await resolveSessions(directory, entries.map((item) => item.target), { claimed, registry });
+  for (const item of entries) {
+    if (item.target.frozen) continue;
+    const match = matches.get(item.target.key);
+    if (match?.session) {
+      item.worker.session = match.session;
+      delete item.worker.session_scan;
+      track(match.session, item.role, item.owner);
+    } else if (match?.ambiguous) {
+      item.worker.session_scan = "ambiguous";
+    }
   }
 }
 
@@ -752,11 +854,12 @@ Run options:
   --session UUID        Record the Copilot session of the factory in the sessions registry of FILE
                         (<owner.repo>-factory-sessions.jsonl). The command records worker sessions
                         automatically from --workers and --rule-worker records that have a session.
-                        A running worker without a session gets the one session that started
-                        after its launch in its worktree, or in the current directory. The session
-                        is in the Copilot session-state folder (FACTORY_SESSION_STATE, default
-                        ~/.copilot/session-state). With many matches, the command sets "session_scan"
-                        and skips the scan until the next launch
+                        An anchored worker without a valid session gets the single matching session
+                        started since its launch (matched by worker name, project, and role
+                        directory, skipping claimed IDs) for running and closed workers alike. The
+                        session is in the Copilot session-state folder (FACTORY_SESSION_STATE,
+                        default ~/.copilot/session-state). With many matches, the command sets
+                        "session_scan" and skips unnamed launches until the next launch
   --limits JSON         Merge the worker limits, for example '{"investigation":2}' (default 3 each;
                         the dashboard accepts 1 to 100). Emits limits.updated
   --expected-limits JSON  Limits on which the write is based, for example '{"investigation":3}'. List

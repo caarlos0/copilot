@@ -54,6 +54,7 @@ export type Worker = {
   summary?: string | null;
   summary_at?: string | null;
   launched_at?: string;
+  closed_at?: string;
   session_scan?: string;
 };
 export type BlockerOption = { label: string; state?: State; recommended?: boolean };

@@ -1,7 +1,8 @@
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import { measureFile } from "./session-metrics.ts";
-import { sessionID } from "./sessions.ts";
+import { readSessions, resolveSessions, sessionID, workerCwds, workerUpperBound } from "./sessions.ts";
+import type { SessionEntry, SessionTarget } from "./sessions.ts";
 
 const maxLogBytes = 512 * 1024 * 1024;
 const refreshMs = 30_000;
@@ -17,11 +18,33 @@ export type Usage = {
   active_minutes: number;
 };
 
+type WorkerInput = {
+  session?: unknown;
+  status?: string;
+  name?: string | null;
+  launched_at?: string;
+  closed_at?: string;
+  session_scan?: string;
+};
+
 type TaskInput = {
   id?: string;
   state?: string;
-  workers: Record<string, { session?: unknown } | null | undefined>;
-  history: { at: string }[];
+  updated_at?: string;
+  worktree?: { path?: string } | null;
+  workers: Record<string, WorkerInput | null | undefined>;
+  history: { state?: string; at: string }[];
+};
+
+type RuleInput = {
+  id: string;
+  kind?: string;
+  worker?: WorkerInput | null;
+};
+
+export type FactoryUsageOptions = {
+  registry?: string;
+  scanCacheMs?: number;
 };
 
 // 1 AI credit = $0.01 (docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing).
@@ -97,12 +120,17 @@ type Read = (id: string, directory: string) => Usage | null | undefined | Promis
 
 // Per worker role usage and a task total; a missing or unreadable session is null.
 // ended_at is null while the task is open, so the browser can keep counting.
-export async function taskUsage(task: TaskInput, directory: string, read: Read = sessionUsage) {
+export async function taskUsage(
+  task: TaskInput,
+  directory: string,
+  read: Read = sessionUsage,
+  inferred?: ReadonlyMap<string, string>,
+) {
   const workers: Record<string, Usage | null | undefined> = {};
   const seen = new Map<string, Usage | null | undefined>();
   for (const [role, worker] of Object.entries(task.workers)) {
     if (!worker) continue;
-    const id = sessionID(worker.session);
+    const id = sessionID(worker.session) ?? (task.id ? inferred?.get(`${task.id}:${role}`) ?? null : null);
     workers[role] = id === null ? null : await read(id, directory);
     if (id !== null) seen.set(id, workers[role]);
   }
@@ -128,11 +156,70 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promis
   return results;
 }
 
-export async function factoryUsage(data: { tasks: (TaskInput & { id: string })[] }, directory: string) {
+export async function factoryUsage(
+  data: { project?: string; updated_at?: string; tasks: (TaskInput & { id: string })[]; rules?: RuleInput[] },
+  directory: string,
+  options?: FactoryUsageOptions,
+) {
+  const claimed = new Set<string>();
+  const targets: SessionTarget[] = [];
+  const consider = (
+    worker: WorkerInput | null | undefined,
+    key: string,
+    role: string,
+    owner: { task?: string; rule?: string },
+    cwds: string[],
+    history: readonly { state?: string; at: string }[],
+  ) => {
+    if (!worker) return;
+    const id = sessionID(worker.session);
+    if (id) {
+      claimed.add(id);
+      return;
+    }
+    if (!worker.launched_at) return;
+    const since = Date.parse(worker.launched_at);
+    if (Number.isNaN(since)) return;
+    const until = workerUpperBound(worker.status, worker.closed_at, role, history, since);
+    if (until === null) return;
+    const frozen = worker.session_scan === "ambiguous" && !worker.name;
+    targets.push({ key, role, owner, cwds, project: data.project, name: worker.name ?? undefined, since, until, frozen });
+  };
+
+  for (const task of data.tasks) {
+    for (const [role, worker] of Object.entries(task.workers)) {
+      consider(worker, `${task.id}:${role}`, role, { task: task.id }, workerCwds(role, task.worktree?.path), task.history);
+    }
+  }
+  for (const rule of data.rules ?? []) {
+    const role = rule.kind === "improve" ? "improver" : "producer";
+    consider(rule.worker, `rule:${rule.id}`, role, { rule: rule.id }, [], []);
+  }
+
+  const inferred = new Map<string, string>();
+  if (targets.some((target) => !target.frozen)) {
+    let registry: SessionEntry[] | null = [];
+    if (options?.registry) {
+      try {
+        registry = await readSessions(options.registry);
+      } catch {
+        // Keep usage working for explicitly recorded sessions if the registry cannot be read.
+        registry = null;
+      }
+    }
+    if (registry !== null) {
+      const matches = await resolveSessions(directory, targets, { claimed, registry, cacheMs: options?.scanCacheMs ?? 0 });
+      for (const [key, match] of matches) {
+        if (match.session) inferred.set(key, match.session);
+      }
+    }
+  }
+
   const ids = new Set<string>();
   for (const task of data.tasks) {
-    for (const worker of Object.values(task.workers)) {
-      const id = worker && sessionID(worker.session);
+    for (const [role, worker] of Object.entries(task.workers)) {
+      if (!worker) continue;
+      const id = sessionID(worker.session) ?? inferred.get(`${task.id}:${role}`) ?? null;
       if (id) ids.add(id);
     }
   }
@@ -141,6 +228,6 @@ export async function factoryUsage(data: { tasks: (TaskInput & { id: string })[]
   const measured = new Map(list.map((id, index) => [id, results[index]]));
   const read: Read = (id) => measured.get(id);
   const usage: Record<string, Awaited<ReturnType<typeof taskUsage>>> = {};
-  for (const task of data.tasks) usage[task.id] = await taskUsage(task, directory, read);
+  for (const task of data.tasks) usage[task.id] = await taskUsage(task, directory, read, inferred);
   return usage;
 }

@@ -718,13 +718,16 @@ work". It changes nothing without the user's answer. Its worker follows
 1. Record sessions. Save your own Copilot session once at start and after each
    resume: `--session UUID`. The UUID is the name of your session-state
    folder. The helper saves a `session` in a `--workers` or `--rule-worker`
-   record automatically. A `running` worker without a `session` gets the single
-   session in `~/.copilot/session-state` that the worker created in its
-   worktree since launch. For one-shot workers, the helper uses the factory's
-   directory. If no session or many sessions match, the helper leaves it unset.
-   Many matches set `session_scan: "ambiguous"` in the worker record. Then
-   later writes skip the scan until the worker is launched again. The
-   registry is `<owner.repo>-factory-sessions.jsonl` beside
+   record automatically. An anchored worker (running or closed) without a valid
+   `session` gets the single matching session in `~/.copilot/session-state`
+   started since launch, matched by worker name, project, and role directory
+   (primary checkout for `investigation` and rules, worktree for
+   `implementation`, either for `review`) while skipping already-claimed IDs.
+   If no session or many sessions match, the helper leaves it unset. Many
+   matches set `session_scan: "ambiguous"` in the worker record, and later
+   writes skip unnamed ambiguous launches until the worker is launched again.
+   The dashboard also resolves missing sessions read-only when displaying usage.
+   The registry is `<owner.repo>-factory-sessions.jsonl` beside
    the factory file. It holds IDs, roles, and task or rule names only.
 2. When you create a factory, add a rule `self-improve` with `--rules JSON`.
    Use `kind` `improve`, `every` `7d`, `enabled` true, and `last_run_at` set to

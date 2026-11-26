@@ -137,3 +137,163 @@ test("the usage cache is capped and a large run still returns every result", asy
   assert.ok(Object.values(usage).every((item) => item.workers.implementation!.credits === 1));
   assert.ok(cacheSize() <= 1024, `cache holds ${cacheSize()} entries`);
 });
+
+test("factoryUsage resolves missing sessions read-only with strict identity, time bounds, and pending-dir cache refresh", async (t) => {
+  const { factoryUsage } = await import("./usage.ts");
+  const { yamlField } = await import("./sessions.ts");
+  assert.equal(yamlField("name: 'Investigate #1: don''t panic'\n", "name"), "Investigate #1: don't panic");
+  assert.equal(yamlField('name: "Investigate #1: \\"quoted\\""\n', "name"), 'Investigate #1: "quoted"');
+  assert.equal(yamlField("name: 'unterminated\n", "name"), undefined);
+  assert.equal(yamlField("name: 'bad' quote'\n", "name"), undefined);
+  assert.equal(yamlField("name: |\n  block\n", "name"), undefined);
+
+  const directory = await sessions(t, {});
+  const worktree = await mkdtemp(join(tmpdir(), "factory-usage-wt-"));
+  const regDir = await mkdtemp(join(tmpdir(), "factory-usage-reg-"));
+  t.after(() => rm(worktree, { recursive: true, force: true }));
+  t.after(() => rm(regDir, { recursive: true, force: true }));
+
+  const now = Date.now();
+  const iso = (ms: number) => new Date(ms).toISOString();
+  const writeSession = async (id: string, meta: { cwd: string; repository?: string; name?: string; created: number }, model: string, nano: number) => {
+    await mkdir(join(directory, id), { recursive: true });
+    const lines = [
+      `id: ${id}`,
+      `cwd: ${meta.cwd}`,
+      ...(meta.repository ? [`repository: ${meta.repository}`] : []),
+      ...(meta.name ? [`name: '${meta.name.replace(/'/g, "''")}'`] : []),
+      `created_at: ${iso(meta.created)}`,
+    ];
+    await writeFile(join(directory, id, "workspace.yaml"), `${lines.join("\n")}\n`);
+    await writeFile(join(directory, id, "events.jsonl"), `${event(0, "session.start")}\n${record(model, nano, 100, 10)}\n${event(2, "assistant.turn_end")}\n`);
+  };
+
+  // Closed historical investigation matched by name + repository; live implementation matched after workspace.yaml appears in existing dir.
+  await writeSession(uuid(501), { cwd: "/some/primary/checkout", repository: "owner/repo", name: "Investigate #1: Bug", created: now - 50_000 }, "claude-opus-5.5", 2_000_000_000);
+  // A much later session with the same name must not attach to an older closed worker whose window already ended.
+  await writeSession(uuid(502), { cwd: "/some/primary/checkout", repository: "owner/repo", name: "Investigate #99: Old", created: now - 5_000 }, "claude-opus-5.5", 9_000_000_000);
+  // Pre-create empty directory for implementation before workspace.yaml exists (tests pending-dir cache invalidation).
+  await mkdir(join(directory, uuid(503)));
+
+  const registry = join(regDir, "owner.repo-factory-sessions.jsonl");
+  await writeFile(registry, `${JSON.stringify({ id: uuid(504), role: "factory", at: iso(now - 60_000) })}\n`);
+  await writeSession(uuid(504), { cwd: worktree, repository: "owner/repo", created: now - 30_000 }, "coordinator-model", 8_000_000_000);
+
+  const data = {
+    project: "owner/repo",
+    tasks: [
+      {
+        id: "issue-1",
+        state: "implementation",
+        updated_at: iso(now - 10_000),
+        worktree: { path: worktree },
+        history: [
+          { state: "initial", at: iso(now - 65_000) },
+          { state: "investigation", at: iso(now - 60_000) },
+          { state: "implementation", at: iso(now - 40_000) },
+        ],
+        workers: {
+          investigation: { status: "closed", name: "Investigate #1: Bug", launched_at: iso(now - 60_000) },
+          implementation: { status: "running", launched_at: iso(now - 40_000) },
+        },
+      },
+      {
+        id: "issue-99",
+        state: "resolved",
+        updated_at: iso(now - 200_000),
+        history: [
+          { state: "initial", at: iso(now - 300_000) },
+          { state: "investigation", at: iso(now - 290_000) },
+          { state: "resolved", at: iso(now - 200_000) },
+        ],
+        workers: {
+          investigation: { status: "closed", name: "Investigate #99: Old", launched_at: iso(now - 290_000) },
+        },
+      },
+    ],
+  };
+
+  const before = await factoryUsage(data, directory, { registry, scanCacheMs: 60_000 });
+  assert.deepEqual(before["issue-1"].workers.investigation?.models, ["claude-opus-5.5"]);
+  assert.equal(before["issue-1"].workers.implementation, null, "Coordinator session uuid(504) in registry is excluded.");
+  assert.equal(before["issue-99"].workers.investigation, null, "Closed worker upper bound blocks later same-name session.");
+  assert.equal("session" in data.tasks[0].workers.investigation, false, "Read-only resolution never mutates factory data.");
+
+  // Now workspace.yaml appears inside the already-existing directory uuid(503) while cacheMs is still active.
+  await writeSession(uuid(503), { cwd: worktree, repository: "owner/repo", created: now - 20_000 }, "claude-sonnet-5.5", 3_000_000_000);
+  const after = await factoryUsage(data, directory, { registry, scanCacheMs: 60_000 });
+  assert.deepEqual(after["issue-1"].workers.implementation?.models, ["claude-sonnet-5.5"]);
+
+  // A corrupt registry disables inferred attribution without breaking explicitly recorded sessions.
+  const badRegistry = join(regDir, "corrupt-sessions.jsonl");
+  await writeFile(badRegistry, "{not-json\n");
+  const explicitTask = {
+    id: "issue-explicit",
+    state: "implementation",
+    history,
+    workers: { implementation: { session: uuid(503) } },
+  };
+  const degraded = await factoryUsage({ project: "owner/repo", tasks: [...data.tasks, explicitTask] }, directory, { registry: badRegistry });
+  assert.equal(degraded["issue-1"].workers.investigation, null, "Inferred attribution stops on unreadable registry.");
+  assert.deepEqual(degraded["issue-explicit"].workers.implementation?.models, ["claude-sonnet-5.5"], "Explicit sessions still report usage.");
+
+  // Superseded registry session stays excluded in factoryUsage; frozen ambiguous worker protects its candidate;
+  // closed worker without closed_at or following history step declines inference even when updated_at advances.
+  const wtGuard = join(regDir, "wt-guard");
+  await mkdir(wtGuard, { recursive: true });
+  await writeSession(uuid(505), { cwd: wtGuard, repository: "owner/repo", created: now - 25_000 }, "claude-sonnet-5.5", 1_000_000_000);
+  await writeSession(uuid(506), { cwd: wtGuard, repository: "owner/repo", created: now - 20_000 }, "claude-sonnet-5.5", 1_000_000_000);
+  const guardRegistry = join(regDir, "guard-sessions.jsonl");
+  await writeFile(guardRegistry, `${JSON.stringify({ id: uuid(505), role: "implementation", task: "relaunch-task", at: new Date(now - 15_000).toISOString() })}\n`);
+  const guarded = await factoryUsage({
+    project: "owner/repo",
+    updated_at: new Date(now + 200_000).toISOString(),
+    tasks: [
+      {
+        id: "relaunch-task",
+        state: "implementation",
+        updated_at: new Date(now + 200_000).toISOString(),
+        worktree: { path: wtGuard },
+        history: [{ state: "implementation", at: new Date(now - 30_000).toISOString() }],
+        workers: { implementation: { status: "running", launched_at: new Date(now - 30_000).toISOString() } },
+      },
+      {
+        id: "ambiguous-owner",
+        state: "implementation",
+        updated_at: new Date(now + 200_000).toISOString(),
+        worktree: { path: wtGuard },
+        history: [{ state: "implementation", at: new Date(now - 30_000).toISOString() }],
+        workers: { implementation: { status: "running", launched_at: new Date(now - 30_000).toISOString(), session_scan: "ambiguous" } },
+      },
+      {
+        id: "closed-unbounded",
+        state: "implementation",
+        updated_at: new Date(now + 200_000).toISOString(),
+        worktree: { path: wtGuard },
+        history: [{ state: "implementation", at: new Date(now - 30_000).toISOString() }],
+        workers: { implementation: { status: "closed", launched_at: new Date(now - 30_000).toISOString() } },
+      },
+    ],
+  }, directory, { registry: guardRegistry });
+  assert.equal(guarded["relaunch-task"].workers.implementation, null, "Superseded registry session and contested candidate must not attach.");
+  assert.equal(guarded["ambiguous-owner"].workers.implementation, null, "Frozen ambiguous worker stays unset.");
+  assert.equal(guarded["closed-unbounded"].workers.implementation, null, "Closed worker without closed_at or next state declines inference.");
+
+  // Independent check: a relaunched worker alone still cannot re-attach its own superseded registry session.
+  const wtSolo = join(regDir, "wt-solo");
+  await mkdir(wtSolo, { recursive: true });
+  await writeSession(uuid(507), { cwd: wtSolo, repository: "owner/repo", created: now - 25_000 }, "claude-sonnet-5.5", 1_000_000_000);
+  const soloRegistry = join(regDir, "solo-sessions.jsonl");
+  await writeFile(soloRegistry, `${JSON.stringify({ id: uuid(507), role: "implementation", task: "solo-task", at: new Date(now - 15_000).toISOString() })}\n`);
+  const solo = await factoryUsage({
+    project: "owner/repo",
+    tasks: [{
+      id: "solo-task",
+      state: "implementation",
+      worktree: { path: wtSolo },
+      history: [{ state: "implementation", at: new Date(now - 30_000).toISOString() }],
+      workers: { implementation: { status: "running", launched_at: new Date(now - 30_000).toISOString() } },
+    }],
+  }, directory, { registry: soloRegistry });
+  assert.equal(solo["solo-task"].workers.implementation, null, "Solo relaunched worker cannot re-attach its superseded registry session.");
+});

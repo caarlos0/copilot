@@ -1012,9 +1012,16 @@ async function sessionState(t: TestContext) {
   });
   return {
     directory,
-    add: async (id: string, cwd: string, created: number) => {
-      await mkdir(join(directory, id));
-      await writeFile(join(directory, id, "workspace.yaml"), `id: ${id}\ncwd: ${cwd}\ncreated_at: ${new Date(created).toISOString()}\n`);
+    add: async (id: string, cwd: string, created: number, meta?: { name?: string; repository?: string }) => {
+      await mkdir(join(directory, id), { recursive: true });
+      const lines = [
+        `id: ${id}`,
+        `cwd: ${cwd}`,
+        ...(meta?.repository ? [`repository: ${meta.repository}`] : []),
+        ...(meta?.name ? [`name: '${meta.name.replace(/'/g, "''")}'`] : []),
+        `created_at: ${new Date(created).toISOString()}`,
+      ];
+      await writeFile(join(directory, id, "workspace.yaml"), `${lines.join("\n")}\n`);
     },
   };
 }
@@ -1081,6 +1088,188 @@ test("a one-shot rule worker is matched by the factory's directory; no or many m
   const registry = (await readFile(join(f.directory, "owner.repo-factory-sessions.jsonl"), "utf8")).split("\n").filter(Boolean);
   assert.deepEqual(registry.map((line) => JSON.parse(line)).map(({ id, role, rule }) => ({ id, role, rule })),
     [{ id: uuid(1), role: "improver", rule: "self" }]);
+});
+
+test("investigation, implementation, and review sessions are captured on close and resolve with role-specific directories", async (t) => {
+  const state = await sessionState(t);
+  const f = await fixture(t);
+  const repo = await mkdtemp(join(tmpdir(), "repo-"));
+  const worktree = await mkdtemp(join(tmpdir(), "worktree-"));
+  t.after(() => rm(repo, { recursive: true, force: true }));
+  t.after(() => rm(worktree, { recursive: true, force: true }));
+  const run = (...args: string[]) => {
+    const result = spawnSync(process.execPath, [script, "write", f.file, ...args], { encoding: "utf8", cwd: repo });
+    assert.equal(result.status, 0, result.stderr);
+  };
+  const t0 = Date.now() - 120_000;
+  const iso = (ms: number) => new Date(ms).toISOString();
+
+  run("--project", "owner/repo", "--run-goal", "Ship it", "--task", "issue-1", "--title", "Fix bug",
+    "--issue", issue(1), "--next-action", "Investigate", "--updated-at", iso(t0), "--task-updated-at", iso(t0));
+  run("--task", "issue-1", "--state", "investigation", "--note", "Start",
+    "--updated-at", iso(t0 + 1_000), "--task-updated-at", iso(t0 + 1_000),
+    "--workers", JSON.stringify({ investigation: { status: "running", mode: "one-shot", name: "Investigate #1: Fix's bug" } }));
+  assert.equal((await f.read()).tasks[0].workers.investigation.session, undefined, "Session does not exist yet at launch.");
+
+  const sid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+  // Investigation finishes in the primary repo; the write closes it and assigns a worktree for implementation.
+  await state.add(sid(11), repo, t0 + 5_000, { repository: "owner/repo", name: "Investigate #1: Fix's bug" });
+  run("--task", "issue-1", "--state", "implementation", "--note", "Implement",
+    "--worktree", JSON.stringify({ path: worktree, created_by_run: true }),
+    "--updated-at", iso(t0 + 20_000), "--task-updated-at", iso(t0 + 20_000),
+    "--workers", JSON.stringify({
+      investigation: { status: "closed" },
+      implementation: { status: "running", mode: "continuous", pane: "block:p1", name: "Implement #1: Fix's bug" },
+    }));
+  assert.equal((await f.read()).tasks[0].workers.investigation.session, sid(11), "Closed investigation matches primary repo even after worktree is set.");
+
+  // Implementation runs in worktree; review runs in the primary repo despite worktree being set, then resolves directly.
+  await state.add(sid(12), worktree, t0 + 25_000, { repository: "owner/repo", name: "Implement #1: Fix's bug" });
+  run("--task", "issue-1", "--state", "review", "--pr", pull(10), "--note", "Review",
+    "--updated-at", iso(t0 + 40_000), "--task-updated-at", iso(t0 + 40_000),
+    "--workers", JSON.stringify({
+      implementation: { status: "closed" },
+      review: { status: "running", mode: "one-shot", name: "Review PR #10: Fix's bug" },
+    }));
+  assert.equal((await f.read()).tasks[0].workers.implementation.session, sid(12));
+
+  await state.add(sid(13), repo, t0 + 45_000, { repository: "owner/repo", name: "Review PR #10: Fix's bug" });
+  run("--task", "issue-1", "--state", "resolved", "--resolution", "merged", "--note", "Merged",
+    "--updated-at", iso(t0 + 60_000), "--task-updated-at", iso(t0 + 60_000));
+
+  const { workers } = (await f.read()).tasks[0];
+  assert.equal(workers.investigation.session, sid(11));
+  assert.equal(workers.implementation.session, sid(12));
+  assert.equal(workers.review.session, sid(13), "Auto-closed review worker still captures its primary-repo session.");
+});
+
+test("repeated running updates preserve launched_at, relaunches exclude old sessions, and stale history is clamped", async (t) => {
+  const state = await sessionState(t);
+  const f = await fixture(t);
+  const worktree = await mkdtemp(join(tmpdir(), "worktree-"));
+  t.after(() => rm(worktree, { recursive: true, force: true }));
+  const run = (...args: string[]) => {
+    const result = spawnSync(process.execPath, [script, "write", f.file, ...args], { encoding: "utf8", cwd: worktree });
+    assert.equal(result.status, 0, result.stderr);
+  };
+  const sid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+  const now = Date.now();
+  const iso = (ms: number) => new Date(ms).toISOString();
+
+  // Task sat idle for 2 days with an old unrelated session in the worktree.
+  await state.add(sid(20), worktree, now - 24 * 3_600_000, { repository: "owner/repo" });
+  run("--project", "owner/repo", "--run-goal", "Ship it", "--task", "issue-1", "--title", "Old task",
+    "--issue", issue(1), "--next-action", "Go", "--updated-at", iso(now - 48 * 3_600_000), "--task-updated-at", iso(now - 48 * 3_600_000));
+  run("--task", "issue-1", "--state", "investigation", "--note", "Inv", "--updated-at", iso(now - 48 * 3_600_000), "--task-updated-at", iso(now - 48 * 3_600_000));
+  run("--task", "issue-1", "--state", "implementation", "--note", "Impl",
+    "--worktree", JSON.stringify({ path: worktree, created_by_run: true }),
+    "--updated-at", iso(now - 60_000), "--task-updated-at", iso(now - 60_000),
+    "--workers", JSON.stringify({ implementation: { status: "running", pane: "block:p1" } }));
+
+  const firstLaunched = (await f.read()).tasks[0].workers.implementation.launched_at;
+  assert.ok(Date.parse(firstLaunched) >= now - 12 * 60_000, "Stale 2-day updated_at is clamped to lookback window.");
+  assert.equal((await f.read()).tasks[0].workers.implementation.session, undefined, "Old session from 24h ago is ignored.");
+
+  // Session appears and is discovered by a root-only write (task.updated_at stays unchanged).
+  await state.add(sid(21), worktree, now - 55_000, { repository: "owner/repo" });
+  run("--run-status", "active", "--updated-at", iso(now - 20_000));
+  assert.equal((await f.read()).tasks[0].workers.implementation.session, sid(21));
+
+  // A mid-run running update (summary) arrives later — launched_at must not advance past session creation.
+  run("--task", "issue-1", "--updated-at", iso(now - 10_000), "--task-updated-at", iso(now - 10_000),
+    "--workers", JSON.stringify({ implementation: { status: "running", pane: "block:p1", summary: "Working" } }));
+  assert.equal((await f.read()).tasks[0].workers.implementation.launched_at, firstLaunched);
+  assert.equal((await f.read()).tasks[0].workers.implementation.session, sid(21));
+
+  // Relaunch on a new pane drops sid(21) and excludes it across the relaunch write AND later writes.
+  run("--task", "issue-1", "--updated-at", iso(now - 5_000), "--task-updated-at", iso(now - 5_000),
+    "--workers", JSON.stringify({ implementation: { status: "running", pane: "block:p2" } }));
+  assert.equal((await f.read()).tasks[0].workers.implementation.session, undefined, "Relaunch excludes the previous session.");
+  run("--run-status", "active", "--updated-at", iso(now - 3_000));
+  assert.equal((await f.read()).tasks[0].workers.implementation.session, undefined, "Superseded session stays excluded on later writes.");
+
+  await state.add(sid(22), worktree, now - 2_000, { repository: "owner/repo" });
+  run("--run-status", "active", "--updated-at", iso(now));
+  assert.equal((await f.read()).tasks[0].workers.implementation.session, sid(22));
+
+  // Closing in place stamps closed_at; later unrelated metadata updates do not widen the closed window.
+  run("--task", "issue-1", "--updated-at", iso(now + 1_000), "--task-updated-at", iso(now + 1_000),
+    "--workers", JSON.stringify({ review: { status: "running", mode: "one-shot" } }));
+  run("--task", "issue-1", "--updated-at", iso(now + 5_000), "--task-updated-at", iso(now + 5_000),
+    "--workers", JSON.stringify({ review: { status: "closed" } }));
+  const closedAt = (await f.read()).tasks[0].workers.review.closed_at;
+  assert.equal(closedAt, iso(now + 5_000));
+  await state.add(sid(23), worktree, now + 180_000, { repository: "owner/repo" });
+  run("--task", "issue-1", "--next-action", "Check later", "--updated-at", iso(now + 200_000), "--task-updated-at", iso(now + 200_000));
+  assert.equal((await f.read()).tasks[0].workers.review.session, undefined, "Unrelated metadata update must not widen a closed worker's window.");
+});
+
+test("session matching prevents cross-worker stealing, enforces project/registry boundaries, and heals named ambiguity", async (t) => {
+  const state = await sessionState(t);
+  const f = await fixture(t);
+  const repo = await mkdtemp(join(tmpdir(), "repo-"));
+  t.after(() => rm(repo, { recursive: true, force: true }));
+  const run = (...args: string[]) => {
+    const result = spawnSync(process.execPath, [script, "write", f.file, ...args], { encoding: "utf8", cwd: repo });
+    assert.equal(result.status, 0, result.stderr);
+  };
+  const sid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+  const t0 = Date.now() - 60_000;
+  const iso = (ms: number) => new Date(ms).toISOString();
+
+  run("--project", "owner/repo", "--run-goal", "Ship it", "--session", sid(30),
+    "--task", "issue-1", "--title", "One", "--issue", issue(1), "--next-action", "Go",
+    "--updated-at", iso(t0), "--task-updated-at", iso(t0));
+  run("--task", "issue-2", "--title", "Two", "--issue", issue(2), "--next-action", "Go",
+    "--updated-at", iso(t0), "--task-updated-at", iso(t0));
+
+  // Coordinator session and foreign-repo session in the same cwd must never be claimed.
+  await state.add(sid(30), repo, t0 + 1_000, { repository: "owner/repo" });
+  await state.add(sid(31), repo, t0 + 2_000, { repository: "other/repo" });
+
+  // Single unnamed worker claims the one valid session while ignoring coordinator and foreign-repo sessions.
+  await state.add(sid(32), repo, t0 + 3_000, { repository: "owner/repo" });
+  run("--task", "issue-1", "--state", "investigation", "--note", "Go",
+    "--updated-at", iso(t0 + 1_000), "--task-updated-at", iso(t0 + 1_000),
+    "--workers", JSON.stringify({ investigation: { status: "running", mode: "one-shot" } }));
+  assert.equal((await f.read()).tasks[0].workers.investigation.session, sid(32), "Single unnamed worker claims the one valid session.");
+
+  // Two unnamed workers competing for a single session both stay unset and ambiguous (order-independent).
+  run("--task", "issue-3", "--title", "Three", "--issue", issue(3), "--next-action", "Go",
+    "--updated-at", iso(t0 + 10_000), "--task-updated-at", iso(t0 + 10_000));
+  run("--task", "issue-2", "--state", "investigation", "--note", "Go",
+    "--updated-at", iso(t0 + 10_000), "--task-updated-at", iso(t0 + 10_000),
+    "--workers", JSON.stringify({ investigation: { status: "running", mode: "one-shot" } }));
+  run("--task", "issue-3", "--state", "investigation", "--note", "Go",
+    "--updated-at", iso(t0 + 10_000), "--task-updated-at", iso(t0 + 10_000),
+    "--workers", JSON.stringify({ investigation: { status: "running", mode: "one-shot" } }));
+  await state.add(sid(33), repo, t0 + 15_000, { repository: "owner/repo" });
+  run("--run-status", "active", "--updated-at", iso(t0 + 20_000));
+  const afterCompete = await f.read();
+  assert.equal(afterCompete.tasks[1].workers.investigation.session, undefined);
+  assert.equal(afterCompete.tasks[2].workers.investigation.session, undefined);
+  assert.equal(afterCompete.tasks[1].workers.investigation.session_scan, "ambiguous");
+  assert.equal(afterCompete.tasks[2].workers.investigation.session_scan, "ambiguous");
+
+  // A frozen ambiguous unnamed worker keeps protecting its candidate from another unnamed worker.
+  run("--task", "issue-5", "--title", "Five", "--issue", issue(5), "--next-action", "Go",
+    "--updated-at", iso(t0 + 12_000), "--task-updated-at", iso(t0 + 12_000));
+  run("--task", "issue-5", "--state", "investigation", "--note", "Go",
+    "--updated-at", iso(t0 + 14_000), "--task-updated-at", iso(t0 + 14_000),
+    "--workers", JSON.stringify({ investigation: { status: "running", mode: "one-shot" } }));
+  assert.equal((await f.read()).tasks[3].workers.investigation.session, undefined, "Frozen ambiguous workers prevent stealing of sid(33).");
+
+  // Legacy named worker marked ambiguous heals when its exact-name session is present.
+  run("--task", "issue-4", "--title", "Four", "--issue", issue(4), "--next-action", "Go",
+    "--updated-at", iso(t0 + 25_000), "--task-updated-at", iso(t0 + 25_000));
+  run("--task", "issue-4", "--state", "investigation", "--note", "Go",
+    "--updated-at", iso(t0 + 25_000), "--task-updated-at", iso(t0 + 25_000),
+    "--workers", JSON.stringify({ investigation: { status: "closed", mode: "one-shot", name: "Investigate #4: Four", launched_at: iso(t0 + 25_000), session_scan: "ambiguous" } }));
+  await state.add(sid(34), repo, t0 + 26_000, { repository: "owner/repo", name: "Investigate #4: Four" });
+  run("--run-status", "active", "--updated-at", iso(t0 + 30_000));
+  const healed = (await f.read()).tasks[4].workers.investigation;
+  assert.equal(healed.session, sid(34));
+  assert.equal(healed.session_scan, undefined);
 });
 
 test("a worker summary is optional, validated, and kept through later worker updates", async (t) => {

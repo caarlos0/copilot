@@ -1983,8 +1983,10 @@
 
       // Cost in USD when the log has credits, else tokens; all values come from the server as numbers and model names.
       const usdLabel = (item) => `$${item.usd.toFixed(2)}`;
+      const hasUsage = (item) => item.credits !== null || item.input_tokens > 0 || item.output_tokens > 0;
+
       const usageCost = (item) => item.credits === null
-        ? `${tokenLabel(item.input_tokens)} in / ${tokenLabel(item.output_tokens)} out tokens`
+        ? (hasUsage(item) ? `${tokenLabel(item.input_tokens)} in / ${tokenLabel(item.output_tokens)} out tokens` : "no usage")
         : `${usdLabel(item)} (${item.credits} AIC)`;
 
       const usageDetail = (item) =>
@@ -1993,6 +1995,7 @@
       // The model and cost chips of one worker, on its history step. The cost chip's tooltip has the AIC value.
       function stepChips(item) {
         const chips = item.models.map((text) => element("span", text, "chip"));
+        if (!hasUsage(item)) return chips;
         const cost = element("span", item.credits === null
           ? `${tokenLabel(item.input_tokens)} in / ${tokenLabel(item.output_tokens)} out`
           : usdLabel(item), "chip");
@@ -2012,16 +2015,19 @@
         const chips = [elapsed];
         const total = usage.total;
         if (!total) return chips;
-        const cost = element("span", total.credits === null
-          ? `Tokens: ${tokenLabel(total.input_tokens)} in / ${tokenLabel(total.output_tokens)} out`
-          : `Cost: ${usdLabel(total)}`, "chip");
-        cost.title = [
-          ...(total.credits === null ? [] : [`${total.credits} AIC`]),
-          ...Object.entries(usage.workers)
-            .filter(([, item]) => item)
-            .map(([role, item]) => `${role}: ${usageDetail(item)}`),
-        ].join("\n");
-        chips.push(cost, ...total.models.map((model) => element("span", model, "chip")));
+        if (hasUsage(total)) {
+          const cost = element("span", total.credits === null
+            ? `Tokens: ${tokenLabel(total.input_tokens)} in / ${tokenLabel(total.output_tokens)} out`
+            : `Cost: ${usdLabel(total)}`, "chip");
+          cost.title = [
+            ...(total.credits === null ? [] : [`${total.credits} AIC`]),
+            ...Object.entries(usage.workers)
+              .filter(([, item]) => item)
+              .map(([role, item]) => `${role}: ${usageDetail(item)}`),
+          ].join("\n");
+          chips.push(cost);
+        }
+        chips.push(...total.models.map((model) => element("span", model, "chip")));
         chips.push(element("span", `Active: ${span(Math.round(total.active_minutes * 60))}`, "chip"));
         return chips;
       }

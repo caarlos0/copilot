@@ -2100,30 +2100,247 @@ async function recordSessions(file, entries) {
 `).join(""), { mode: 384 });
   }
 }
-async function findSessions(directory, cwd, since) {
-  const from = Date.parse(since);
-  const names = await readdir2(directory).catch(() => []);
-  const wanted = await real(cwd);
-  const found = [];
-  await Promise.all(names.filter((name) => sessionID(name) === name).map(async (name) => {
+function yamlField(yaml, key) {
+  const match = yaml.match(new RegExp(`^${key}:[ \\t]*(.*?)[ \\t]*$`, "m"));
+  if (!match)
+    return;
+  const raw = match[1].replace(/\r$/, "");
+  if (!raw)
+    return;
+  if (raw.startsWith("'")) {
+    if (raw.length < 2 || !raw.endsWith("'"))
+      return;
+    const inner = raw.slice(1, -1);
+    if (!inner || inner.replace(/''/g, "").includes("'"))
+      return;
+    return inner.replace(/''/g, "'");
+  }
+  if (raw.startsWith('"')) {
+    if (raw.length < 2 || !raw.endsWith('"'))
+      return;
     try {
-      if ((await stat3(join4(directory, name))).mtimeMs < from)
-        return;
-      const yaml = await readFile5(join4(directory, name, "workspace.yaml"), "utf8");
-      const field = (key) => yaml.match(new RegExp(`^${key}: *["']?(.+?)["']?$`, "m"))?.[1];
-      const sessionCwd = field("cwd");
-      if (!(Date.parse(field("created_at")) >= from) || !sessionCwd)
-        return;
-      if (await real(sessionCwd) === wanted)
-        found.push(name);
-    } catch {}
-  }));
-  return found;
+      const parsed = JSON.parse(raw);
+      return typeof parsed === "string" && parsed ? parsed : undefined;
+    } catch {
+      return;
+    }
+  }
+  if (/^[|>[{&*!]/.test(raw))
+    return;
+  return raw;
 }
-var sessionRoles, uuid, registryFile = (file) => join4(dirname3(file), `${basename3(file, extname3(file))}-sessions.jsonl`), sessionID = (value) => (typeof value === "string" ? value.match(uuid)?.[0].toLowerCase() : null) ?? null, sessionStateDirectory = () => process.env.FACTORY_SESSION_STATE ?? join4(homedir2(), ".copilot", "session-state"), real = (path) => realpath2(path).catch(() => resolve3(path));
+async function readWorkspace(directory, id, folderMtimeMs, previous) {
+  const yamlPath = join4(directory, id, "workspace.yaml");
+  const yamlStat = await stat3(yamlPath);
+  if (previous && previous.folderMtimeMs === folderMtimeMs && previous.yamlMtimeMs === yamlStat.mtimeMs) {
+    return previous;
+  }
+  const yaml = await readFile5(yamlPath, "utf8");
+  const sessionCwd = yamlField(yaml, "cwd");
+  const createdAt = Date.parse(yamlField(yaml, "created_at") ?? "");
+  if (!sessionCwd || Number.isNaN(createdAt))
+    return { folderMtimeMs, yamlMtimeMs: yamlStat.mtimeMs, meta: null };
+  const meta = {
+    id,
+    cwd: sessionCwd,
+    realCwd: await real(sessionCwd),
+    repository: yamlField(yaml, "repository"),
+    name: yamlField(yaml, "name"),
+    createdAt
+  };
+  return { folderMtimeMs, yamlMtimeMs: yamlStat.mtimeMs, meta };
+}
+async function pendingChanged(directory, pending) {
+  if (!pending.size)
+    return false;
+  const checks = await Promise.all([...pending.entries()].map(async ([id, seen]) => {
+    try {
+      if ((await stat3(join4(directory, id))).mtimeMs !== seen.folderMtimeMs)
+        return true;
+    } catch {
+      return true;
+    }
+    try {
+      const yamlMtimeMs = (await stat3(join4(directory, id, "workspace.yaml"))).mtimeMs;
+      return seen.yamlMtimeMs === null || yamlMtimeMs !== seen.yamlMtimeMs;
+    } catch {
+      return seen.yamlMtimeMs !== null;
+    }
+  }));
+  return checks.some(Boolean);
+}
+async function listSessions(directory, sinceMs, options) {
+  if (Number.isNaN(sinceMs))
+    return [];
+  const cacheMs = options?.cacheMs ?? 0;
+  let dirMtimeMs;
+  try {
+    dirMtimeMs = (await stat3(directory)).mtimeMs;
+  } catch {
+    directoryCache.delete(directory);
+    return [];
+  }
+  const hit = directoryCache.get(directory);
+  if (hit && cacheMs > 0 && Date.now() - hit.at < cacheMs && hit.dirMtimeMs === dirMtimeMs && hit.coveredSinceMs <= sinceMs && !await pendingChanged(directory, hit.pending)) {
+    return [...hit.sessions.values()].map((item) => item.meta).filter((item) => item.createdAt >= sinceMs);
+  }
+  const entry = hit ?? {
+    at: 0,
+    dirMtimeMs,
+    coveredSinceMs: sinceMs,
+    sessions: new Map,
+    pending: new Map
+  };
+  const names = await readdir2(directory).catch(() => []);
+  const ids = names.filter((name) => sessionID(name) === name);
+  const present = new Set(ids);
+  for (const id of entry.sessions.keys()) {
+    if (!present.has(id))
+      entry.sessions.delete(id);
+  }
+  for (const id of entry.pending.keys()) {
+    if (!present.has(id))
+      entry.pending.delete(id);
+  }
+  await Promise.all(ids.map(async (id) => {
+    try {
+      const folderMtimeMs = (await stat3(join4(directory, id))).mtimeMs;
+      if (folderMtimeMs < sinceMs)
+        return;
+      const loaded = await readWorkspace(directory, id, folderMtimeMs, entry.sessions.get(id));
+      if (loaded.meta) {
+        entry.sessions.set(id, { folderMtimeMs: loaded.folderMtimeMs, yamlMtimeMs: loaded.yamlMtimeMs, meta: loaded.meta });
+        entry.pending.delete(id);
+      } else {
+        entry.sessions.delete(id);
+        entry.pending.set(id, { folderMtimeMs, yamlMtimeMs: loaded.yamlMtimeMs });
+      }
+    } catch {
+      try {
+        const folderMtimeMs = (await stat3(join4(directory, id))).mtimeMs;
+        if (folderMtimeMs >= sinceMs)
+          entry.pending.set(id, { folderMtimeMs, yamlMtimeMs: null });
+      } catch {
+        entry.pending.delete(id);
+      }
+      entry.sessions.delete(id);
+    }
+  }));
+  entry.at = Date.now();
+  entry.dirMtimeMs = dirMtimeMs;
+  entry.coveredSinceMs = Math.min(entry.coveredSinceMs, sinceMs);
+  directoryCache.delete(directory);
+  directoryCache.set(directory, entry);
+  if (directoryCache.size > maxCachedDirectories) {
+    directoryCache.delete(directoryCache.keys().next().value);
+  }
+  return [...entry.sessions.values()].map((item) => item.meta).filter((item) => item.createdAt >= sinceMs);
+}
+function workerCwds(role, worktreePath, fallbackCwd) {
+  if (role === "investigation")
+    return fallbackCwd ? [fallbackCwd] : [];
+  if (role === "review")
+    return [...worktreePath ? [worktreePath] : [], ...fallbackCwd ? [fallbackCwd] : []];
+  if (worktreePath)
+    return [worktreePath];
+  return fallbackCwd ? [fallbackCwd] : [];
+}
+function workerUpperBound(status, closedAt, role, history, sinceMs) {
+  if (status !== "closed")
+    return;
+  const closedMs = closedAt ? Date.parse(closedAt) : Number.NaN;
+  if (Number.isFinite(closedMs) && closedMs >= sinceMs)
+    return closedMs + upperBoundSlackMs;
+  let step = -1;
+  for (let index = history.length - 1;index >= 0; index--) {
+    if (history[index].state === role) {
+      step = index;
+      break;
+    }
+  }
+  const nextAt = step >= 0 && step + 1 < history.length ? Date.parse(history[step + 1].at) : Number.NaN;
+  if (Number.isFinite(nextAt) && nextAt >= sinceMs)
+    return nextAt + upperBoundSlackMs;
+  return null;
+}
+function matchSessions(sessions, targets, options) {
+  const excluded = new Set(options?.claimed);
+  for (const item of options?.registry ?? [])
+    excluded.add(item.id);
+  const candidates = new Map;
+  const namedClaimants = new Set;
+  for (const target of targets) {
+    const cwds = new Set(target.cwds);
+    const project = target.project?.toLowerCase();
+    const list = sessions.filter((session) => {
+      if (excluded.has(session.id))
+        return false;
+      if (session.createdAt < target.since)
+        return false;
+      if (target.until !== undefined && session.createdAt > target.until)
+        return false;
+      const repo = session.repository?.toLowerCase();
+      if (project && repo && repo !== project)
+        return false;
+      const cwdMatch = cwds.size > 0 && cwds.has(session.realCwd);
+      const projectMatch = Boolean(project && repo && repo === project);
+      if (target.name)
+        return session.name === target.name && (cwdMatch || projectMatch);
+      return cwdMatch;
+    });
+    candidates.set(target.key, list);
+    if (target.name) {
+      for (const session of list)
+        namedClaimants.add(session.id);
+    }
+  }
+  for (const target of targets) {
+    if (target.name)
+      continue;
+    const list = candidates.get(target.key) ?? [];
+    candidates.set(target.key, list.filter((session) => !namedClaimants.has(session.id)));
+  }
+  const claimants = new Map;
+  for (const list of candidates.values()) {
+    for (const session of list)
+      claimants.set(session.id, (claimants.get(session.id) ?? 0) + 1);
+  }
+  const results = new Map;
+  for (const target of targets) {
+    if (target.frozen) {
+      results.set(target.key, { ambiguous: true });
+      continue;
+    }
+    const list = candidates.get(target.key) ?? [];
+    if (list.length === 1 && claimants.get(list[0].id) === 1) {
+      results.set(target.key, { session: list[0].id });
+    } else if (list.length > 0) {
+      results.set(target.key, { ambiguous: true });
+    } else {
+      results.set(target.key, {});
+    }
+  }
+  return results;
+}
+async function resolveSessions(directory, targets, options) {
+  if (!targets.length)
+    return new Map;
+  if (targets.every((target) => target.frozen)) {
+    return new Map(targets.map((target) => [target.key, { ambiguous: true }]));
+  }
+  const earliest = Math.min(...targets.map((target) => target.since));
+  const resolvedTargets = await Promise.all(targets.map(async (target) => ({
+    ...target,
+    cwds: await Promise.all(target.cwds.map((cwd) => real(cwd)))
+  })));
+  const sessions = await listSessions(directory, earliest, { cacheMs: options?.cacheMs });
+  return matchSessions(sessions, resolvedTargets, { claimed: options?.claimed, registry: options?.registry });
+}
+var sessionRoles, uuid, registryFile = (file) => join4(dirname3(file), `${basename3(file, extname3(file))}-sessions.jsonl`), sessionID = (value) => (typeof value === "string" ? value.match(uuid)?.[0].toLowerCase() : null) ?? null, sessionStateDirectory = () => process.env.FACTORY_SESSION_STATE ?? join4(homedir2(), ".copilot", "session-state"), real = (path) => realpath2(path).catch(() => resolve3(path)), maxCachedDirectories = 16, upperBoundSlackMs = 60000, directoryCache;
 var init_sessions = __esm(() => {
   sessionRoles = ["factory", "investigation", "implementation", "review", "producer", "improver"];
   uuid = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+  directoryCache = new Map;
 });
 
 // plugins/factory/skills/lifecycle/tasks.ts
@@ -2341,13 +2558,14 @@ function taskPatch(task, values) {
   }
   return patch;
 }
-function dropRelaunched(task, patch) {
+function dropRelaunched(task, patch, track) {
   for (const [role, worker] of Object.entries(patch.workers ?? {})) {
     const stored = task.workers?.[role];
     if (worker?.status !== "running" || !isObject(stored))
       continue;
     if (["pane", "window"].some((key) => stored[key] != null && worker[key] !== undefined && worker[key] !== stored[key])) {
-      for (const key of ["session", "summary", "summary_at"])
+      track(stored.session, role, { task: task.id });
+      for (const key of ["session", "summary", "summary_at", "launched_at", "closed_at", "session_scan"])
         delete stored[key];
     }
   }
@@ -2598,7 +2816,7 @@ async function writeFactory(file, values, operator, source) {
     }
     const patch = taskPatch(task, values);
     checkInvestigation(patch, task.state);
-    dropRelaunched(task, patch);
+    dropRelaunched(task, patch, track);
     task = merge(task, { ...patch, updated_at: at, revision: revision + 1 });
     if (before.state !== "resolved" && task.state === "resolved") {
       for (const [role, worker] of Object.entries(task.workers ?? {})) {
@@ -2636,7 +2854,7 @@ async function writeFactory(file, values, operator, source) {
   }
   current.tasks = tasks;
   validate(current);
-  await locateSessions(current, previous, launches, now, track);
+  await locateSessions(file, current, previous, launches, rootPatch.updated_at, sessions, operator, track);
   if (values.budget !== undefined) {
     events.push({ type: "budget.updated", data: { max_parallel_workers: current.budget.max_parallel_workers } });
   }
@@ -2668,9 +2886,9 @@ async function writeFactory(file, values, operator, source) {
   }
   if (stale.length)
     await saveArchive(directory, current.project, stale);
-  await recordSessions(registryFile(file), sessions);
   await import_write_file_atomic2.default(file, `${JSON.stringify(current, null, 2)}
 `, { mode: 384 });
+  await recordSessions(registryFile(file), sessions);
   await announce(file, source, events);
   if (archived) {
     try {
@@ -2681,34 +2899,100 @@ async function writeFactory(file, values, operator, source) {
   }
   return current;
 }
-async function locateSessions(current, previous, launches, now, track) {
+function launchAnchor(beforeAt, now) {
+  const nowMs = Date.parse(now);
+  const beforeMs = beforeAt ? Date.parse(beforeAt) : Number.NaN;
+  if (!Number.isFinite(beforeMs) || beforeMs > nowMs)
+    return now;
+  return new Date(Math.max(beforeMs, nowMs - launchLookbackMs)).toISOString();
+}
+async function locateSessions(file, current, previous, launches, now, pending, operator, track) {
   const directory = sessionStateDirectory();
-  const find = async (worker, key, anchor, cwd, role, owner) => {
-    if (worker?.status !== "running" || worker.session)
+  const fallbackCwd = operator ? undefined : process.cwd();
+  const claimed = new Set;
+  const collectClaimed = (factory) => {
+    for (const task of factory.tasks ?? []) {
+      for (const worker of Object.values(task.workers ?? {})) {
+        const id = sessionID(worker?.session);
+        if (id)
+          claimed.add(id);
+      }
+    }
+    for (const rule of factory.rules ?? []) {
+      const id = sessionID(rule.worker?.session);
+      if (id)
+        claimed.add(id);
+    }
+  };
+  collectClaimed(current);
+  collectClaimed(previous);
+  for (const item of pending)
+    claimed.add(item.id);
+  const entries = [];
+  const consider = (worker, beforeWorker, key, anchor, cwds, role, owner, history) => {
+    if (!worker || sessionID(worker.session) !== null)
       return;
     if (launches.has(key)) {
-      worker.launched_at = anchor;
+      if (!worker.launched_at || beforeWorker?.status !== "running") {
+        worker.launched_at = anchor;
+      }
+      delete worker.closed_at;
       delete worker.session_scan;
     }
-    if (!worker.launched_at || worker.session_scan)
+    if (!worker.launched_at)
       return;
-    const found = await findSessions(directory, cwd, worker.launched_at);
-    if (found.length === 1) {
-      worker.session = found[0];
-      track(found[0], role, owner);
-    } else if (found.length > 1) {
-      worker.session_scan = "ambiguous";
+    if (worker.status === "closed") {
+      if (!worker.closed_at && beforeWorker?.status !== "closed")
+        worker.closed_at = now;
+    } else {
+      delete worker.closed_at;
     }
+    const since = Date.parse(worker.launched_at);
+    if (Number.isNaN(since))
+      return;
+    const until = workerUpperBound(worker.status, worker.closed_at, role, history, since);
+    if (until === null)
+      return;
+    const frozen = worker.session_scan === "ambiguous" && !worker.name;
+    entries.push({
+      worker,
+      role,
+      owner,
+      target: { key, role, owner, cwds, project: current.project, name: worker.name ?? undefined, since, until, frozen }
+    });
   };
   for (const task of current.tasks) {
     const before = previous.tasks?.find((item) => item.id === task.id);
+    const anchor = launchAnchor(before?.updated_at, now);
     for (const [role, worker] of Object.entries(task.workers ?? {})) {
-      await find(worker, `${task.id}:${role}`, before?.updated_at ?? now, task.worktree?.path ?? process.cwd(), role, { task: task.id });
+      consider(worker, before?.workers?.[role], `${task.id}:${role}`, anchor, workerCwds(role, task.worktree?.path, fallbackCwd), role, { task: task.id }, task.history);
     }
   }
   for (const rule of current.rules ?? []) {
     const before = previous.rules?.find((item) => item.id === rule.id);
-    await find(rule.worker, `rule:${rule.id}`, before?.last_run_at ?? previous.updated_at ?? now, process.cwd(), rule.kind === "improve" ? "improver" : "producer", { rule: rule.id });
+    const anchor = launchAnchor(before?.last_run_at ?? previous.updated_at, now);
+    consider(rule.worker, before?.worker, `rule:${rule.id}`, anchor, fallbackCwd ? [fallbackCwd] : [], rule.kind === "improve" ? "improver" : "producer", { rule: rule.id }, []);
+  }
+  if (!entries.some((item) => !item.target.frozen))
+    return;
+  let registry;
+  try {
+    registry = await readSessions(registryFile(file));
+  } catch {
+    return;
+  }
+  const matches = await resolveSessions(directory, entries.map((item) => item.target), { claimed, registry });
+  for (const item of entries) {
+    if (item.target.frozen)
+      continue;
+    const match = matches.get(item.target.key);
+    if (match?.session) {
+      item.worker.session = match.session;
+      delete item.worker.session_scan;
+      track(match.session, item.role, item.owner);
+    } else if (match?.ambiguous) {
+      item.worker.session_scan = "ambiguous";
+    }
   }
 }
 async function lockOwner(lockFile) {
@@ -2851,11 +3135,12 @@ Run options:
   --session UUID        Record the Copilot session of the factory in the sessions registry of FILE
                         (<owner.repo>-factory-sessions.jsonl). The command records worker sessions
                         automatically from --workers and --rule-worker records that have a session.
-                        A running worker without a session gets the one session that started
-                        after its launch in its worktree, or in the current directory. The session
-                        is in the Copilot session-state folder (FACTORY_SESSION_STATE, default
-                        ~/.copilot/session-state). With many matches, the command sets "session_scan"
-                        and skips the scan until the next launch
+                        An anchored worker without a valid session gets the single matching session
+                        started since its launch (matched by worker name, project, and role
+                        directory, skipping claimed IDs) for running and closed workers alike. The
+                        session is in the Copilot session-state folder (FACTORY_SESSION_STATE,
+                        default ~/.copilot/session-state). With many matches, the command sets
+                        "session_scan" and skips unnamed launches until the next launch
   --limits JSON         Merge the worker limits, for example '{"investigation":2}' (default 3 each;
                         the dashboard accepts 1 to 100). Emits limits.updated
   --expected-limits JSON  Limits on which the write is based, for example '{"investigation":3}'. List
@@ -2978,7 +3263,7 @@ Run with --help for usage.`);
     process.exitCode = 1;
   }
 }
-var import_write_file_atomic2, nullable = (value) => value === "null" ? null : value, nullableObject = (value, option) => value === "null" ? null : json(value, option, isObject), running = (task) => Object.values(task.workers ?? {}).some((worker) => worker?.status === "running"), settingOptions, lockMaxAge, taskOptions;
+var import_write_file_atomic2, nullable = (value) => value === "null" ? null : value, nullableObject = (value, option) => value === "null" ? null : json(value, option, isObject), running = (task) => Object.values(task.workers ?? {}).some((worker) => worker?.status === "running"), settingOptions, launchLookbackMs, lockMaxAge, taskOptions;
 var init_tasks = __esm(() => {
   init_archive();
   init_broker();
@@ -2988,6 +3273,7 @@ var init_tasks = __esm(() => {
   init_state_dir();
   import_write_file_atomic2 = __toESM(require_lib(), 1);
   settingOptions = ["budget", "expected-budget", "limits", "expected-limits", "lever", "expected-lever", "models", "expected-models", "efforts", "expected-efforts"];
+  launchLookbackMs = 10 * 60 * 1000;
   lockMaxAge = 10 * 60 * 1000;
   taskOptions = [
     "title",
@@ -3988,13 +4274,13 @@ function total(items) {
     active_minutes: Math.round(found.reduce((sum, item) => sum + item.active_minutes, 0) * 100) / 100
   };
 }
-async function taskUsage(task, directory, read = sessionUsage) {
+async function taskUsage(task, directory, read = sessionUsage, inferred) {
   const workers = {};
   const seen = new Map;
   for (const [role, worker] of Object.entries(task.workers)) {
     if (!worker)
       continue;
-    const id = sessionID(worker.session);
+    const id = sessionID(worker.session) ?? (task.id ? inferred?.get(`${task.id}:${role}`) ?? null : null);
     workers[role] = id === null ? null : await read(id, directory);
     if (id !== null)
       seen.set(id, workers[role]);
@@ -4018,11 +4304,61 @@ async function mapLimit(items, limit, fn) {
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, run));
   return results;
 }
-async function factoryUsage(data, directory) {
+async function factoryUsage(data, directory, options) {
+  const claimed = new Set;
+  const targets = [];
+  const consider = (worker, key, role, owner, cwds, history) => {
+    if (!worker)
+      return;
+    const id = sessionID(worker.session);
+    if (id) {
+      claimed.add(id);
+      return;
+    }
+    if (!worker.launched_at)
+      return;
+    const since = Date.parse(worker.launched_at);
+    if (Number.isNaN(since))
+      return;
+    const until = workerUpperBound(worker.status, worker.closed_at, role, history, since);
+    if (until === null)
+      return;
+    const frozen = worker.session_scan === "ambiguous" && !worker.name;
+    targets.push({ key, role, owner, cwds, project: data.project, name: worker.name ?? undefined, since, until, frozen });
+  };
+  for (const task of data.tasks) {
+    for (const [role, worker] of Object.entries(task.workers)) {
+      consider(worker, `${task.id}:${role}`, role, { task: task.id }, workerCwds(role, task.worktree?.path), task.history);
+    }
+  }
+  for (const rule of data.rules ?? []) {
+    const role = rule.kind === "improve" ? "improver" : "producer";
+    consider(rule.worker, `rule:${rule.id}`, role, { rule: rule.id }, [], []);
+  }
+  const inferred = new Map;
+  if (targets.some((target) => !target.frozen)) {
+    let registry = [];
+    if (options?.registry) {
+      try {
+        registry = await readSessions(options.registry);
+      } catch {
+        registry = null;
+      }
+    }
+    if (registry !== null) {
+      const matches = await resolveSessions(directory, targets, { claimed, registry, cacheMs: options?.scanCacheMs ?? 0 });
+      for (const [key, match] of matches) {
+        if (match.session)
+          inferred.set(key, match.session);
+      }
+    }
+  }
   const ids = new Set;
   for (const task of data.tasks) {
-    for (const worker of Object.values(task.workers)) {
-      const id = worker && sessionID(worker.session);
+    for (const [role, worker] of Object.entries(task.workers)) {
+      if (!worker)
+        continue;
+      const id = sessionID(worker.session) ?? inferred.get(`${task.id}:${role}`) ?? null;
       if (id)
         ids.add(id);
     }
@@ -4033,7 +4369,7 @@ async function factoryUsage(data, directory) {
   const read = (id) => measured.get(id);
   const usage = {};
   for (const task of data.tasks)
-    usage[task.id] = await taskUsage(task, directory, read);
+    usage[task.id] = await taskUsage(task, directory, read, inferred);
   return usage;
 }
 var maxLogBytes, refreshMs = 30000, readers = 4, maxCached = 1024, usdPerCredit = 0.01, usdOf = (credits) => credits === null ? null : Math.round(credits * usdPerCredit * 1e4) / 1e4, cache, reading, sessionUsage = (session, directory) => {
@@ -4263,7 +4599,10 @@ An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
     const proposals = await openProposals(entry.target);
     const data = await readFactory(entry);
     const stops = await recentStops(entry.target, data);
-    const usage = await factoryUsage(data, sessionStateDirectory());
+    const usage = await factoryUsage(data, sessionStateDirectory(), {
+      registry: registryFile(entry.target),
+      scanCacheMs: 5000
+    });
     const briefs = await taskBriefs(entry.file, data);
     const digest = createHash2("sha1").update(JSON.stringify([attention, proposals, stops, usage, briefs])).digest("base64url");
     return {

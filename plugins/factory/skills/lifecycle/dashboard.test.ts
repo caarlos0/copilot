@@ -3520,3 +3520,124 @@ test("cards show usage chips in the header and per worker on history steps, and 
   assert.doesNotMatch(implementation.textContent, /AIC|n\/a/, "A session with no log shows nothing.");
 });
 
+test("history shows model and cost chips across investigation, implementation, and review and hides empty zero-usage chips", async (t) => {
+  const state = await mkdtemp(join(tmpdir(), "factory-dashboard-stages-"));
+  t.after(() => rm(state, { recursive: true, force: true }));
+  const now = Date.now();
+  const iso = (ms: number) => new Date(ms).toISOString();
+  const ev = (ms: number, type: string, data: Json) => JSON.stringify({ type, timestamp: iso(ms), data });
+  const addSession = async (id: string, meta: { cwd: string; repository?: string; name?: string; created: number } | null, lines: string[]) => {
+    await mkdir(join(state, id), { recursive: true });
+    if (meta) {
+      await writeFile(join(state, id, "workspace.yaml"), [
+        `id: ${id}`,
+        `cwd: ${meta.cwd}`,
+        ...(meta.repository ? [`repository: ${meta.repository}`] : []),
+        ...(meta.name ? [`name: '${meta.name}'`] : []),
+        `created_at: ${iso(meta.created)}`,
+      ].join("\n") + "\n");
+    }
+    await writeFile(join(state, id, "events.jsonl"), `${lines.join("\n")}\n`);
+  };
+
+  // Investigation has no persisted session in factory.json — resolved read-only via name + project.
+  await addSession("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", {
+    cwd: "/repo/primary", repository: "acme/widget", name: "Investigate #7: Fix chips", created: now - 55_000,
+  }, [
+    ev(now - 55_000, "session.start", {}),
+    ev(now - 50_000, "session.usage_record", { usage: { model: "claude-opus-5.5", inputTokens: 1200, outputTokens: 80, copilotUsage: { totalNanoAiu: 25_000_000_000 } } }),
+    ev(now - 45_000, "assistant.turn_end", {}),
+  ]);
+  // Implementation has token-only usage (no credits).
+  await addSession("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", null, [
+    ev(now - 40_000, "session.start", {}),
+    ev(now - 35_000, "session.usage_record", { usage: { model: "claude-sonnet-5.5", inputTokens: 2500, outputTokens: 300 } }),
+    ev(now - 30_000, "assistant.turn_end", {}),
+  ]);
+  // Review has known credits.
+  await addSession("cccccccc-cccc-4ccc-8ccc-cccccccccccc", null, [
+    ev(now - 25_000, "session.start", {}),
+    ev(now - 20_000, "session.usage_record", { usage: { model: "gpt-6.1-sol", inputTokens: 900, outputTokens: 50, copilotUsage: { totalNanoAiu: 12_000_000_000 } } }),
+    ev(now - 15_000, "assistant.turn_end", {}),
+  ]);
+  // Zero-usage session (started, no usage_record yet).
+  await addSession("dddddddd-dddd-4ddd-8ddd-dddddddddddd", null, [
+    ev(now - 10_000, "session.start", { selectedModel: "claude-sonnet-5.5" }),
+  ]);
+
+  const ui = await dashboard(t, { now, env: { FACTORY_SESSION_STATE: state } });
+  const data = structuredClone(example);
+  data.project = "acme/widget";
+  data.updated_at = iso(now);
+  data.tasks = [
+    {
+      id: "issue-7",
+      title: "Fix chips",
+      issue: "https://github.com/acme/widget/issues/7",
+      pr: "https://github.com/acme/widget/pull/8",
+      head: null,
+      reviewed_head: null,
+      state: "review",
+      updated_at: iso(now - 10_000),
+      revision: 3,
+      next_action: "Merge",
+      blocker: null,
+      resolution: null,
+      links: [],
+      workers: {
+        investigation: { status: "closed", name: "Investigate #7: Fix chips", launched_at: iso(now - 60_000) },
+        implementation: { status: "closed", session: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", name: "Implement #7: Fix chips" },
+        review: { status: "running", session: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", name: "Review PR #8: Fix chips" },
+      },
+      worktree: { path: "/repo.worktrees/issue-7", created_by_run: true },
+      merge: null,
+      details: null,
+      history: [
+        { state: "initial", at: iso(now - 65_000), note: "Added" },
+        { state: "investigation", at: iso(now - 60_000), note: "Check" },
+        { state: "implementation", at: iso(now - 42_000), note: "Build" },
+        { state: "review", at: iso(now - 26_000), note: "Review" },
+      ],
+    },
+    {
+      id: "issue-8",
+      title: "Brand new",
+      issue: "https://github.com/acme/widget/issues/8",
+      pr: null,
+      head: null,
+      reviewed_head: null,
+      state: "investigation",
+      updated_at: iso(now - 5_000),
+      revision: 1,
+      next_action: "Wait",
+      blocker: null,
+      resolution: null,
+      links: [],
+      workers: {
+        investigation: { status: "running", session: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" },
+      },
+      worktree: null,
+      merge: null,
+      details: null,
+      history: [
+        { state: "initial", at: iso(now - 15_000), note: "Added" },
+        { state: "investigation", at: iso(now - 10_000), note: "Start" },
+      ],
+    },
+  ];
+  await writeFile(join(ui.directory, factoryFile), JSON.stringify(data));
+  await ui.run("refresh()");
+  ui.run("choose('review')");
+  const reviewRow = ui.get("task-list").children[0];
+  const [, invStep, implStep, revStep] = reviewRow.querySelector("ol").children;
+  assert.match(invStep.textContent, /claude-opus-5\.5\$0\.25/);
+  assert.match(implStep.textContent, /claude-sonnet-5\.52\.5k in \/ 300 out/);
+  assert.match(revStep.textContent, /gpt-6\.1-sol\$0\.12/);
+
+  ui.run("choose('investigation')");
+  const newRow = ui.get("task-list").children[0];
+  const [, startedStep] = newRow.querySelector("ol").children;
+  assert.doesNotMatch(startedStep.textContent, /0 in \/ 0 out|claude-sonnet-5\.5/, "Zero-usage session shows no fake cost or unbilled model.");
+  assert.doesNotMatch(newRow.querySelector(".chips").textContent, /Tokens: 0 in \/ 0 out/, "Header hides empty zero-token chip.");
+});
+
