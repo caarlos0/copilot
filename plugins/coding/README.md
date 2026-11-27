@@ -37,7 +37,7 @@ Start one with `copilot --agent coding:<name>`.
 | Performance | `go-performance`, `rust-performance`, `python-performance`, `typescript-performance` |
 | Debugging | `runtime-process-debugging` |
 | GitHub | `gh-cli`, `issue-validator`, `maintainer-briefing`, `dependabot-merge` |
-| Writing | `gh-doc-author`, `dashboard` |
+| Writing | `gh-doc-author`, `dashboard`, `stop-slop` |
 
 Ask Copilot to use a skill by name, or run `/coding:review` or
 `/coding:simplifier`.
