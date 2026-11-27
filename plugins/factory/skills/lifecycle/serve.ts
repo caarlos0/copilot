@@ -17,7 +17,7 @@ import { update } from "./tasks.ts";
 import { decideProposal, scanProposals } from "./proposals.ts";
 import type { Proposal } from "./proposals.ts";
 import { registryFile, sessionStateDirectory } from "./sessions.ts";
-import { causeTaskId, causeTaskValues, dismissStop, isStopDismissed, scanStops } from "./stops.ts";
+import { causeTaskId, causeTaskValues, dismissStop, isStopDismissed, isStopRecorded, scanStops } from "./stops.ts";
 import { factoryUsage } from "./usage.ts";
 import { candidates, stateDirectories } from "./state-dir.ts";
 
@@ -552,6 +552,7 @@ An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
       const stop = (await scanStops(target, data)).find(({ stop_id }) => stop_id === id);
       if (!stop) {
         if (await isStopDismissed(target, id)) throw new HttpError(409, "The stop is already dismissed.");
+        if (await isStopRecorded(target, id)) throw new HttpError(409, "The stop is already resolved.");
         throw new HttpError(404, "The stop does not exist.");
       }
       const existing = stop.cause_task ??

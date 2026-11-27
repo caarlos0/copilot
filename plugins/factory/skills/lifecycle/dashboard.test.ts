@@ -2924,8 +2924,15 @@ test("the stops link counts open stops, renders cards without None, links text, 
   assert.equal(ui.get("detail").hidden, false);
   assert.equal(ui.get("stops-view").hidden, false);
   assert.equal(ui.get("task-view").hidden, true);
-  const [first, second, third] = ui.get("stops-list").children;
-  assert.equal(ui.get("stops-list").children.length, 3);
+  const [quietGroup, blockedGroup] = ui.get("stops-list").children;
+  assert.equal(ui.get("stops-list").children.length, 2);
+  assert.equal(quietGroup.dataset.group, "worker-quiet");
+  assert.match(quietGroup.querySelector(".stop-group-head").textContent, /worker-quiet2Dismiss all/);
+  assert.equal(blockedGroup.dataset.group, "blocked:user-decision");
+  assert.match(blockedGroup.querySelector(".stop-group-head").textContent, /blockeduser-decision1Dismiss all/);
+
+  const [first, second] = quietGroup.querySelector(".stop-group-list").children;
+  const [third] = blockedGroup.querySelector(".stop-group-list").children;
   assert.equal(first.tagName, "LI");
   assert.match(first.textContent, /worker-quiet.*worker-fixable.*9m.*Task issue-5.*Role implementation.*Cause task issue-9/);
   assert.equal(first.querySelector("img"), null, "A detail with markup is text.");
@@ -2967,6 +2974,41 @@ test("the stops link counts open stops, renders cards without None, links text, 
 
   await action(first, "open-cause").fire("click");
   assert.equal(ui.run("location.hash"), "#implementation", "Open cause task opens that task.");
+
+  // Blocked stops split into separate groups by blocker class, and Dismiss all dismisses each stop in its group.
+  show([
+    stop(1),
+    stop(2),
+    stop(4, { cause: "blocked", class: "user-decision", task: "issue-5", role: null }),
+    stop(5, { cause: "blocked", class: "approval", task: "issue-5", role: null }),
+    stop(6, { cause: "blocked", class: "none", task: "issue-5", role: null }),
+  ]);
+  await link.fire("click");
+  const groups = ui.get("stops-list").children;
+  assert.deepEqual(groups.map((section: Json) => section.dataset.group), [
+    "worker-quiet",
+    "blocked:user-decision",
+    "blocked:approval",
+    "blocked:none",
+  ]);
+  assert.match(groups[3].querySelector(".stop-group-head").textContent, /blockedNo class1Dismiss all/);
+
+  posts.length = 0;
+  reply = { status: 200, body: { dismissed: true, recorded: true } };
+  await action(groups[0].querySelector(".stop-group-head"), "dismiss-group").fire("click");
+  assert.deepEqual(posts, [
+    { path: `/api/stops/dismiss?file=${encodeURIComponent(factoryFile)}`, body: { stop_id: "worker-quiet:issue-5:implementation:1" } },
+    { path: `/api/stops/dismiss?file=${encodeURIComponent(factoryFile)}`, body: { stop_id: "worker-quiet:issue-5:implementation:2" } },
+  ]);
+  assert.match(groups[0].querySelector(".stop-group-head").textContent, /Dismissed 2 stops\./);
+
+  // A failed dismiss in a group reports how many failed and re-enables the group buttons.
+  posts.length = 0;
+  reply = { status: 500, body: { error: "Disk full." } };
+  const dismissGroup = action(groups[1].querySelector(".stop-group-head"), "dismiss-group");
+  await dismissGroup.fire("click");
+  assert.match(groups[1].querySelector(".stop-group-head").textContent, /The factory did not dismiss 1 of 1 stop: Disk full\./);
+  assert.equal(dismissGroup.disabled, false);
 
   show([]);
   assert.equal(link.hidden, true);
@@ -3037,6 +3079,14 @@ test("stop actions dismiss a stop and create a cause task through the shared wri
   }
   assert.equal((await post("/api/stops/dismiss", { stop_id: "s-cause" }, { Origin: "http://evil.example" })).status, 403);
   assert.equal((await post("/api/stops/cause-task", { stop_id: "s-cause" }, { Origin: "http://evil.example" })).status, 403);
+
+  // Auto-resolved stops drop out of /api/factory and refuse cause-task creation with 409.
+  await appendFile(events, `${JSON.stringify({
+    id: "r-fixed", at: new Date().toISOString(), type: "worker.result", task: "issue-5", source: "worker",
+    data: { role: "implementation", outcome: "complete" },
+  })}\n`);
+  assert.deepEqual((await (await get(url, path)).json()).stops, []);
+  assert.equal((await post("/api/stops/cause-task", { stop_id: "s-cause" })).status, 409);
 });
 
 test("the factory payload lists the stops of the last 30 days, newest first, at most 50, and its tag follows the log", async (t) => {

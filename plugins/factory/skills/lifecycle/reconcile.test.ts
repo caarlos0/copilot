@@ -430,6 +430,10 @@ test("records each stop once, reports it until a cause task holds its stop_id, a
   result = await f.run([work, stopped({ class: "user-decision" }), cause]);
   assert.deepEqual(stops(result), [], "A dismissed stop produces no stop finding.");
   assert.equal((await recorded()).length, 2, "A dismissed stop is not recorded again.");
+
+  // Unblocking the task clears its blocked stop without a cause task or dismissal.
+  result = await f.run([work, task("stuck", "implementation")]);
+  assert.deepEqual(stops(result), [], "An unblocked task clears its blocked stop.");
 });
 
 test("reconcile hides an emit-refused stop fixed by a later worker.result and keeps an unfixed one", async (t) => {

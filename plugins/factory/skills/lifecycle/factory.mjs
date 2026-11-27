@@ -1276,16 +1276,22 @@ async function readStopEvents(file) {
     text = await readFile3(eventsFile(file), "utf8");
   } catch (error) {
     if (error.code === "ENOENT") {
-      return { stops: new Map, dismissed: new Set, resolved: new Set };
+      return {
+        stops: new Map,
+        dismissed: new Set,
+        resolved: new Set,
+        movedResolved: new Map
+      };
     }
     throw error;
   }
   const stops = new Map;
   const dismissed = new Set;
   const resolved = new Set;
+  const movedResolved = new Map;
   for (const line of text.split(`
 `)) {
-    if (!line.includes('"stop.') && !line.includes('"worker.result"'))
+    if (!line.includes('"stop.') && !line.includes('"worker.result"') && !line.includes('"task.moved"'))
       continue;
     let event;
     try {
@@ -1295,11 +1301,39 @@ async function readStopEvents(file) {
     }
     if (event?.type === "worker.result") {
       const role = typeof event.data?.role === "string" ? event.data.role : null;
+      const outcome = typeof event.data?.outcome === "string" ? event.data.outcome : null;
       if (!event.task || !role)
         continue;
       for (const [id, stop] of stops) {
-        if (stop.data.cause === "emit-refused" && stop.task === event.task && stop.data.role === role) {
+        if (stop.task !== event.task)
+          continue;
+        if (stop.data.cause === "emit-refused" && stop.data.role === role) {
           resolved.add(id);
+        } else if (outcome !== "blocked" && workerResultAutoCauses.has(stop.data.cause) && (stop.data.role === role || stop.data.cause === "repeated-conflict" && stop.data.role === null)) {
+          resolved.add(id);
+        }
+      }
+      continue;
+    }
+    if (event?.type === "task.moved") {
+      const to = typeof event.data?.to === "string" ? event.data.to : null;
+      if (!event.task || !to)
+        continue;
+      if (to === "resolved") {
+        for (const [id, stop] of stops) {
+          if (stop.task === event.task || causeTaskId(id) === event.task)
+            movedResolved.set(id, event.task);
+        }
+      } else {
+        for (const [id, taskId] of movedResolved) {
+          if (taskId === event.task)
+            movedResolved.delete(id);
+        }
+      }
+      if (to !== "blocked") {
+        for (const [id, stop] of stops) {
+          if (taskMovedAutoCauses.has(stop.data.cause) && stop.task === event.task)
+            resolved.add(id);
         }
       }
       continue;
@@ -1318,7 +1352,7 @@ async function readStopEvents(file) {
       dismissed.add(id);
     }
   }
-  return { stops, dismissed, resolved };
+  return { stops, dismissed, resolved, movedResolved };
 }
 async function recordStop(file, stop) {
   const factory = await resolveFactory(file);
@@ -1343,12 +1377,61 @@ async function dismissStop(file, id) {
 async function isStopDismissed(file, id) {
   return (await readStopEvents(await resolveFactory(file))).dismissed.has(id);
 }
+async function isStopRecorded(file, id) {
+  return (await readStopEvents(await resolveFactory(file))).stops.has(id);
+}
+function isResolvedByFactory(stop, tasks, cause, movedResolvedTask) {
+  if (cause?.state === "resolved")
+    return true;
+  const source = stop.task ? tasks.get(stop.task) : undefined;
+  if (source?.state === "resolved")
+    return true;
+  if (movedResolvedTask && !tasks.has(movedResolvedTask))
+    return true;
+  if (!source)
+    return false;
+  const { cause: kind, role, stop_id: id } = stop.data;
+  if (kind === "blocked") {
+    if (source.state !== "blocked")
+      return true;
+    const prefix = `blocked:${source.id}:-:`;
+    if (source.blocker?.since && id.startsWith(prefix) && id !== stopId("blocked", source.id, null, source.blocker.since)) {
+      return true;
+    }
+    return false;
+  }
+  const worker = role ? source.workers?.[role] : null;
+  if (kind === "worker-blocked")
+    return worker?.status === "running";
+  if (kind === "worker-quiet" && worker) {
+    if (worker.status === "closed")
+      return true;
+    if (worker.launched_at) {
+      const prefix = `worker-quiet:${source.id}:${role}:`;
+      if (id.startsWith(prefix)) {
+        const key = id.slice(prefix.length);
+        if (key !== "-" ? worker.launched_at !== key : Date.parse(worker.launched_at) > Date.parse(stop.at))
+          return true;
+      }
+    }
+  }
+  return false;
+}
 async function scanStops(file, factory) {
-  const { stops, dismissed, resolved } = await readStopEvents(await resolveFactory(file));
-  return [...stops.values()].filter(({ data }) => !dismissed.has(data.stop_id) && !resolved.has(data.stop_id)).map(({ at, task, data }) => {
-    const cause = factory.tasks.find((candidate) => candidate.details?.stop_id === data.stop_id);
-    return { ...data, task, at, cause_task: cause?.id ?? null, cause_state: cause?.state ?? null };
-  });
+  const { stops, dismissed, resolved, movedResolved } = await readStopEvents(await resolveFactory(file));
+  const tasks = new Map(factory.tasks.map((task) => [task.id, task]));
+  const causesByStop = new Map(factory.tasks.filter((task) => typeof task.details?.stop_id === "string").map((task) => [task.details.stop_id, task]));
+  const open = [];
+  for (const event of stops.values()) {
+    const { at, task, data } = event;
+    if (dismissed.has(data.stop_id) || resolved.has(data.stop_id))
+      continue;
+    const cause = causesByStop.get(data.stop_id);
+    if (isResolvedByFactory(event, tasks, cause, movedResolved.get(data.stop_id)))
+      continue;
+    open.push({ ...data, task, at, cause_task: cause?.id ?? null, cause_state: cause?.state ?? null });
+  }
+  return open;
 }
 function detectStops(factory, events, quiet = []) {
   const found = new Map;
@@ -1449,9 +1532,11 @@ function detectStops(factory, events, quiet = []) {
   }
   return [...found.values()];
 }
-var stopId = (cause, task, role, key) => `${cause}:${task ?? "-"}:${role ?? "-"}:${key}`, causeTaskId = (id) => `cause-${createHash("sha256").update(id).digest("hex").slice(0, 8)}`, causeTaskNextAction = "Find the root cause. Then propose a prevention, not only a retry.", maxDetail = 300, repeatedPrompts = 2, duplicatePromptWindowMs = 2000, repeatedConflicts = 2, promptKinds, short = (text) => createHash("sha256").update(text).digest("hex").slice(0, 8), clip = (text) => text.length > maxDetail ? `${text.slice(0, maxDetail - 3)}...` : text;
+var stopId = (cause, task, role, key) => `${cause}:${task ?? "-"}:${role ?? "-"}:${key}`, causeTaskId = (id) => `cause-${createHash("sha256").update(id).digest("hex").slice(0, 8)}`, causeTaskNextAction = "Find the root cause. Then propose a prevention, not only a retry.", workerResultAutoCauses, taskMovedAutoCauses, maxDetail = 300, repeatedPrompts = 2, duplicatePromptWindowMs = 2000, repeatedConflicts = 2, promptKinds, short = (text) => createHash("sha256").update(text).digest("hex").slice(0, 8), clip = (text) => text.length > maxDetail ? `${text.slice(0, maxDetail - 3)}...` : text;
 var init_stops = __esm(() => {
   init_broker();
+  workerResultAutoCauses = new Set(["worker-blocked", "worker-quiet", "repeated-conflict"]);
+  taskMovedAutoCauses = new Set(["blocked", "worker-blocked"]);
   promptKinds = ["permission", "sandbox-bypass"];
 });
 
@@ -4879,6 +4964,8 @@ An invalid argument gives exit code 2. A startup failure gives exit code 1.`);
       if (!stop) {
         if (await isStopDismissed(target, id))
           throw new HttpError(409, "The stop is already dismissed.");
+        if (await isStopRecorded(target, id))
+          throw new HttpError(409, "The stop is already resolved.");
         throw new HttpError(404, "The stop does not exist.");
       }
       const existing = stop.cause_task ?? (data.tasks.some((task) => task.id === causeTaskId(stop.stop_id)) ? causeTaskId(stop.stop_id) : null);

@@ -42,22 +42,32 @@ export function causeTaskValues(stop: Pick<Stop, "stop_id" | "cause" | "task">) 
 
 type StopEvent = { at: string; task: string | null; data: Omit<Stop, "task"> };
 
-// Reads recorded stops (oldest first), dismissed stop_ids, and emit-refused stops auto-resolved by a later accepted worker.result for the same task and role.
+const workerResultAutoCauses = new Set(["worker-blocked", "worker-quiet", "repeated-conflict"]);
+const taskMovedAutoCauses = new Set(["blocked", "worker-blocked"]);
+
+// Reads recorded stops (oldest first), dismissed stop_ids, and stops auto-resolved by later events.
 async function readStopEvents(file: string) {
   let text: string;
   try {
     text = await readFile(eventsFile(file), "utf8");
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return { stops: new Map<string, StopEvent>(), dismissed: new Set<string>(), resolved: new Set<string>() };
+      return {
+        stops: new Map<string, StopEvent>(),
+        dismissed: new Set<string>(),
+        resolved: new Set<string>(),
+        movedResolved: new Map<string, string>(),
+      };
     }
     throw error;
   }
   const stops = new Map<string, StopEvent>();
   const dismissed = new Set<string>();
   const resolved = new Set<string>();
+  // Tracks stops whose task or cause task moved to resolved after the stop, for tasks later archived.
+  const movedResolved = new Map<string, string>();
   for (const line of text.split("\n")) {
-    if (!line.includes('"stop.') && !line.includes('"worker.result"')) continue;
+    if (!line.includes('"stop.') && !line.includes('"worker.result"') && !line.includes('"task.moved"')) continue;
     let event;
     try {
       event = JSON.parse(line);
@@ -66,10 +76,34 @@ async function readStopEvents(file: string) {
     }
     if (event?.type === "worker.result") {
       const role = typeof event.data?.role === "string" ? event.data.role : null;
+      const outcome = typeof event.data?.outcome === "string" ? event.data.outcome : null;
       if (!event.task || !role) continue;
       for (const [id, stop] of stops) {
-        if (stop.data.cause === "emit-refused" && stop.task === event.task && stop.data.role === role) {
+        if (stop.task !== event.task) continue;
+        if (stop.data.cause === "emit-refused" && stop.data.role === role) {
           resolved.add(id);
+        } else if (outcome !== "blocked" && workerResultAutoCauses.has(stop.data.cause) &&
+            (stop.data.role === role || (stop.data.cause === "repeated-conflict" && stop.data.role === null))) {
+          resolved.add(id);
+        }
+      }
+      continue;
+    }
+    if (event?.type === "task.moved") {
+      const to = typeof event.data?.to === "string" ? event.data.to : null;
+      if (!event.task || !to) continue;
+      if (to === "resolved") {
+        for (const [id, stop] of stops) {
+          if (stop.task === event.task || causeTaskId(id) === event.task) movedResolved.set(id, event.task);
+        }
+      } else {
+        for (const [id, taskId] of movedResolved) {
+          if (taskId === event.task) movedResolved.delete(id);
+        }
+      }
+      if (to !== "blocked") {
+        for (const [id, stop] of stops) {
+          if (taskMovedAutoCauses.has(stop.data.cause) && stop.task === event.task) resolved.add(id);
         }
       }
       continue;
@@ -87,7 +121,7 @@ async function readStopEvents(file: string) {
       dismissed.add(id);
     }
   }
-  return { stops, dismissed, resolved };
+  return { stops, dismissed, resolved, movedResolved };
 }
 
 // Appends one stop.recorded event (source stops). A stop_id that is already open or dismissed records nothing.
@@ -115,15 +149,64 @@ export async function isStopDismissed(file: string, id: string) {
   return (await readStopEvents(await resolveFactory(file))).dismissed.has(id);
 }
 
+export async function isStopRecorded(file: string, id: string) {
+  return (await readStopEvents(await resolveFactory(file))).stops.has(id);
+}
+
+function isResolvedByFactory(
+  stop: StopEvent,
+  tasks: Map<string, Factory["tasks"][number]>,
+  cause: Factory["tasks"][number] | undefined,
+  movedResolvedTask: string | undefined,
+) {
+  if (cause?.state === "resolved") return true;
+  const source = stop.task ? tasks.get(stop.task) : undefined;
+  if (source?.state === "resolved") return true;
+  if (movedResolvedTask && !tasks.has(movedResolvedTask)) return true;
+  if (!source) return false;
+
+  const { cause: kind, role, stop_id: id } = stop.data;
+  if (kind === "blocked") {
+    if (source.state !== "blocked") return true;
+    const prefix = `blocked:${source.id}:-:`;
+    if (source.blocker?.since && id.startsWith(prefix) && id !== stopId("blocked", source.id, null, source.blocker.since)) {
+      return true;
+    }
+    return false;
+  }
+  const worker = role ? source.workers?.[role as WorkerRole] : null;
+  if (kind === "worker-blocked") return worker?.status === "running";
+  if (kind === "worker-quiet" && worker) {
+    if (worker.status === "closed") return true;
+    if (worker.launched_at) {
+      const prefix = `worker-quiet:${source.id}:${role}:`;
+      if (id.startsWith(prefix)) {
+        const key = id.slice(prefix.length);
+        if (key !== "-" ? worker.launched_at !== key : Date.parse(worker.launched_at) > Date.parse(stop.at)) return true;
+      }
+    }
+  }
+  return false;
+}
+
 // Pairs each open (not dismissed and not auto-resolved) recorded stop with its cause task: the task whose details.stop_id equals the stop_id.
 export async function scanStops(file: string, factory: Factory): Promise<ScannedStop[]> {
-  const { stops, dismissed, resolved } = await readStopEvents(await resolveFactory(file));
-  return [...stops.values()]
-    .filter(({ data }) => !dismissed.has(data.stop_id) && !resolved.has(data.stop_id))
-    .map(({ at, task, data }) => {
-      const cause = factory.tasks.find((candidate) => candidate.details?.stop_id === data.stop_id);
-      return { ...data, task, at, cause_task: cause?.id ?? null, cause_state: cause?.state ?? null };
-    });
+  const { stops, dismissed, resolved, movedResolved } = await readStopEvents(await resolveFactory(file));
+  const tasks = new Map(factory.tasks.map((task) => [task.id, task]));
+  const causesByStop = new Map(
+    factory.tasks
+      .filter((task) => typeof task.details?.stop_id === "string")
+      .map((task) => [task.details!.stop_id as string, task]),
+  );
+  const open: ScannedStop[] = [];
+  for (const event of stops.values()) {
+    const { at, task, data } = event;
+    if (dismissed.has(data.stop_id) || resolved.has(data.stop_id)) continue;
+    const cause = causesByStop.get(data.stop_id);
+    if (isResolvedByFactory(event, tasks, cause, movedResolved.get(data.stop_id))) continue;
+    open.push({ ...data, task, at, cause_task: cause?.id ?? null, cause_state: cause?.state ?? null });
+  }
+  return open;
 }
 
 const maxDetail = 300;

@@ -429,9 +429,15 @@ leave work undone. Treat each finding as unfinished work:
   `emit-refused`, `repeated-permission`, `repeated-conflict`), `class`, `task`,
   `role`, `detail` and the exact `command` that creates the cause task. An
   `emit-refused` stop uses a stable key and clears automatically when a later
-  accepted `worker.result` for that task and role exists. A stop stays until a
+  accepted `worker.result` for that task and role exists. A stop also clears
+  automatically when its cause clears: the task or cause task moves to
+  `resolved`, a `blocked` task leaves `blocked`, a `worker-blocked` or
+  `worker-quiet` worker runs again, closes, or emits a non-`blocked` result
+  (parking a quiet worker as `idle` keeps the stop open), or a
+  `repeated-conflict` task emits a non-`blocked` result. A stop stays until a
   task has that `stop_id` in its `details`, the user dismisses it in the
-  dashboard Stops panel, or an `emit-refused` stop clears automatically. Follow
+  dashboard Stops panel (individually or with "Dismiss all" on its group), or
+  it clears automatically. Follow
   "Root cause, not retry".
 - `improve-decided-unapplied`: the user decided an `improve` proposal in the
   dashboard (an `improve.decided` event exists), but the result file has a

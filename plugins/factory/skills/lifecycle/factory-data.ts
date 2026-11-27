@@ -728,6 +728,29 @@ export function digitIndex(
   return index < count ? index : -1;
 }
 
+// Groups stops by cause, and splits blocked stops by blocker class so one group can be dismissed together.
+export type StopGroup<T extends { cause: string; class?: string | null }> = {
+  key: string;
+  cause: string;
+  class: string | null;
+  stops: T[];
+};
+
+export function groupStops<T extends { cause: string; class?: string | null }>(stops: T[]): StopGroup<T>[] {
+  const groups = new Map<string, StopGroup<T>>();
+  for (const stop of stops) {
+    const klass = stop.cause === "blocked" ? (stop.class || "none") : null;
+    const key = klass ? `${stop.cause}:${klass}` : stop.cause;
+    let group = groups.get(key);
+    if (!group) {
+      group = { key, cause: stop.cause, class: klass, stops: [] };
+      groups.set(key, group);
+    }
+    group.stops.push(stop);
+  }
+  return [...groups.values()];
+}
+
 // Shortens an `owner/repo` label until `measure(text)` fits `width`, like fish's prompt_pwd:
 // full name, abbreviated owner, repo alone, then the repo cut from the start so its end stays.
 export function fitProjectLabel(label: string, width: number, measure: (text: string) => number) {

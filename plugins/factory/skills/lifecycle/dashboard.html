@@ -220,7 +220,14 @@
       #stops-badge[hidden] { display: none; }
       #stops-badge[aria-pressed="true"] { background: color-mix(in srgb, var(--blocked) 14%, var(--bg)); }
       #stops-note, #stops-empty { margin: 16px 24px 0; }
-      #stops-list { list-style: none; margin: 16px 0 0; padding: 0; border-top: 1px solid var(--border); }
+      #stops-list { margin: 16px 0 0; border-top: 1px solid var(--border); }
+      .stop-group + .stop-group { border-top: 1px solid var(--border); }
+      .stop-group-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px;
+        padding: 12px 24px; background: var(--bg-muted); border-bottom: 1px solid var(--border); }
+      .stop-group-title { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; font-size: 13px; }
+      .stop-group-title .counter { margin-left: 0; }
+      .stop-group-head p { flex-basis: 100%; margin: 0; }
+      .stop-group-list { list-style: none; margin: 0; padding: 0; }
       .stop-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin: 8px 0 0; font-size: 12px; }
       .stop-detail { margin: 8px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
       .stop-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0 0; }
@@ -409,7 +416,7 @@
         #palette-list li { padding: 12px 16px; }
         #palette-status { padding-left: 16px; padding-right: 16px; }
         #producers-note, #detail-empty, #attention-note, #attention-empty, #stops-note, #stops-empty { margin-left: 16px; margin-right: 16px; }
-        #producers-view h3.section, #ignored-list li, #ignored-empty { padding-left: 16px; padding-right: 16px; }
+        #producers-view h3.section, #ignored-list li, #ignored-empty, .stop-group-head { padding-left: 16px; padding-right: 16px; }
         .move-form { padding: 16px; }
         .move-form .controls button { flex: 1 1 auto; }
         select { width: 100%; }
@@ -556,7 +563,7 @@
       </div>
       <div id="stops-view" hidden>
         <p id="stops-note" class="muted">Review each open stop. Open or unblock its task, create a cause task, or dismiss the stop.</p>
-        <ul id="stops-list"></ul>
+        <div id="stops-list"></div>
         <p id="stops-empty" class="muted" hidden>No stop is open.</p>
       </div>
     </aside>
@@ -564,7 +571,7 @@
     <noscript>The factory page needs JavaScript.</noscript>
     <script type="module">
       import { marked, DOMPurify } from "./dashboard.mjs";
-      import { states, outcomes, transitions, artifactName, briefName, githubURL, advisoryURL, validate, countByState, entered, byRecency, cardSummary, rankTasks, compareFactories, factorySection, factorySections, fitProjectLabel, sortReferences, cyclesOf, operatorStates, operatorOutcomes, unblockState, unblockChoice, stripRecommended, blockerClasses, blockerMeta, nextRun, nextDue, leverSpends, leverAutonomyCaps, maxParallelWorkers, maxRoleLimit, modelRoles, maxModelLength, reasoningEfforts, digitIndex } from "./dashboard.mjs";
+      import { states, outcomes, transitions, artifactName, briefName, githubURL, advisoryURL, validate, countByState, entered, byRecency, cardSummary, rankTasks, compareFactories, factorySection, factorySections, fitProjectLabel, groupStops, sortReferences, cyclesOf, operatorStates, operatorOutcomes, unblockState, unblockChoice, stripRecommended, blockerClasses, blockerMeta, nextRun, nextDue, leverSpends, leverAutonomyCaps, maxParallelWorkers, maxRoleLimit, modelRoles, maxModelLength, reasoningEfforts, digitIndex } from "./dashboard.mjs";
 
       const SVG = "http://www.w3.org/2000/svg";
       const NODE = { w: 160, h: 110 };
@@ -2543,6 +2550,72 @@
         }
       }
 
+      async function dismissStopGroup(group, section, head, status) {
+        const file = selection;
+        const buttons = section.querySelectorAll(".stop-action");
+        for (const button of buttons) button.disabled = true;
+        head.setAttribute("aria-busy", "true");
+        status.hidden = true;
+        let failed = 0;
+        let lastError = "";
+        for (const stop of group.stops) {
+          try {
+            await requestJSON(`/api/stops/dismiss?${new URLSearchParams({ file })}`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ stop_id: stop.stop_id }),
+            });
+          } catch (cause) {
+            failed += 1;
+            lastError = cause.message;
+          }
+        }
+        head.setAttribute("aria-busy", "false");
+        const total = group.stops.length;
+        if (failed === 0) {
+          status.textContent = total === 1 ? "Dismissed 1 stop." : `Dismissed ${total} stops.`;
+          status.hidden = false;
+          if (selection === file) refresh();
+          return;
+        }
+        status.textContent = `The factory did not dismiss ${failed} of ${total} ${total === 1 ? "stop" : "stops"}: ${lastError}`;
+        status.hidden = false;
+        for (const button of buttons) button.disabled = false;
+        if (failed < total && selection === file) refresh();
+      }
+
+      function stopGroup(group) {
+        const section = element("section", null, "stop-group");
+        section.dataset.group = group.key;
+        section.dataset.cause = group.cause;
+        if (group.class) section.dataset.class = group.class;
+
+        const head = element("div", null, "stop-group-head");
+        const title = element("h3", null, "stop-group-title");
+        const cause = element("span", group.cause, "chip state");
+        cause.style.setProperty("--c", "var(--blocked)");
+        title.append(cause);
+        if (group.class) {
+          title.append(element("span", group.class === "none" ? "No class" : group.class, "chip"));
+        }
+        title.append(element("span", String(group.stops.length), "counter"));
+
+        const dismissAll = element("button", "Dismiss all", "stop-action");
+        dismissAll.type = "button";
+        dismissAll.dataset.action = "dismiss-group";
+        const status = element("p", null, "muted");
+        status.hidden = true;
+        status.setAttribute("role", "status");
+
+        const cards = element("ul", null, "stop-group-list");
+        cards.append(...group.stops.map(stopCard));
+
+        dismissAll.addEventListener("click", () => dismissStopGroup(group, section, head, status));
+        head.append(title, dismissAll, status);
+        section.append(head, cards);
+        return section;
+      }
+
       function renderStops() {
         const stops = openStops();
         document.getElementById("detail-title").textContent = "Stops";
@@ -2555,7 +2628,7 @@
         });
         const signature = JSON.stringify([stops, linked]);
         if (list.dataset.signature !== signature) {
-          list.replaceChildren(...stops.map(stopCard));
+          list.replaceChildren(...groupStops(stops).map(stopGroup));
           list.dataset.signature = signature;
         }
         refreshElapsedLabels(list);

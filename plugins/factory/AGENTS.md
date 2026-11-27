@@ -542,15 +542,26 @@ not create a stop. `factory.mjs broker emit`
 records an `emit-refused` stop with a stable key (`not-rebased:<head>`,
 `dirty-worktree`, `head-mismatch`, or `bad-result`) and the refusal error
 message (cut to 300 characters) in `detail` when it refuses a worker event.
-A later accepted `worker.result` for the same task and role auto-resolves that
-`emit-refused` stop: it leaves `scanStops` so `reconcile`, `stop-hook`, and the
-dashboard Stops panel ignore it. `stop.dismissed`
+A stop auto-resolves and leaves `scanStops` (so `reconcile`, `stop-hook`, and the
+dashboard Stops panel ignore it) when its cause clears: the cause task or the
+task itself moves to `resolved`; a `blocked` task leaves `blocked` or gets a
+newer `blocker.since`; a `worker-blocked` task leaves `blocked`, its worker
+runs again, or that role emits a non-`blocked` `worker.result`; a `worker-quiet`
+worker closes, relaunches with a new `launched_at`, or emits a non-`blocked`
+`worker.result` (parking a quiet worker as `idle` keeps the stop open until a
+cause task exists); an `emit-refused` role emits a later accepted `worker.result`;
+or a `repeated-conflict` task emits a later non-`blocked` `worker.result`.
+`repeated-permission` stays open until dismissed or until its task or cause task
+resolves. `stop.dismissed`
 (source `stops`, `data.stop_id`) marks a stop as dismissed. Dismissed stops leave
 `scanStops`, so the dashboard Stops panel, `reconcile` `stop` findings, and `stop-hook`
 ignore them, and `reconcile` does not record the same `stop_id` again. The `stop` finding
 stays until a task has that `stop_id` in its `details` (the cause task), a
-`stop.dismissed` event exists for it, or an `emit-refused` stop auto-resolves. The dashboard Stops panel reads `stops` in
-`/api/factory` and shows one card per open stop with actions: Open task, Unblock task
+`stop.dismissed` event exists for it, or the stop auto-resolves. The dashboard Stops panel reads `stops` in
+`/api/factory`, groups open stops by `cause` (and by blocker `class` for
+`blocked` stops) via `groupStops`, shows a group header with a "Dismiss all"
+action (calling `POST /api/stops/dismiss?file=` once per stop in the group),
+and shows one card per open stop with actions: Open task, Unblock task
 (for `user-decision` stops or blocked tasks), Create cause task (`POST /api/stops/cause-task?file=`
 with `{stop_id}`, reusing `causeTaskValues` and the shared `update` writer with source
 `dashboard`), Open cause task, and Dismiss (`POST /api/stops/dismiss?file=` with `{stop_id}`,
