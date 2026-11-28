@@ -1185,9 +1185,21 @@ investigation result has `verdict: implement`. It is the only worker that
 edits, commits, or pushes. Use a new worktree for every task:
 
 ```sh
-WT=$(node /abs/path/to/factory.mjs worktree create fix-login)   # run in the main checkout
-NAME=$(node /abs/path/to/factory.mjs worker-name --role implementation --ref '#42' --summary 'Fix login redirect')
-rex window new -c "$(echo "$WT" | jq -r .path)" -- env FACTORY_TASK=fix-login FACTORY_ROLE=implementation FACTORY_FILE="$FILE" copilot --agent coding:caarlos0 --name "$NAME" --yolo --sandbox --add-dir "$HOME/Developer/worktrees" --add-dir "$STATE_DIR" -i 'Read /abs/brief.md and do it.'
+node /abs/path/to/factory.mjs worktree create fix-login
+```
+
+Record the returned `.path`. Write the brief and worker instructions for that
+path. In the same shell call as the preflight and launch, set `WORKER_DIR`,
+`INSTRUCTIONS_DIR`, `FILE`, and `STATE_DIR` to their absolute paths:
+
+```sh
+: "${WORKER_DIR:?set the worker cwd}" "${INSTRUCTIONS_DIR:?set the instructions directory}" "${FILE:?set the factory file}" "${STATE_DIR:?set the state directory}" &&
+NAME=$(node /abs/path/to/factory.mjs worker-name --role implementation --ref '#42' --summary 'Fix login redirect') &&
+SOURCE=$(realpath "$INSTRUCTIONS_DIR/worker.instructions.md") &&
+CUSTOM_INSTRUCTIONS="${COPILOT_CUSTOM_INSTRUCTIONS_DIRS:+$COPILOT_CUSTOM_INSTRUCTIONS_DIRS,}$INSTRUCTIONS_DIR" &&
+SOURCES=$(env COPILOT_CUSTOM_INSTRUCTIONS_DIRS="$CUSTOM_INSTRUCTIONS" copilot -C "$WORKER_DIR" --sandbox --add-dir "$HOME/Developer/worktrees" --add-dir "$STATE_DIR" instruction list --json) &&
+printf '%s\n' "$SOURCES" | jq -e --arg source "$SOURCE" 'any(.[]; .sourcePath == $source and .defaultDisabled == false)' &&
+rex window new -c "$WORKER_DIR" -- env COPILOT_CUSTOM_INSTRUCTIONS_DIRS="$CUSTOM_INSTRUCTIONS" FACTORY_TASK=fix-login FACTORY_ROLE=implementation FACTORY_FILE="$FILE" copilot --agent coding:caarlos0 --name "$NAME" --yolo --sandbox --add-dir "$HOME/Developer/worktrees" --add-dir "$STATE_DIR" -i 'Read /abs/brief.md and do it.'
 ```
 
 `$STATE_DIR` is the factory state directory. Replace `$HOME/Developer/worktrees`
@@ -1304,11 +1316,18 @@ The factory runs no GitHub watcher.
 
 ### Launch rules
 
-Before every launch, put an `AGENTS.md` in a private, task-specific
+Before every launch, put a `worker.instructions.md` in a private, task-specific
 instructions directory under the state directory. Name the directory
 `<project>-<task>-<role>-instructions`, so that `factory.mjs archive clean` can remove
-it. Start that `AGENTS.md` at the top with the exact path rule block from
-"Brief the workers":
+it. Start the file with this front matter:
+
+```yaml
+---
+applyTo: "**"
+---
+```
+
+Immediately after it, put the exact path rule block from "Brief the workers":
 
 ```text
 Path rule:
@@ -1319,11 +1338,18 @@ Never use a relative path that leaves the working directory. Never use `..` to r
 
 The file also points to the exact brief. It states both Rex rules above in its
 own text: never rename the session, and never create, close, or type into Rex
-windows, tabs, splits, or panes. Add the directory to
-`COPILOT_CUSTOM_INSTRUCTIONS_DIRS` for that worker only. Keep the existing
-entries. Check `copilot instruction list` in that cwd and environment. If the
-launch loses these instructions, record a blocker. Never start an unconstrained
-worker. Do not edit the product worktree or a shared instructions directory.
+windows, tabs, splits, or panes. Read it back and verify the front matter, path
+rule, brief path, and Rex rules. Set `INSTRUCTIONS_DIR` to this directory and
+`WORKER_DIR` to the worker's cwd. Use the preflight and launch chain in
+"Implementation worker" for every role, adapted to its launch flags. Run it in
+one shell call: verify the exact canonical file in `copilot instruction list
+--json`, then pass the same `CUSTOM_INSTRUCTIONS` through `env` to the worker.
+Keep existing entries. The list proves discovery, not that instructions are
+enabled: it still lists sources with `--no-custom-instructions`. Check the final
+command and any wrapper; do not launch if either disables instructions or loses
+the environment. If the file is absent, disabled, or cannot be verified, record
+a blocker. Never start an unconstrained worker. Do not edit the product worktree
+or a shared instructions directory.
 
 Model and reasoning effort come from the factory file, never from the agent
 file. Read `models.ROLE` and `efforts.ROLE` for the role of the worker

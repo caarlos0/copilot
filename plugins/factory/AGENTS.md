@@ -241,8 +241,9 @@ not unwrap a launcher script). It allows every other call and any call it cannot
 parse. The script path comes from `PLUGIN_ROOT`. If no root variable is set, the
 hook allows the call and prints a warning on stderr.
 
-Every worker brief and every per-worker `AGENTS.md` starts at the top with this
-literal path rule (never buried in a shared file):
+Every worker brief starts with this literal path rule. Each per-worker
+`worker.instructions.md` puts it first in its body, after the `applyTo: "**"`
+front matter (never buried in a shared file):
 
 ```text
 Path rule:

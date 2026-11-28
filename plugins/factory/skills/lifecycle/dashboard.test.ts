@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { appendFile, chmod, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { appendFile, chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { spawn, spawnSync } from "node:child_process";
 import http from "node:http";
 import { delimiter, dirname, join } from "node:path";
@@ -2159,6 +2159,81 @@ test("the rules say only the user's click answers an attention prompt, and only 
   assert.match(agents, /coordinator\s+still\s+never\s+answers/);
   assert.match(skill, /never\s+answer\s+the\s+prompt,\s+never\s+type\s+or\s+send\s+keys\s+into\s+the\s+pane/);
   assert.match(html, /Select an option to send it to the pane/);
+});
+
+test("worker launch requires the verified instruction source", async (t) => {
+  if (spawnSync("sh", ["-c", "command -v jq >/dev/null && command -v realpath >/dev/null"]).status !== 0) {
+    t.skip("jq and realpath are required");
+    return;
+  }
+  const skill = readFileSync(join(import.meta.dirname, "SKILL.md"), "utf8");
+  const launch = skill.match(/```sh\n(: "\$\{WORKER_DIR:\?[\s\S]*?)\n```/)?.[1];
+  assert.ok(launch, "worker launch example is missing");
+  const directory = await mkdtemp(join(tmpdir(), "factory-launch-test-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const bin = join(directory, "bin");
+  const instructions = join(directory, "instructions");
+  await Promise.all([mkdir(bin), mkdir(instructions)]);
+  const instructionFile = join(instructions, "worker.instructions.md");
+  await writeFile(instructionFile, '---\napplyTo: "**"\n---\nPath rule: fixture\n');
+  const source = await realpath(instructionFile);
+  const discoveryEnv = join(directory, "discovery-env");
+  const discoveryArgs = join(directory, "discovery-args");
+  const rexArgs = join(directory, "rex-args");
+  await writeFile(join(bin, "node"), "#!/bin/sh\nprintf '%s\\n' 'test worker'\n");
+  await writeFile(join(bin, "copilot"), `#!/bin/sh
+printf '%s\\n' "$COPILOT_CUSTOM_INSTRUCTIONS_DIRS" > "$DISCOVERY_ENV"
+printf '%s\\n' "$@" > "$DISCOVERY_ARGS"
+[ "$FAKE_EXIT" = 0 ] || exit "$FAKE_EXIT"
+printf '%s\\n' "$FAKE_SOURCES"
+`);
+  await writeFile(join(bin, "rex"), `#!/bin/sh
+printf '%s\\n' "$@" > "$REX_ARGS"
+`);
+  await Promise.all(["node", "copilot", "rex"].map((name) => chmod(join(bin, name), 0o755)));
+  const run = (overrides: NodeJS.ProcessEnv = {}) => spawnSync("bash", ["-c", launch], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+    env: {
+      PATH: [bin, process.env.PATH ?? ""].join(delimiter),
+      HOME: directory,
+      WORKER_DIR: directory,
+      INSTRUCTIONS_DIR: instructions,
+      FILE: join(directory, "factory.json"),
+      STATE_DIR: directory,
+      COPILOT_CUSTOM_INSTRUCTIONS_DIRS: "/existing",
+      DISCOVERY_ENV: discoveryEnv,
+      DISCOVERY_ARGS: discoveryArgs,
+      REX_ARGS: rexArgs,
+      FAKE_EXIT: "0",
+      FAKE_SOURCES: JSON.stringify([{ sourcePath: source, defaultDisabled: false }]),
+      ...overrides,
+    },
+  });
+  const success = run();
+  assert.equal(success.status, 0, `stdout: ${success.stdout}\nstderr: ${success.stderr}`);
+  const expectedEnv = `/existing,${instructions}`;
+  assert.equal((await readFile(discoveryEnv, "utf8")).trim(), expectedEnv);
+  assert.deepEqual((await readFile(discoveryArgs, "utf8")).trim().split("\n").slice(0, 2), ["-C", directory]);
+  const launched = (await readFile(rexArgs, "utf8")).trim().split("\n");
+  assert.deepEqual(launched.slice(0, 4), ["window", "new", "-c", directory]);
+  assert.ok(launched.includes(`COPILOT_CUSTOM_INSTRUCTIONS_DIRS=${expectedEnv}`));
+  assert.ok(!launched.includes("--no-custom-instructions"));
+  await rm(rexArgs);
+  const failures: Array<[string, NodeJS.ProcessEnv]> = [
+    ["wrong source", { FAKE_SOURCES: JSON.stringify([{ sourcePath: `${source}.other`, defaultDisabled: false }]) }],
+    ["disabled source", { FAKE_SOURCES: JSON.stringify([{ sourcePath: source, defaultDisabled: true }]) }],
+    ["discovery failed", { FAKE_EXIT: "7" }],
+    ["empty discovery", { FAKE_SOURCES: "" }],
+    ["invalid discovery", { FAKE_SOURCES: "{" }],
+    ["missing directory", { INSTRUCTIONS_DIR: "" }],
+    ["missing instruction file", { INSTRUCTIONS_DIR: join(directory, "missing") }],
+  ];
+  for (const [label, overrides] of failures) {
+    const result = run(overrides);
+    assert.notEqual(result.status, 0, `${label}: stdout: ${result.stdout}\nstderr: ${result.stderr}`);
+    await assert.rejects(readFile(rexArgs, "utf8"), { code: "ENOENT" }, label);
+  }
 });
 
 test("the worker write boundary is present in the skill and plugin rules", () => {
