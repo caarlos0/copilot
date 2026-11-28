@@ -36,8 +36,7 @@ structure or workflows change.
   `coding:simplifier`, `coding:review`, or `security:engineer`. Do not repeat
   code context already supplied by the namespace. Update paths, launchers,
   references, and preloads together when renaming entries. Preserve preload
-  behavior. Skill preload names remain unqualified. `i-have-adhd` is an
-  external skill; do not vendor it.
+  behavior. Skill preload names remain unqualified.
 - Do not add sleep-and-poll loops. Wait with native watchers or `gh wait`; the
   coding plugin's `AGENTS.md` has the rules.
 - Resolve bundled assets relative to the loaded skill directory, not

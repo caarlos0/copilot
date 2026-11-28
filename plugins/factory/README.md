@@ -15,9 +15,7 @@ copilot plugin marketplace add caarlos0/copilot
 copilot plugin install factory@caarlos0
 ```
 
-Install the `coding` plugin too. Some agents preload the external
-`i-have-adhd` skill. Install it with
-`gh skill install ayghri/i-have-adhd i-have-adhd --agent github-copilot --scope user --force`.
+Install the `coding` plugin too. The agent preloads its `stop-slop` skill.
 
 ## Agents
 

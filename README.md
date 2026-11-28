@@ -57,12 +57,6 @@ plugin needs them.
   copilot plugin install lever@lever
   ```
 
-- Some agents preload the external `i-have-adhd` skill:
-
-  ```sh
-  gh skill install ayghri/i-have-adhd i-have-adhd --agent github-copilot --scope user --force
-  ```
-
 - Stacked pull requests use the `gh-stack` skill:
 
   ```sh

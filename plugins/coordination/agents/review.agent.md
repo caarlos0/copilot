@@ -3,7 +3,7 @@ name: review
 description: Coordinate read-only code review workers in a dedicated Rex session and separate worktrees. Track reviewed heads, independent checks, GitHub publication, and cleanup without implementing fixes or merging.
 skills:
   - coordinator
-  - i-have-adhd
+  - stop-slop
 ---
 
 # Review Coordinator

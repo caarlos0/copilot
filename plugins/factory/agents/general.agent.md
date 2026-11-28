@@ -5,7 +5,7 @@ skills:
   - lifecycle
   - autonomy-dial
   - progress-contract
-  - i-have-adhd
+  - stop-slop
 ---
 
 # Factory

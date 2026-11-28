@@ -3,7 +3,7 @@ name: implement
 description: Coordinate implementation workers in a dedicated Rex session and separate worktrees. Own delivery, validation, blockers, and authorized commits, pushes, and pull requests without doing the workers' implementation.
 skills:
   - coordinator
-  - i-have-adhd
+  - stop-slop
 ---
 
 # Implementation Coordinator
