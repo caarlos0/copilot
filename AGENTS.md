@@ -5,9 +5,10 @@ structure or workflows change.
 
 ## Layout
 
-- `.github/plugin/marketplace.json` exposes seven plugins under `plugins/`:
-  coding, security, fitness, terminals, coordination, factory, and home. Keep each
-  marketplace version in sync with its plugin's `plugin.json`.
+- `.github/plugin/marketplace.json` exposes eight plugins under `plugins/`:
+  coding, security, fitness, terminals, coordination, factory, home, and
+  database. Keep each marketplace version in sync with its plugin's
+  `plugin.json`.
 - Each plugin uses the supported legacy Copilot format with default `agents/`
   and `skills/` locations. Give each plugin a `README.md`. Keep it true when
   its agents, skills, or build steps change. One `LICENSE.md` in the repository

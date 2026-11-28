@@ -85,6 +85,12 @@ tasks:
       - task: release
         vars: {PLUGIN: factory}
 
+  release:database:
+    desc: Release the database plugin
+    cmds:
+      - task: release
+        vars: {PLUGIN: database}
+
   release:
     internal: true
     vars:

@@ -17,6 +17,7 @@ Each plugin is small and does one job. Install only the ones you need.
 | [`factory`](plugins/factory) | A task lifecycle with GitHub issues, Rex workers, and a dashboard |
 | [`fitness`](plugins/fitness) | A personal trainer that reads your Hevy log |
 | [`home`](plugins/home) | An agent for household electricity, solar, and battery planning |
+| [`database`](plugins/database) | A skill for SQL performance in SQLite and PostgreSQL |
 
 ## Install
 

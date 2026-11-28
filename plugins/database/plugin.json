@@ -1,0 +1,7 @@
+{
+  "name": "database",
+  "version": "0.1.0",
+  "description": "SQL query, index, and schema performance for SQLite and PostgreSQL.",
+  "repository": "https://github.com/caarlos0/copilot",
+  "license": "MIT"
+}
